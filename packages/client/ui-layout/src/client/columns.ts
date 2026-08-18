@@ -37,6 +37,12 @@ export const DETAILS_MIN = 300
 export const DETAILS_MAX = 520
 /** Details width before any user drag. */
 export const DETAILS_DEFAULT = 360
+/** Conversation sidebar drag clamp floor. */
+export const CONVERSATION_MIN = 300
+/** Conversation sidebar drag clamp ceiling. */
+export const CONVERSATION_MAX = 520
+/** Conversation sidebar width before any user drag. */
+export const CONVERSATION_DEFAULT = 360
 
 /**
  * Clamp a panel width into its contract range.
