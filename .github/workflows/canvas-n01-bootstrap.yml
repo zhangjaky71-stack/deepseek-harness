@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - agent/canvas-n01-domain
+  pull_request:
+    branches:
+      - agent/canvas-n01-domain
 
 permissions:
   contents: write
 
 jobs:
   bootstrap:
-    if: github.repository == 'zhangjaky71-stack/deepseek-harness'
+    if: github.repository == 'zhangjaky71-stack/deepseek-harness' && (github.event_name == 'push' || github.head_ref == 'agent/canvas-n01-bootstrap-trigger')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
