@@ -1,34 +1,28 @@
 /** Per-session browser-local Minimal/Editor mode store. */
 
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionId, SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { CanvasMode } from '../types.ts'
-
-interface ModeRow {
-  mode: CanvasMode
-  readonly listeners: Set<() => void>
-  readonly face: SnapshotStore<CanvasMode>
-}
 
 /**
  * UI-local mode ledger. It has no Session, Remote, persistence, or Canvas mutation dependency.
  * The first mode is Minimal on narrow screens and Editor otherwise.
  */
 export class CanvasModeStore {
-  private readonly rows = new Map<SessionId, ModeRow>()
+  private readonly rows = new Map<SessionId, SnapshotStore<CanvasMode>>()
 
   constructor(private readonly isNarrow: () => boolean = defaultNarrowViewport) {}
 
   /** Stable observable face for one Session's UI preference. */
   faceOf(sessionId: SessionId): SnapshotStore<CanvasMode> {
-    return this.row(sessionId).face
+    return this.row(sessionId)
   }
 
   /** Set a browser-local mode; identical writes are no-ops. */
   set(sessionId: SessionId, mode: CanvasMode): void {
     const row = this.row(sessionId)
-    if (row.mode === mode) return
-    row.mode = mode
-    for (const listener of row.listeners) listener()
+    if (row.getSnapshot() === mode) return
+    row.set(mode)
   }
 
   /** Drop one UI preference when an owning integration explicitly chooses to prune it. */
@@ -36,23 +30,12 @@ export class CanvasModeStore {
     this.rows.delete(sessionId)
   }
 
-  private row(sessionId: SessionId): ModeRow {
+  private row(sessionId: SessionId): SnapshotStore<CanvasMode> {
     let row = this.rows.get(sessionId)
     if (row !== undefined) return row
-    const listeners = new Set<() => void>()
-    const created: ModeRow = {
-      mode: this.isNarrow() ? 'minimal' : 'editor',
-      listeners,
-      face: {
-        getSnapshot: () => created.mode,
-        subscribe: (listener) => {
-          listeners.add(listener)
-          return () => { listeners.delete(listener) }
-        },
-      },
-    }
-    this.rows.set(sessionId, created)
-    return created
+    row = createSnapshotStore<CanvasMode>(this.isNarrow() ? 'minimal' : 'editor')
+    this.rows.set(sessionId, row)
+    return row
   }
 }
 
