@@ -32,9 +32,17 @@ Current Browser-facing state is projected, not queried from a second database. W
 
 Semantic workflow edits preserve current layout because layout has an independent stream. Canvas `create` and `clear` reset the current layout projection to null so a later Canvas cannot inherit stale coordinates if a workflow id is reused. Historical layout events remain in the Session log and therefore remain auditable/replayable as history without becoming current state.
 
-The client-safe `@deepseek-ai/dsh-canvas/client` outlet carries Canvas and layout projection types without importing Host services. Browser transport and rendering can therefore depend on Session Projection as the sole current-state source while mutations continue through Host APIs.
+The client-safe `@deepseek-ai/dsh-canvas/client` outlet carries Canvas and layout projection types without importing Host services. Browser current state therefore comes only from Session Projection. There is no Canvas `getCurrent` Remote method.
 
-The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). The Canvas package owns domain values, migration, strict replay, runtime invariants, Host authorization/audit, bounded projections, independent layout persistence, and the single Host write façade before Remote, provider execution, Agent tools, media assets, or UI are added.
+Browser mutations use Typert Remote wrappers on the same `CanvasService`. The wrappers accept business arguments only, create `human` + `browser-remote` access on the Host, and then call the ordinary Host mutation methods, so a Browser cannot supply a forged system or Agent actor. Mutation results are small receipts; the subsequent current value arrives through Projection.
+
+Run history is a bounded query view derived from `canvas/change`, not a second durable store. `listRuns` walks runs newest-first with a default page size of 20 and a hard maximum of 100; its opaque cursor is anchored to the run-start Session sequence so newly appended runs do not reorder an in-progress pagination walk. `getRun` derives the same DTO by run id. History responses contain durable references and run metadata, not binary media or provider objects.
+
+The Remote namespace publishes only behavior that exists on the Host. `editWorkflow`, `replaceWorkflow`, `selectOutput`, `saveLayout`, `clear`, `listRuns`, and `getRun` are active. The public method-name type reserves `createVariant`, `restoreWorkflow`, `run`, and `cancel`, but those endpoints are not registered until their corresponding Host mutations exist. Generated `./typert` and `./remote` artifacts remain build output rather than hand-maintained source.
+
+`dsh-base` mounts `@deepseek-ai/dsh-canvas` in every profile. Browser Remotes and later Agent tools therefore resolve the same Host service instead of relying on a Web-only Canvas owner.
+
+The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). The Canvas package owns domain values, migration, strict replay, runtime invariants, Host authorization/audit, bounded projections, independent layout persistence, Typert mutation/history APIs, and the single Host façade before provider execution, Agent tools, media assets, or UI are added.
 
 ## Alternatives considered
 
@@ -46,7 +54,11 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 
 **Store node coordinates inside `MediaWorkflow`** — rejected. Dragging a node would create a semantic workflow revision, stale Agent/editor CAS fences, and make execution fingerprints depend on presentation-only state.
 
-**Expose current Canvas through a dedicated `getCurrent` RPC** — rejected. A second current-state query path would compete with Session Projection. Browser current state comes from projection; future Remote APIs are for mutations and bounded history queries.
+**Expose current Canvas through a dedicated `getCurrent` RPC** — rejected. A second current-state query path would compete with Session Projection. Browser current state comes from projection; Remote APIs carry mutations and bounded history queries.
+
+**Persist run history in a separate Canvas database** — rejected. Session already records the durable run lifecycle and outputs. A second store would need synchronization and conflict rules; bounded History queries instead derive from the append-only Session log.
+
+**Let Browser callers provide `CanvasAccessContext`** — rejected. Actor/source attribution is a Host transport responsibility; accepting it from the Browser would let an untrusted caller claim another actor kind.
 
 **Use one revision for both workflow edits and run progress** — rejected. Long-running media work would continuously stale otherwise independent editor mutations.
 
@@ -66,9 +78,14 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 - Cold projection replay equals live projection state after Canvas and layout mutations.
 - Semantic workflow edits retain layout; Canvas create/clear reset current layout projection without rewriting historical layout events.
 - Projection registration unloads with the Canvas service fiber.
-- Browser-facing projection types are available through a client-safe package face.
-- Remote, provider execution, Agent tools, asset routes, and UI remain consumers of the same Session/Canvas authority rather than independent state stores.
+- Browser-facing projection and Remote DTO types are available through a client-safe package face.
+- Canvas has no `getCurrent` Remote endpoint; committed current state continues through Session Projection.
+- Browser Remote mutations are attributed as `human` + `browser-remote` and pass through Host authorization before Session append.
+- Run-history pagination is bounded and stable when newer runs are appended after a cursor is issued.
+- Generated Canvas Remote contribution mounts through `api-remotes` and the built HTTP chain can mutate Host Canvas state.
+- Every shipped profile mounts the same Host `ctx.canvas` service through `dsh-base`.
+- Provider execution, Agent tools, asset routes, and UI remain consumers of the same Session/Canvas authority rather than independent state stores.
 
 ## Risks
 
-Whole Canvas events are larger than deltas, so `CanvasSnapshot` and projection values must stay UI-scale. Layout and semantic graph state intentionally evolve independently; future Editor code must treat positions as optional presentation hints and ignore entries that are not relevant to the current graph. Projection is a current-state cache, not durability: Session replay and strict package invariants remain authoritative. The current authorization policy is still actor-kind based and will need stronger tenancy/ACL policy behind the same Host seam when multi-user ownership is introduced.
+Whole Canvas events are larger than deltas, so `CanvasSnapshot` and projection values must stay UI-scale. Layout and semantic graph state intentionally evolve independently; future Editor code must treat positions as optional presentation hints and ignore entries that are not relevant to the current graph. Projection and History are derived views, not durability: Session replay and strict package invariants remain authoritative. Stable cursor semantics depend on append-only Session sequence numbers. The current Browser human id is a session-level surrogate in the single-user deployment; a future identity layer must replace that attribution without moving authorization out of the Host. The current authorization policy is still actor-kind based and will need stronger tenancy/ACL policy behind the same Host seam when multi-user ownership is introduced.
