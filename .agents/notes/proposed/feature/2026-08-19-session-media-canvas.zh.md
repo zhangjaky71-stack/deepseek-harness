@@ -32,9 +32,17 @@ Browser current state 使用 Projection，而不是查询第二套数据库。�
 
 语义 Workflow 编辑会保留 current Layout，因为 Layout 有独立 stream。Canvas `create` 与 `clear` 会把 current layout projection 重置为 null，避免后续 Canvas 仅因为复用了相同 `workflowId` 就继承旧坐标。历史 Layout Event 继续保留在 Session Log，因此仍可作为历史审计／重放数据存在，但不会成为当前状态。
 
-Client-safe `@deepseek-ai/dsh-canvas/client` outlet 携带 Canvas 与 Layout Projection 类型，不导入 Host Service。Browser transport 与 rendering 因而可以把 Session Projection 作为唯一 current-state source，同时所有 mutation 继续经过 Host API。
+Client-safe `@deepseek-ai/dsh-canvas/client` outlet 携带 Canvas 与 Layout Projection 类型，不导入 Host Service。Browser current state 因而只来自 Session Projection；Canvas 不提供 `getCurrent` Remote 方法。
 
-实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 在 Remote、Provider 执行、Agent Tool、Media Asset 和 UI 之前，负责 Domain Value、Migration、严格 Replay、Runtime Invariant、Host Authorization/Audit、bounded Projection、独立 Layout Persistence 与单一 Host write façade。
+Browser mutation 使用同一个 `CanvasService` 上的 Typert Remote wrapper。Wrapper 只接收业务参数，在 Host 构造 `human` + `browser-remote` access，再调用普通 Host mutation，因此 Browser 无法伪造 system 或 Agent actor。Mutation 只返回小型 receipt；后续 current value 由 Projection 到达 Browser。
+
+Run History 是从 `canvas/change` 派生的 bounded query view，不是第二套 durable store。`listRuns` 按 newest-first 返回，默认 20 条，硬上限 100；opaque cursor 锚定 run-start Session sequence，因此分页过程中后来 append 的新 run 不会重排已经开始的遍历。`getRun` 按 run id 派生同一 DTO。History response 只包含 durable reference 与 run metadata，不包含 binary media 或 Provider runtime object。
+
+Remote namespace 只发布 Host 上已经存在的行为。当前 active endpoint 是 `editWorkflow`、`replaceWorkflow`、`selectOutput`、`saveLayout`、`clear`、`listRuns` 和 `getRun`。公开 method-name type 预留 `createVariant`、`restoreWorkflow`、`run` 与 `cancel`，但在对应 Host mutation 存在前不注册 endpoint。生成的 `./typert` 与 `./remote` artifact 继续属于 build output，而不是手工维护源码。
+
+`dsh-base` 在每个 profile 中挂载 `@deepseek-ai/dsh-canvas`。Browser Remote 与后续 Agent Tool 因而解析到同一个 Host Service，不依赖 Web-only Canvas owner。
+
+实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 在 Provider 执行、Agent Tool、Media Asset 与 UI 之前，负责 Domain Value、Migration、严格 Replay、Runtime Invariant、Host Authorization/Audit、bounded Projection、独立 Layout Persistence、Typert Mutation/History API 与单一 Host façade。
 
 ## Alternatives considered
 
@@ -46,7 +54,11 @@ Client-safe `@deepseek-ai/dsh-canvas/client` outlet 携带 Canvas 与 Layout Pro
 
 **把节点坐标放入 `MediaWorkflow`** — 不采用。拖动节点会产生 semantic workflow revision，使 Agent/Editor CAS fence stale，并让执行 fingerprint 依赖纯 presentation state。
 
-**通过独立 `getCurrent` RPC 暴露当前 Canvas** — 不采用。第二套 current-state query path 会与 Session Projection 竞争。Browser 当前状态来自 Projection；未来 Remote 只负责 mutation 与 bounded history query。
+**通过独立 `getCurrent` RPC 暴露当前 Canvas** — 不采用。第二套 current-state query path 会与 Session Projection 竞争。Browser 当前状态来自 Projection；Remote 只负责 mutation 与 bounded history query。
+
+**把 Run History 持久化到独立 Canvas 数据库** — 不采用。Session 已记录 durable Run lifecycle 与 Output；第二个 store 会引入同步与冲突规则。History query 直接从 append-only Session log 派生。
+
+**允许 Browser caller 传入 `CanvasAccessContext`** — 不采用。Actor/source attribution 是 Host transport 责任；由 Browser 提供会让不可信 caller 冒充其他 actor kind。
 
 **工作流编辑和运行进度共用一个 revision** — 不采用。长耗时媒体任务会持续让彼此独立的编辑 mutation stale。
 
@@ -66,9 +78,14 @@ Client-safe `@deepseek-ai/dsh-canvas/client` outlet 携带 Canvas 与 Layout Pro
 - Canvas/Layout mutation 后 cold projection replay 与 live projection state 相等。
 - Semantic Workflow edit 保留 Layout；Canvas create/clear 重置 current layout projection，同时不重写历史 Layout Event。
 - Canvas Service fiber 卸载时 Projection registration 一并 disposal。
-- Browser-facing Projection type 通过 client-safe package face 提供。
-- Remote、Provider 执行、Agent Tool、Asset Route 与 UI 继续作为同一 Session/Canvas authority 的 consumer，而不是独立状态源。
+- Browser-facing Projection 与 Remote DTO type 通过 client-safe package face 提供。
+- Canvas 不提供 `getCurrent` Remote endpoint；已提交 current state 继续通过 Session Projection 到达 Browser。
+- Browser Remote mutation 使用 `human` + `browser-remote` attribution，并在 Session append 前经过 Host Authorization。
+- 发出 cursor 后再 append 更新的 run，Run History 分页仍保持 bounded 且稳定。
+- 生成的 Canvas Remote contribution 通过 `api-remotes` 挂载，built HTTP chain 可以实际修改 Host Canvas state。
+- 所有 shipped profile 都通过 `dsh-base` 挂载同一个 Host `ctx.canvas` Service。
+- Provider 执行、Agent Tool、Asset Route 与 UI 继续作为同一 Session/Canvas authority 的 consumer，而不是独立状态源。
 
 ## Risks
 
-Whole Canvas Event 比 delta 更大，因此 `CanvasSnapshot` 与 Projection value 必须保持 UI-scale。Layout 与 semantic graph 故意独立演进；未来 Editor 必须把坐标视为可选 presentation hint，并忽略与当前 graph 不相关的 entry。Projection 是 current-state cache，不是 durability；Session replay 与严格 package invariant 仍是 authority。当前 Authorization Policy 只区分 Actor Kind，未来多用户 ownership 需要在同一 Host seam 后增强 policy，而不是把权限逻辑分叉到各 consumer。
+Whole Canvas Event 比 delta 更大，因此 `CanvasSnapshot` 与 Projection value 必须保持 UI-scale。Layout 与 semantic graph 故意独立演进；未来 Editor 必须把坐标视为可选 presentation hint，并忽略与当前 graph 不相关的 entry。Projection 与 History 都是 derived view，不是 durability；Session replay 与严格 package invariant 仍是 authority。稳定 cursor 语义依赖 append-only Session sequence。当前 Browser human id 在单用户部署中只是 session-level surrogate；未来 Identity layer 必须替换该 attribution，同时仍把 Authorization 留在 Host。当前 Authorization Policy 只区分 Actor Kind，未来多用户 ownership 需要在同一 Host seam 后增强 policy，而不是把权限逻辑分叉到各 consumer。
