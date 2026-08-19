@@ -1,0 +1,139 @@
+name: Canvas N01 bootstrap
+
+on:
+  push:
+    branches:
+      - agent/canvas-n01-domain
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.repository == 'zhangjaky71-stack/deepseek-harness'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/canvas-n01-domain
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Apply deterministic repository integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f'anchor missing in {path}: {old!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          domain = Path('packages/canvas/canvas/src/domain.ts')
+          text = domain.read_text(encoding='utf-8')
+          docs = {
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the Canvas brand. */': '/**\n * Brand a Canvas identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the Canvas brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the workflow brand. */': '/**\n * Brand a workflow identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the workflow brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the node brand. */': '/**\n * Brand a workflow-node identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the node brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the edge brand. */': '/**\n * Brand a workflow-edge identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the edge brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the run brand. */': '/**\n * Brand a Canvas-run identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the run brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the variant brand. */': '/**\n * Brand a Canvas-variant identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the variant brand.\n */',
+              '/** @param id - raw opaque identifier. @returns the same runtime string with the video-asset brand. */': '/**\n * Brand a video-asset identifier without changing its runtime value.\n * @param id - raw opaque identifier.\n * @returns the same runtime string with the video-asset brand.\n */',
+          }
+          for old, new in docs.items():
+              text = text.replace(old, new)
+          domain.write_text(text, encoding='utf-8')
+
+          replace_once(
+              'tsconfig.base.json',
+              '        "./packages/attachment/*/src/invariant.ts",\n',
+              '        "./packages/attachment/*/src/invariant.ts",\n        "./packages/canvas/*/src/invariant.ts",\n',
+          )
+          replace_once(
+              'tsconfig.base.json',
+              '        "./packages/attachment/*/src",\n',
+              '        "./packages/attachment/*/src",\n        "./packages/canvas/*/src",\n',
+          )
+          replace_once(
+              'tsconfig.host.json',
+              '    { "path": "./packages/attachment/attachment" },\n',
+              '    { "path": "./packages/attachment/attachment" },\n    { "path": "./packages/canvas/canvas" },\n',
+          )
+          replace_once(
+              'packages/README.md',
+              '| [`goal/`](goal/README.md) | Same-session goal persistence and lifecycle | Product — stable API |\n',
+              '| [`goal/`](goal/README.md) | Same-session goal persistence and lifecycle | Product — stable API |\n| [`canvas/`](canvas/README.md) | Session-scoped generative-media Canvas domain vocabulary and semantic workflow values | Product — evolving API |\n',
+          )
+          replace_once(
+              'packages/README.zh.md',
+              '| [`goal/`](goal/README.md) | 同会话 goal 的持久化与生命周期 | 产品：稳定 API |\n',
+              '| [`goal/`](goal/README.md) | 同会话 goal 的持久化与生命周期 | 产品：稳定 API |\n| [`canvas/`](canvas/README.md) | 会话范围内的生成式媒体 Canvas 领域词汇与语义工作流值 | 产品：演进中 API |\n',
+          )
+          PY
+
+      - name: Refresh lockfile and generated dependency graph
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile
+          pnpm run gen-module-graph
+
+      - name: Refresh bilingual consistency records
+        run: |
+          pnpm run verify-translation-pairing --write packages/canvas/README.md
+          pnpm run verify-translation-pairing --write packages/canvas/canvas/README.md
+          pnpm run verify-translation-pairing --write packages/README.md
+          pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-19-session-media-canvas.md
+
+      - name: Commit bootstrap changes when needed
+        id: commit
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name 'canvas-n01-bootstrap'
+          git config user.email 'canvas-n01-bootstrap@users.noreply.github.com'
+          git add packages/canvas/canvas/src/domain.ts tsconfig.base.json tsconfig.host.json pnpm-lock.yaml docs/module-graph.md packages/README.md packages/README.zh.md packages/README.i18n.yaml packages/canvas/README.i18n.yaml packages/canvas/canvas/README.i18n.yaml .agents/notes/proposed/feature/2026-08-19-session-media-canvas.i18n.yaml
+          git commit -m 'chore: integrate Canvas N01 workspace'
+          git push origin HEAD:agent/canvas-n01-domain
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Install immutable workspace
+        if: steps.commit.outputs.changed == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Focused Canvas tests
+        if: steps.commit.outputs.changed == 'false'
+        run: pnpm exec vitest run packages/canvas/canvas/tests/domain.spec.ts
+
+      - name: Canvas package typecheck
+        if: steps.commit.outputs.changed == 'false'
+        run: pnpm exec tsc -b packages/canvas/canvas
+
+      - name: Repository package and documentation gates
+        if: steps.commit.outputs.changed == 'false'
+        run: |
+          pnpm run constraints
+          pnpm run verify-package-invariants
+          pnpm run verify-export-jsdoc
+          pnpm run verify-package-readme-model-experience
+          pnpm run verify-package-readme-limitations
+          pnpm run verify-agent-note-format
+          pnpm run verify-translation-pairing
+          pnpm run verify-md-links
+          pnpm run verify-module-graph
+
+      - name: Canvas lint
+        if: steps.commit.outputs.changed == 'false'
+        run: pnpm exec oxlint packages/canvas/canvas/src packages/canvas/canvas/tests
