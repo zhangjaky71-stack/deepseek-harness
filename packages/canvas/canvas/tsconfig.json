@@ -14,6 +14,7 @@
     { "path": "../../llm/llm" },
     { "path": "../../util/brand" },
     { "path": "../../attachment/attachment" },
-    { "path": "../../runtime-diagnostics/invariants" }
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../session/session-projection" }
   ]
 }

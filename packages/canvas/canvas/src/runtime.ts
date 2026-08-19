@@ -1,4 +1,4 @@
-/** Host CanvasService: the single same-session write path over durable Canvas events and Host authorization. */
+/** Host CanvasService: the single same-session write path over durable Canvas events, layout, and Host authorization. */
 
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -23,10 +23,20 @@ import {
   canvasChangeMeta,
 } from './audit.ts'
 import { CanvasAuthorizationPolicy } from './authorization.ts'
+import {
+  CANVAS_LAYOUT_CHANGE_VERSION,
+  CanvasLayoutError,
+  createCanvasLayoutSnapshot,
+  foldCanvasLayout,
+} from './layout.ts'
+import type { CanvasLayoutChange } from './layout.ts'
+import { registerCanvasProjections } from './projection.ts'
+import type { SaveCanvasLayoutRequest } from './client.ts'
 import type {
   CanvasAccessContext,
   CanvasAuthorizationDecision,
   CanvasAuthorizationRequest,
+  CanvasLayoutSnapshot,
   CanvasPermission,
   CanvasServiceConfig,
   CanvasServiceErrorCode,
@@ -171,13 +181,16 @@ export class CanvasService extends Service {
   private readonly fallbackAuthorization: CanvasAuthorizationPolicy
 
   /**
-   * Create the Canvas Host service.
+   * Create the Canvas Host service and register optional Session projection units.
    * @param ctx - Cordis context with the live Agent registry.
    * @param config - fallback single-user authorization policy used when no `canvasAuthorization` service is mounted.
    */
   constructor(ctx: Context, config: CanvasServiceConfig = {}) {
     super(ctx, 'canvas')
     this.fallbackAuthorization = new CanvasAuthorizationPolicy(config.authorization)
+    ctx.inject(['sessionProjections'], (projectionCtx) => {
+      registerCanvasProjections(projectionCtx)
+    })
   }
 
   /**
@@ -302,7 +315,48 @@ export class CanvasService extends Service {
   }
 
   /**
-   * Clear the current Canvas while retaining its append-only Session history.
+   * Persist editor node positions/viewport independently from semantic workflow revisions.
+   * @param agent - exact live Agent whose Session owns the Canvas.
+   * @param request - layout for the current workflow identity.
+   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
+   * @returns detached committed layout snapshot.
+   */
+  saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CanvasLayoutSnapshot {
+    const prepared = this.prepare(agent, 'canvas.layout.write', access)
+    const current = prepared.cache.state.canvas
+    if (current === null || current.workflow === null) {
+      throw new CanvasServiceError('no current Canvas workflow', 'CANVAS_NOT_FOUND')
+    }
+    if (request.workflowId !== current.workflow.id) {
+      throw new CanvasLayoutError(
+        `Canvas layout workflow "${request.workflowId}" does not match current workflow "${current.workflow.id}"`,
+        'CANVAS_LAYOUT_WORKFLOW_MISMATCH',
+      )
+    }
+    const nodeIds = new Set(current.workflow.nodes.map(node => String(node.id)))
+    for (const nodeId of Object.keys(request.nodePositions)) {
+      if (!nodeIds.has(nodeId)) {
+        throw new CanvasLayoutError(`Canvas layout references unknown node "${nodeId}"`, 'CANVAS_INVALID_LAYOUT')
+      }
+    }
+    const previous = foldCanvasLayout(agent.session.events)
+    const layout = createCanvasLayoutSnapshot(
+      request,
+      Math.max(Date.now(), previous?.workflowId === request.workflowId ? previous.updatedAt : 0),
+    )
+    const change: CanvasLayoutChange = {
+      kind: 'canvas/layout-change',
+      version: CANVAS_LAYOUT_CHANGE_VERSION,
+      layout,
+      meta: canvasChangeMeta(prepared.access),
+    }
+    agent.session.append('canvas/layout-change', change)
+    this.sync(agent.session, prepared.cache)
+    return structuredClone(layout)
+  }
+
+  /**
+   * Clear the current Canvas while retaining its append-only Session history and independent layout history.
    * @param agent - exact live Agent whose Session owns the Canvas.
    * @param canvasId - identity of the Canvas expected to be current.
    * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.

@@ -1,12 +1,14 @@
 /**
- * Session-scoped Canvas domain vocabulary, durable migration/replay, Host authorization, and write service.
- * Provider execution, projections, Remotes, Agent tools, and UI remain later Canvas layers.
+ * Session-scoped Canvas domain vocabulary, durable migration/replay, Host authorization, projections/layout, and write service.
+ * Provider execution, Remotes, Agent tools, media assets, and UI remain later Canvas layers.
  *
  * @module @deepseek-ai/dsh-canvas
  */
 
 export type * from './types.ts'
+export type * from './client.ts'
 export type * from './events.ts'
+export type { CanvasLayoutChange, CanvasLayoutFoldState } from './layout.ts'
 export {
   CANVAS_SCHEMA_VERSION,
   MEDIA_WORKFLOW_SCHEMA_VERSION,
@@ -54,5 +56,18 @@ export {
   applyCanvasEvent,
   foldCanvas,
 } from './fold.ts'
+export {
+  CANVAS_LAYOUT_CHANGE_VERSION,
+  CanvasLayoutError,
+  assertCanvasLayoutSnapshot,
+  createCanvasLayoutSnapshot,
+  decodeCanvasLayoutChange,
+  emptyCanvasLayoutFoldState,
+  cloneCanvasLayoutFoldState,
+  applyCanvasLayoutChange,
+  applyCanvasLayoutEvent,
+  foldCanvasLayout,
+} from './layout.ts'
+export { applyCanvasProjection, applyCanvasLayoutProjection } from './projection.ts'
 export { CanvasService, CanvasServiceError } from './runtime.ts'
 export { default } from './runtime.ts'

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import {
+  CANVAS_LAYOUT_CHANGE_VERSION,
+  MediaWorkflowId,
+} from '@deepseek-ai/dsh-canvas'
 import * as CanvasInvariantCompanion from '@deepseek-ai/dsh-canvas/invariant'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -56,6 +60,59 @@ describe('Canvas stream invariants', () => {
     }))
     expect(session.seq).toBe(1)
     expect(JSON.stringify(session.events)).not.toContain('sk-never-persist')
+  })
+
+  it('accepts a current-workflow layout and rejects mismatched or unknown-node layout before commit', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('canvas-layout-invariant'))
+    const change = createChange()
+    session.append('canvas/change', change)
+    if (change.canvas === null || change.canvas.workflow === null) throw new Error('test Canvas lacks workflow')
+
+    const meta = {
+      schemaVersion: 2 as const,
+      actor: { kind: 'agent' as const, id: 'layout-test' },
+      source: 'host' as const,
+    }
+    expect(() => session.append('canvas/layout-change', {
+      kind: 'canvas/layout-change',
+      version: CANVAS_LAYOUT_CHANGE_VERSION,
+      layout: {
+        schemaVersion: 1,
+        workflowId: change.canvas.workflow.id,
+        nodePositions: { prompt: { x: 0, y: 0 } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+        updatedAt: change.canvas.updatedAt,
+      },
+      meta,
+    } as never)).not.toThrow()
+    expect(session.seq).toBe(2)
+
+    expect(() => session.append('canvas/layout-change', {
+      kind: 'canvas/layout-change',
+      version: CANVAS_LAYOUT_CHANGE_VERSION,
+      layout: {
+        schemaVersion: 1,
+        workflowId: MediaWorkflowId('wrong-workflow'),
+        nodePositions: {},
+        updatedAt: change.canvas.updatedAt + 1,
+      },
+      meta,
+    } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
+    expect(session.seq).toBe(2)
+
+    expect(() => session.append('canvas/layout-change', {
+      kind: 'canvas/layout-change',
+      version: CANVAS_LAYOUT_CHANGE_VERSION,
+      layout: {
+        schemaVersion: 1,
+        workflowId: change.canvas.workflow.id,
+        nodePositions: { missing: { x: 1, y: 1 } },
+        updatedAt: change.canvas.updatedAt + 1,
+      },
+      meta,
+    } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
+    expect(session.seq).toBe(2)
   })
 
   it('reconstructs existing Canvas history before validating later changes', async () => {
