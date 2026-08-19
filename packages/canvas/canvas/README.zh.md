@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`dsh-canvas` 负责会话范围内的媒体 Canvas 领域及其 durable Host control plane：语义媒体工作流、彼此独立的 workflow/run revision、持久媒体引用、Schema Migration、严格 Session Replay、Host Authorization/Audit、bounded Session Projection、独立 Editor Layout State，以及 `ctx.canvas` mutation。Session Event 仍是唯一 durable Canvas authority；Provider 执行、Remote、Agent Tool、Media Asset 实现和 UI 保持为独立层。
+`dsh-canvas` 负责会话范围内的媒体 Canvas 领域及其 durable Host control plane：语义媒体工作流、彼此独立的 workflow/run revision、持久媒体引用、Schema Migration、严格 Session Replay、Host Authorization/Audit、bounded Session Projection、独立 Editor Layout State、Typert Browser mutation、有界 Run History Query，以及 `ctx.canvas`。Session Event 仍是唯一 durable Canvas authority；Provider 执行、Agent Tool、Media Asset 实现和 UI 保持为独立层。
 
 ## 领域模型
 
@@ -52,17 +52,27 @@ Projection fold 故意 fail-soft：无关 Event 和格式错误的 Canvas-shaped
 
 ## Host Authorization 与 Audit
 
-`CanvasPermission` 定义 CanvasService 与后续 Remote、Agent Tool、History、Asset、Restore、Variant、Layout consumer 共用的 Host action 集，包括 Canvas read/edit/run/cancel、History read、Asset read/export/delete、Workflow restore、Variant create 与 Layout write。
+`CanvasPermission` 定义 CanvasService 与 Remote、Agent Tool、History、Asset、Restore、Variant、Layout consumer 共用的 Host action 集，包括 Canvas read/edit/run/cancel、History read、Asset read/export/delete、Workflow restore、Variant create 与 Layout write。
 
-`CanvasAuthorizationService` 是可选 Cordis Service，暴露为 `ctx.canvasAuthorization`。默认 `CanvasAuthorizationPolicy` 适合当前单用户部署，允许 human、agent、system actor；部署可以按 permission 覆盖允许的 actor kind。CanvasService 始终在 Host 执行授权，包括 Layout write。
+`CanvasAuthorizationService` 是可选 Cordis Service，暴露为 `ctx.canvasAuthorization`。默认 `CanvasAuthorizationPolicy` 适合当前单用户部署，允许 human、agent、system actor；部署可以按 permission 覆盖允许的 actor kind。CanvasService 始终在 Host 执行授权，包括 Browser Remote 与 Layout write。
 
 `CanvasAccessContext` 只携带 durable-safe actor/source id 和可选 request/correlation id。Audit metadata 使用 allow-list materialize。语义 Workflow config 在 commit 前扫描受禁 credential/header/binary 类字段；拒绝诊断只说明字段位置，不回显字段值。
 
 ## CanvasService
 
-Package 默认导出 `CanvasService`，挂载为 `ctx.canvas`。它是当前 Canvas read 与已接受 Canvas/Layout write 的单一 Host façade。它在 append Session Event 前校验 exact live Agent、Authorization、Semantic/Layout invariant 和完整候选 state；只有 append 成功后才同步 derived cache。
+Package 默认导出 `CanvasService`，挂载为 `ctx.canvas`，并发布到 Typert namespace `canvas`。它是当前 Canvas read、已接受 Canvas/Layout write 和有界 Session-derived History 的单一 Host façade。它在 append Session Event 前校验 exact live Agent、Authorization、Semantic/Layout invariant 和完整候选 state；只有 append 成功后才同步 derived cache。
 
 `create()` 安装初始 Workflow；`replaceWorkflow()` 和 `editWorkflow()` 使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` 做 compare-and-set。该 fence 故意不包含 `runRevision`，因此运行生命周期变化不会让无关语义编辑 stale。`editWorkflow()` 把完整 `WorkflowEditOperation[]` 应用到 detached draft，最终校验后只 commit 一次。`selectOutput()` 只改变 primary result selection，`saveLayout()` 写独立 Layout Stream，`clear()` 记录 Canvas tombstone，同时 current layout projection 独立重置。
+
+## Browser Remote 与 Run History
+
+生成的 `./remote` contribution 暴露 `editWorkflow`、`replaceWorkflow`、`selectOutput`、`saveLayout`、`clear`、`listRuns` 与 `getRun`。Browser caller 不会传入 `CanvasAccessContext`：专用 Remote wrapper 会在 Host 生成 `human` + `browser-remote` access，再调用与其他 consumer 共用的 CanvasService 方法。Mutation 只返回小型 receipt；Browser 通过 Session Projection 读取已提交的当前 Canvas 与 Layout，因此刻意不存在 `getCurrent` RPC。
+
+`listRuns()` 与 `getRun()` 直接从 `canvas/change` Event 派生 History。分页按 newest-first，默认 20 条，超过 100 会拒绝；opaque cursor 锚定 run-start Session sequence，因此分页过程中后来新增的 run 不会重排已经开始的游标遍历。History 只返回 durable run/output DTO，不建立第二套 History Database。
+
+公开的 `CanvasRemoteMethodName` 类型还预留 `createVariant`、`restoreWorkflow`、`run` 与 `cancel` 名称，交给对应后续 Domain 实现。Host 行为不存在时不会注册这些 Remote endpoint；N06 不提供假的成功路径。
+
+Package 通过仓库 Typert build 发布生成的 `./typert` 与 `./remote` artifact，沿用 Goal 的 artifact-plane 模式。源码只维护 decorator 与 client-safe DTO；generated file 不手工维护。
 
 ## 模型体验
 
@@ -74,7 +84,7 @@ Package 默认导出 `CanvasService`，挂载为 `ctx.canvas`。它是当前 Can
 
 #### Token 影响
 
-直接影响为零。Event Sourcing、Projection、Layout Persistence、Migration、Authorization、Audit、Replay 和 Host Mutation 不改变模型请求。
+直接影响为零。Event Sourcing、Projection、Layout Persistence、Migration、Authorization、Audit、Replay、Remote 调用和 Host Mutation 不改变模型请求。
 
 #### KV Cache 影响
 
@@ -82,8 +92,9 @@ Package 默认导出 `CanvasService`，挂载为 `ctx.canvas`。它是当前 Can
 
 ## 已知限制与后续工作
 
-- **尚无 Browser Remote/UI consumer** — 当前 Projection 与 Host `saveLayout()` 已提供 authoritative current-state 和 write seam，但 Browser transport 与 Editor rendering 仍由独立层接入。
+- **尚无 Canvas UI consumer** — Browser mutation/History transport 与 current-state Projection 已存在，但 Minimal/Editor Rendering 和 Interaction Context 属于独立 Client 工作。
 - **当前 Authorization Policy 只按 Actor Kind 判断** — Identity Ownership、多用户 Tenant、Workspace ACL、Approval Policy、Quota 与 Provider Cost Admission 属于同一 Host seam 后的后续治理层。
-- **尚未实现 Run Execution** — 当前 package 只定义严格 Run replay vocabulary；Jobs、Provider 执行、Retry、Cancel 和完整 Run Lifecycle 保持独立实现。
+- **尚未实现 Run Execution** — `run` 与 `cancel` 只是预留 Remote 名称，不是已注册 endpoint；Jobs、Provider 执行、Retry、Cancel 和完整 Run Lifecycle 保持独立实现。
+- **尚未实现 Variant Create 与 Workflow Restore** — Remote 名称已预留，但在 Host mutation 存在前不会发布 endpoint。
 - **尚无 DAG 执行校验** — Cycle、注册节点端口定义、Capability Resolution 和 Scheduler check 属于 media-workflow engine。
 - **尚无视频存储实现** — `VideoAssetRef` 只表示 durable metadata；独立 media-asset capability 负责 bytes、Authorization 和 Range 读取。

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`dsh-canvas` owns the session-scoped media Canvas domain and its durable Host control plane: semantic media workflows, independent workflow/run revisions, durable media references, schema migration, strict Session replay, Host authorization/audit, bounded Session projections, independent editor layout state, and `ctx.canvas` mutations. Session events remain the only durable Canvas authority; provider execution, Remotes, Agent tools, media-asset implementations, and UI remain separate layers.
+`dsh-canvas` owns the session-scoped media Canvas domain and its durable Host control plane: semantic media workflows, independent workflow/run revisions, durable media references, schema migration, strict Session replay, Host authorization/audit, bounded Session projections, independent editor layout state, Typert Browser mutations, bounded run-history queries, and `ctx.canvas`. Session events remain the only durable Canvas authority; provider execution, Agent tools, media-asset implementations, and UI remain separate layers.
 
 ## Domain model
 
@@ -10,7 +10,7 @@ A `CanvasSnapshot` has one stable `CanvasId`, a semantic `MediaWorkflow | null`,
 
 `MediaWorkflow` is UI- and provider-independent. It contains semantic nodes, semantic edges, output node ids, and JSON-safe node configuration. Graph positions, viewport state, provider credentials, provider request payloads, binary media, and bearer URLs are not workflow data.
 
-`CanvasLayoutSnapshot` stores editor node positions and viewport independently from semantic workflow state. Saving layout never advances `workflowRevision` or `runRevision`. `CanvasRunHistoryEntry` is a bounded history DTO intended to be derived from Session history rather than becoming a second authority.
+`CanvasLayoutSnapshot` stores editor node positions and viewport independently from semantic workflow state. Saving layout never advances `workflowRevision` or `runRevision`. `CanvasRunHistoryEntry` is a bounded history DTO derived from Session history rather than a second authority.
 
 `CanvasOutput` stores durable references rather than bytes. Images reuse `ImageAttachmentRef`; videos use an opaque `VideoAssetRef`. A result can contain multiple candidates and selects one with `primaryAssetIndex`.
 
@@ -52,17 +52,27 @@ Semantic workflow edits preserve the current layout projection because layout ha
 
 ## Host authorization and audit
 
-`CanvasPermission` defines the shared Host action set used by CanvasService and later Remote, Agent Tool, History, Asset, restore, variant, and layout consumers. The set includes Canvas read/edit/run/cancel, history read, asset read/export/delete, workflow restore, variant create, and layout write.
+`CanvasPermission` defines the shared Host action set used by CanvasService and its Remote, Agent Tool, History, Asset, restore, variant, and layout consumers. The set includes Canvas read/edit/run/cancel, history read, asset read/export/delete, workflow restore, variant create, and layout write.
 
-`CanvasAuthorizationService` is an optional Cordis service exposed as `ctx.canvasAuthorization`. Its default `CanvasAuthorizationPolicy` is appropriate for the current single-user deployment and allows human, agent, and system actors; deployments may override allowed actor kinds per permission. CanvasService always evaluates authorization on the Host, including layout writes.
+`CanvasAuthorizationService` is an optional Cordis service exposed as `ctx.canvasAuthorization`. Its default `CanvasAuthorizationPolicy` is appropriate for the current single-user deployment and allows human, agent, and system actors; deployments may override allowed actor kinds per permission. CanvasService always evaluates authorization on the Host, including Browser Remote and layout requests.
 
 `CanvasAccessContext` carries only durable-safe actor/source identifiers and optional request/correlation ids. Audit metadata is materialized by allow-list. Semantic workflow configuration is scanned before commit for credential/header/binary-shaped keys such as authorization headers, API keys, tokens, client/callback secrets, passwords, base64/data URLs, blobs, and raw media bytes; diagnostics never echo rejected secret values.
 
 ## CanvasService
 
-The default package export is `CanvasService`, mounted as `ctx.canvas`. It is the single Host façade for current Canvas reads and accepted Canvas/layout writes. It validates the exact live Agent, authorization, semantic/layout invariants, and complete candidate state before appending Session events; derived cache state is synchronized only after append succeeds.
+The default package export is `CanvasService`, mounted as `ctx.canvas` and published to Typert namespace `canvas`. It is the single Host façade for current Canvas reads, accepted Canvas/layout writes, and bounded Session-derived history. It validates the exact live Agent, authorization, semantic/layout invariants, and complete candidate state before appending Session events; derived cache state is synchronized only after append succeeds.
 
 `create()` installs an initial workflow; `replaceWorkflow()` and `editWorkflow()` use `WorkflowRef { canvasId, workflowId, workflowRevision }` compare-and-set. `runRevision` is deliberately absent from that fence, so run lifecycle changes do not make unrelated semantic edits stale. `editWorkflow()` applies an entire `WorkflowEditOperation[]` batch to a detached draft and commits once after final validation. `selectOutput()` changes only the primary result selection, `saveLayout()` writes the independent layout stream, and `clear()` records a Canvas tombstone while current layout projection resets separately.
+
+## Browser Remote and run history
+
+The generated `./remote` contribution exposes `editWorkflow`, `replaceWorkflow`, `selectOutput`, `saveLayout`, `clear`, `listRuns`, and `getRun`. Browser callers never supply `CanvasAccessContext`: dedicated Remote wrappers create `human` + `browser-remote` access on the Host and then call the same CanvasService methods used by other consumers. Mutation methods return small receipts; the Browser reads committed current Canvas and layout values from Session Projection, so there is deliberately no `getCurrent` RPC.
+
+`listRuns()` and `getRun()` derive history directly from `canvas/change` events. Pages are newest-first, default to 20 entries, reject limits above 100, and use an opaque cursor anchored to the run-start Session sequence so later runs do not reorder an in-progress pagination walk. History responses contain durable run/output DTOs only and do not create a second history database.
+
+The public `CanvasRemoteMethodName` type also reserves `createVariant`, `restoreWorkflow`, `run`, and `cancel` names for their owning later domain implementations. Those methods are not registered as Remote endpoints until the corresponding Host behavior exists; N06 does not publish fake success paths.
+
+The package publishes generated `./typert` and `./remote` artifacts through the repository Typert build, following the same artifact-plane pattern as Goal. The source tree owns decorators and client-safe DTOs; generated files are not hand-maintained.
 
 ## Model Experience
 
@@ -74,7 +84,7 @@ Nothing directly yet. This package registers no Canvas tool, prompt section, req
 
 #### Token effect
 
-Zero direct tokens. Event sourcing, projections, layout persistence, migration, authorization, audit, replay, and Host mutations do not alter model requests.
+Zero direct tokens. Event sourcing, projections, layout persistence, migration, authorization, audit, replay, Remote calls, and Host mutations do not alter model requests.
 
 #### KV Cache effect
 
@@ -82,8 +92,9 @@ None. This package does not participate in prompt assembly yet.
 
 ## Known Limitations and Deferred Work
 
-- **No Browser Remote/UI consumer yet** — the current projections and Host `saveLayout()` provide the authoritative current-state and write seams, but Browser transport and editor rendering are added separately.
+- **No Canvas UI consumer yet** — Browser mutation/history transport and current-state projections exist, but Minimal/Editor rendering and interaction context are separate client work.
 - **Current authorization policy is actor-kind based** — identity ownership, multi-user tenancy, workspace ACLs, approval policy, quotas, and provider-cost admission belong to later governance layers behind the same Host seam.
-- **Run execution is not implemented** — the current package defines strict run replay vocabulary only; Jobs, provider execution, retry, cancel, and the full run lifecycle remain separate work.
+- **Run execution is not implemented** — `run` and `cancel` are reserved Remote names but are not registered endpoints; Jobs, provider execution, retry, cancel, and the full run lifecycle remain separate work.
+- **Variant creation and workflow restore are not implemented** — their Remote names are reserved but no endpoint is published until their Host mutations exist.
 - **No DAG execution validation** — cycles, registered node port definitions, capability resolution, and scheduler checks belong to the media-workflow engine.
 - **No video storage implementation** — `VideoAssetRef` is durable metadata only; the separate media-asset capability owns bytes, authorization, and Range reads.
