@@ -121,6 +121,17 @@ export type CanvasErrorCode =
   | 'CANVAS_INVALID_RUN'
   | 'CANVAS_INVALID_OUTPUT'
 
+/** Stable service failures rejected before a Canvas mutation commits. */
+export type CanvasServiceErrorCode =
+  | 'CANVAS_AGENT_NOT_LIVE'
+  | 'CANVAS_NOT_FOUND'
+  | 'CANVAS_ALREADY_EXISTS'
+  | 'CANVAS_STALE_WORKFLOW_REVISION'
+  | 'CANVAS_WORKFLOW_ID_MISMATCH'
+  | 'CANVAS_INVALID_EDIT'
+  | 'CANVAS_OUTPUT_NOT_FOUND'
+  | 'CANVAS_INVALID_OUTPUT_SELECTION'
+
 /** Wire-safe error detail attached to a failed or interrupted run. */
 export interface CanvasRunError {
   readonly category: CanvasErrorCategory
@@ -179,7 +190,7 @@ export interface CanvasSnapshot {
   readonly updatedAt: number
 }
 
-/** Version of the future durable `canvas/change` envelope. */
+/** Version of the durable `canvas/change` envelope. */
 export type CanvasChangeVersion = 1
 
 /** Stable migration/decode failure reasons at durable Canvas boundaries. */
@@ -203,6 +214,40 @@ export interface CanvasMigrationNotice {
 export interface CanvasMigrationResult<T> {
   readonly value: T
   readonly notices: readonly CanvasMigrationNotice[]
+}
+
+/** Compare-and-set identity for one current semantic workflow revision. */
+export interface WorkflowRef {
+  readonly canvasId: CanvasId
+  readonly workflowId: MediaWorkflowId
+  readonly workflowRevision: number
+}
+
+/** Atomic semantic operation applied in-order to one detached workflow draft. */
+export type WorkflowEditOperation =
+  | { readonly op: 'add-node'; readonly node: MediaWorkflowNode }
+  | { readonly op: 'remove-node'; readonly nodeId: WorkflowNodeId }
+  | {
+    readonly op: 'replace-node-config'
+    readonly nodeId: WorkflowNodeId
+    readonly config: Readonly<Record<string, CanvasJsonValue>>
+  }
+  | { readonly op: 'rename-node'; readonly nodeId: WorkflowNodeId; readonly name: string }
+  | { readonly op: 'connect'; readonly edge: MediaWorkflowEdge }
+  | { readonly op: 'disconnect'; readonly edgeId: WorkflowEdgeId }
+  | { readonly op: 'set-output-nodes'; readonly nodeIds: readonly WorkflowNodeId[] }
+  | { readonly op: 'rename-workflow'; readonly name: string }
+
+/** Host request for the first/current Canvas and its initial workflow. */
+export interface CreateCanvasRequest {
+  readonly workflow: MediaWorkflow
+  readonly currentVariantId?: CanvasVariantId
+}
+
+/** Select one already-durable output candidate by its current run identity. */
+export interface SelectCanvasOutputRequest {
+  readonly runId: CanvasRunId
+  readonly assetIndex: number
 }
 
 /** Input for constructing a fresh Canvas before any run lifecycle exists. */

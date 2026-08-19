@@ -9,6 +9,9 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../llm/llm" },
     { "path": "../../util/brand" },
     { "path": "../../attachment/attachment" },
     { "path": "../../runtime-diagnostics/invariants" }
