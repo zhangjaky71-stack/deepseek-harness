@@ -74,6 +74,14 @@ The public `CanvasRemoteMethodName` type also reserves `createVariant`, `restore
 
 The package publishes generated `./typert` and `./remote` artifacts through the repository Typert build, following the same artifact-plane pattern as Goal. The source tree owns decorators and client-safe DTOs; generated files are not hand-maintained.
 
+## Browser presentation consumer
+
+The shipped Web surface now mounts `@deepseek-ai/dsh-client-ui-canvas` as one `conversation.view` consumer. It reads current Canvas and layout only from Session Projection and keeps Minimal/Editor mode as browser-local presentation state, so the UI does not become a second Canvas authority. The resident Conversation composer remains owned by `ui-conversation` outside the view ring.
+
+N07 implements Minimal result presentation, an Editor workflow shell, the same eight product-state rules, DIRTY_READY stale-result retention, and state-correct Run/Retry/Cancel control skeletons. Live run/cancel controls remain disabled until their Host behavior exists; visual DAG editing, drafts/autosave, interaction context, and authorized media rendering remain later UI layers.
+
+The Canvas client outlet stays runtime-free for Browser use: UI packages consume its DTO and projection declarations type-only rather than loading Host-domain Canvas JavaScript into the browser bundle.
+
 ## Model Experience
 
 ### Session-native Canvas service
@@ -84,7 +92,7 @@ Nothing directly yet. This package registers no Canvas tool, prompt section, req
 
 #### Token effect
 
-Zero direct tokens. Event sourcing, projections, layout persistence, migration, authorization, audit, replay, Remote calls, and Host mutations do not alter model requests.
+Zero direct tokens. Event sourcing, projections, layout persistence, migration, authorization, audit, replay, Remote calls, Host mutations, and the browser presentation consumer do not alter model requests.
 
 #### KV Cache effect
 
@@ -92,7 +100,7 @@ None. This package does not participate in prompt assembly yet.
 
 ## Known Limitations and Deferred Work
 
-- **No Canvas UI consumer yet** — Browser mutation/history transport and current-state projections exist, but Minimal/Editor rendering and interaction context are separate client work.
+- **Canvas UI is still a shell** — Minimal/Editor rendering is shipped, but live media execution controls, visual DAG editing, draft/autosave, interaction context, and authorized media preview remain later client/Host work.
 - **Current authorization policy is actor-kind based** — identity ownership, multi-user tenancy, workspace ACLs, approval policy, quotas, and provider-cost admission belong to later governance layers behind the same Host seam.
 - **Run execution is not implemented** — `run` and `cancel` are reserved Remote names but are not registered endpoints; Jobs, provider execution, retry, cancel, and the full run lifecycle remain separate work.
 - **Variant creation and workflow restore are not implemented** — their Remote names are reserved but no endpoint is published until their Host mutations exist.
