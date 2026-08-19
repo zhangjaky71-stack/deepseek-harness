@@ -22,9 +22,15 @@ Every accepted Canvas business mutation is one `canvas/change` Session event con
 
 Workflow edits use `WorkflowRef { canvasId, workflowId, workflowRevision }` compare-and-set. `runRevision` is intentionally excluded so run lifecycle changes do not make unrelated semantic edits stale. A batch of workflow operations is applied to a detached draft, validated as a complete workflow, and committed by one event or not committed at all.
 
-The `canvas/change.meta` object is versioned independently from the event envelope. The initial metadata version carries no actor or authorization decision; the authorization node extends that metadata while preserving historical readability. Security policy therefore stays Host-owned without making the first event-sourcing implementation invent a partial authorization model.
+Canvas authorization is a Host concern shared by all transport and tool consumers. `CanvasPermission` names the actions that Browser Remote, Agent Tool, History, Asset, restore, variant, and layout paths must request. `CanvasAuthorizationService` is an optional Cordis service; CanvasService always evaluates it when present and otherwise uses the same allow-list policy implementation as the current single-user fallback. UI visibility is never treated as enforcement.
 
-The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). The Canvas package owns domain values, migration, strict replay, runtime invariants, and the Host write service before projection, Remote, provider execution, or UI layers are introduced.
+Request identity is explicit. `CanvasAccessContext` contains a `human`, `agent`, or `system` actor, a known request source, and optional request/correlation ids. CanvasService defaults an omitted context to the exact owning Agent for direct Host calls; Browser, Agent Tool, reconciler, and asset-route consumers supply their concrete source context.
+
+`canvas/change.meta` evolves independently from the event envelope. Historical metadata schema version 1 remains readable without inventing an actor that was never recorded. Current writers use metadata schema version 2 and persist only canonical actor/source/request/correlation fields. Authorization decisions themselves are not persisted as authority: the durable fact is the accepted mutation and its actor/source attribution.
+
+Credential and binary material is excluded twice. Audit metadata is produced by allow-list projection rather than serializing arbitrary caller context, and semantic workflow config rejects credential/header/binary-shaped keys before commit. Diagnostics name only the prohibited key/path and never echo a rejected secret value. Provider credentials, Authorization headers, callback secrets, and binary payloads therefore remain outside Workflow and Session data.
+
+The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). The Canvas package owns domain values, migration, strict replay, runtime invariants, the Host write service, and Host authorization/audit before projection, Remote, provider execution, or UI layers are introduced.
 
 ## Alternatives considered
 
@@ -42,6 +48,10 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 
 **Update a service cache before appending the Session event** — rejected. The cache is derived state and cannot become visible before the durable commit point; append failure must leave both the log and live view unchanged.
 
+**Authorize only in Browser or Agent Tool adapters** — rejected. A second caller could bypass the check. Canvas permissions are decided by the Host service used by every current and future consumer.
+
+**Serialize arbitrary request context for audit** — rejected. Request objects can contain credentials, headers, callbacks, or binary values. Durable audit data is a small allow-listed actor/source record instead.
+
 ## Acceptance criteria
 
 - A pure Canvas domain owns branded Canvas/workflow/node/edge/run/variant ids and media-domain types without UI or provider SDK dependencies.
@@ -54,8 +64,12 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 - A workflow-operation batch advances `workflowRevision` once and cannot partially commit.
 - Workflow CAS rejects stale semantic revisions while ignoring independent `runRevision` changes.
 - The package invariant rejects malformed or impossible Canvas transitions before Session publication.
-- Authorization, actor/audit metadata, projection, Remote, provider execution, Agent tools, and UI remain separate owning nodes rather than bypasses around `CanvasService`.
+- Every CanvasService read/mutation goes through Host authorization; denial leaves the Session log unchanged.
+- Human, Agent, and system actors share one permission vocabulary, and system reconciler mutations are attributable in durable audit metadata.
+- Historical metadata v1 replays unchanged while current writers record canonical metadata v2.
+- Audit serialization discards arbitrary caller fields, and credential/header/binary-shaped workflow data is rejected before Session append without echoing secret values.
+- Projection, Remote, provider execution, Agent tools, asset routes, and UI remain separate consumers of the same CanvasService/authorization seams rather than bypasses.
 
 ## Risks
 
-Full snapshots make individual Canvas events larger than delta events. Keep `CanvasSnapshot` UI-scale: do not add binary payloads, full history, raw provider responses, or progress history. The service cache must remain an optimization rather than authority, so every cache behavior requires a cold-replay equivalent. The event metadata version must evolve deliberately when authorization/audit fields arrive so historical pre-authorization events remain readable without pretending they contain actors they never recorded.
+Full snapshots make individual Canvas events larger than delta events. Keep `CanvasSnapshot` UI-scale: do not add binary payloads, full history, raw provider responses, or progress history. The service cache must remain an optimization rather than authority, so every cache behavior requires a cold-replay equivalent. The current authorization policy distinguishes actor kinds rather than full tenancy/ACL ownership; future identity and governance layers must strengthen the policy behind the same Host seam instead of branching authorization logic into each consumer.
