@@ -1,5 +1,5 @@
 /**
- * Session-scoped Canvas domain vocabulary and pure runtime invariants.
+ * Session-scoped Canvas domain vocabulary, pure runtime invariants, and durable migration seam.
  * Stateful Session integration is added by the Canvas service layer.
  *
  * @module @deepseek-ai/dsh-canvas
@@ -25,3 +25,16 @@ export {
   assertMediaWorkflow,
   assertCanvasSnapshot,
 } from './domain.ts'
+export {
+  CANVAS_CHANGE_VERSION,
+  CANVAS_LAYOUT_SCHEMA_VERSION,
+  MEDIA_WORKFLOW_NODE_VERSIONS,
+  CanvasMigrationError,
+  migrateStoredMediaWorkflow,
+  decodeMediaWorkflow,
+  migrateStoredCanvasSnapshot,
+  decodeCanvasSnapshot,
+  decodeCanvasChangeVersion,
+  decodeCanvasLayoutSnapshot,
+  decodeCanvasRunHistoryEntry,
+} from './migration.ts'
