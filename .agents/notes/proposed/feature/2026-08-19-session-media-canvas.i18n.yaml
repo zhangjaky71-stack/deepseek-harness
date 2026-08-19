@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-19-session-media-canvas.md
-2026-08-19-session-media-canvas.md: 5577f9709ba704a89fec5c7d1049ac317cb54694
-2026-08-19-session-media-canvas.zh.md: daf339d6ce18a95bf8487c4c8bb4307c06e22f35
+2026-08-19-session-media-canvas.md: f7d3b0c9da8157fb2d26ff9854c2ec8021102127
+2026-08-19-session-media-canvas.zh.md: c6a4608ef08d63d6f9925e2c03cda992bf787b09
