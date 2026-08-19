@@ -6,6 +6,7 @@ import {
   MEDIA_WORKFLOW_NODE_VERSIONS,
   CanvasDomainError,
   CanvasMigrationError,
+  WorkflowNodeId,
   decodeCanvasChangeVersion,
   decodeCanvasLayoutSnapshot,
   decodeCanvasRunHistoryEntry,
@@ -93,7 +94,7 @@ describe('Canvas migration boundary', () => {
     const layout = decodeCanvasLayoutSnapshot(fixture('layout-v1.json'))
     expect(layout.schemaVersion).toBe(CANVAS_LAYOUT_SCHEMA_VERSION)
     expect(layout.workflowId).toBe('workflow-v1')
-    expect(layout.nodePositions.generate).toEqual({ x: 320, y: 96 })
+    expect(layout.nodePositions[WorkflowNodeId('generate')]).toEqual({ x: 320, y: 96 })
     expect(layout.viewport?.zoom).toBe(0.9)
   })
 

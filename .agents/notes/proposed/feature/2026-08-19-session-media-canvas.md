@@ -16,7 +16,9 @@ The domain separates `workflowRevision` from `runRevision`. Semantic workflow ed
 
 Semantic workflows contain only media-domain nodes, edges, output ids, and JSON-safe configuration. Browser graph layout and selection remain presentation data, provider request payloads remain provider data, and generated media is represented by durable references rather than binary bytes or bearer URLs. Images reuse the attachment identity already owned by `dsh-attachment`; video storage is a separate capability.
 
-The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). The first node establishes the pure `@deepseek-ai/dsh-canvas` vocabulary, branded ids, constructors, product-state derivation, and value invariants before Session events or provider execution are introduced.
+Durable Canvas values are read through an explicit decode/migration boundary before current-domain invariants run. Historical Session data remains immutable; old shapes are migrated only in memory. Unknown future schema or node versions fail loud instead of guessing a downgrade, while deprecated historical node aliases can produce explicit lifecycle notices without becoming valid output of current writers.
+
+The implementation is divided into independently reviewable nodes in the [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md). N01 establishes the pure `@deepseek-ai/dsh-canvas` vocabulary, branded ids, constructors, product-state derivation, and value invariants. N02 adds schema/node version migration seams and append-only golden fixtures before Session events or provider execution are introduced.
 
 ## Alternatives considered
 
@@ -28,14 +30,18 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 
 **Use one revision for both workflow edits and run progress** — rejected. Long-running image/video work would continuously stale otherwise independent editor mutations and make compare-and-set conflicts unrelated to the semantic graph.
 
+**Rewrite historical Session events when schemas change** — rejected. Event history stays append-only; readers decode and migrate old values into the current runtime shape, and unsupported future versions fail explicitly.
+
 ## Acceptance criteria
 
 - A pure Canvas package owns branded Canvas/workflow/node/edge/run/variant ids and media-domain types without UI or provider SDK dependencies.
 - Workflow and run revisions have independent invariants and tests.
 - Canvas snapshots reject non-JSON workflow configuration and binary-bearing domain values.
+- Durable workflow/snapshot decoding is versioned, migration is separate from current relational invariants, and unknown future versions fail with stable migration errors.
+- Golden fixtures freeze V1 workflow, snapshot, layout, run-history, and deprecated-node compatibility behavior without rewriting historical data.
 - The product state distinguishes empty, ready, dirty-ready, running, completed, failed, cancelled, and interrupted states, including a run executing an older workflow revision.
 - Later Session, Remote, Agent, workflow-engine, asset, image, and video nodes can consume this domain without introducing a second Canvas authority.
 
 ## Risks
 
-The domain may encode assumptions before real providers and editor consumers exist. Keep only concepts required by the accepted workplan, preserve the repository's pre-release freedom to correct names and fields, and require each later node to validate the domain against its first concrete consumer rather than adding speculative compatibility layers.
+The domain may encode assumptions before real providers and editor consumers exist. Keep only concepts required by the accepted workplan, preserve the repository's pre-release freedom to correct names and fields, and require each later node to validate the domain against its first concrete consumer rather than adding speculative compatibility layers. Migration code must stay narrow: support only frozen historical shapes that actually have fixtures, not hypothetical upgrade chains.
