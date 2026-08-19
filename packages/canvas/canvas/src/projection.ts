@@ -40,11 +40,19 @@ export function applyCanvasProjection(state: CanvasSnapshot | null, event: Sessi
   }
 }
 
-/** Last-wins whole layout projection; malformed candidate events fail-soft. */
+/** Last-wins whole layout projection; Canvas create/clear reset current layout and malformed events fail-soft. */
 export function applyCanvasLayoutProjection(
   state: CanvasLayoutSnapshot | null,
   event: SessionEvent,
 ): CanvasLayoutSnapshot | null {
+  if (event.type === 'canvas/change') {
+    try {
+      const change = decodeCanvasChange(event.data)
+      return change?.operation === 'create' || change?.operation === 'clear' ? null : state
+    } catch {
+      return state
+    }
+  }
   if (event.type !== 'canvas/layout-change') return state
   try {
     const change = decodeCanvasLayoutChange(event.data)
