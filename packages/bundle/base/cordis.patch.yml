@@ -126,6 +126,11 @@
     - id: session-projection
       name: '@deepseek-ai/dsh-session-projection'
 
+    # Canvas is a Host service in every profile so Browser Remotes and later
+    # Agent tools share one Session-backed authority and Projection source.
+    - id: canvas
+      name: '@deepseek-ai/dsh-canvas'
+
     # Session telemetry is mounted but disabled by default. DSH_TELEMETRY_MODE
     # explicitly opts into FULL or FEEDBACK_ONLY reporting; uploading mirrors
     # session-log records onto OTLP/HTTP logs with no session-telemetry/record redaction
