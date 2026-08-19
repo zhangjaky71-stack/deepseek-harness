@@ -1,7 +1,30 @@
-/** Pure Canvas UI-state projection over the domain-owned product-state function. */
+/** Pure Canvas UI-state projection over the domain-owned product-state rules. */
 
-import { deriveCanvasProductState } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasProductState } from '@deepseek-ai/dsh-canvas/client'
 import type { CanvasPresentation, CanvasPresentationInput, CanvasPrimaryAction } from '../types.ts'
+
+/**
+ * Client-side isomorphic copy of N01 `deriveCanvasProductState`.
+ * Kept here rather than value-importing the Host-domain package into the browser bundle.
+ */
+export function deriveCanvasViewProductState(canvas: CanvasPresentationInput): CanvasProductState {
+  if (canvas === null || canvas.workflow === null) return 'EMPTY'
+  const run = canvas.run
+  if (run?.status === 'queued' || run?.status === 'running') return 'RUNNING'
+  const currentRun = run !== null
+    && run.workflowId === canvas.workflow.id
+    && run.workflowRevision === canvas.workflowRevision
+  if (currentRun) {
+    if (run.status === 'failed') return 'FAILED'
+    if (run.status === 'cancelled') return 'CANCELLED'
+    if (run.status === 'interrupted') return 'INTERRUPTED'
+    if (run.status === 'completed') return 'COMPLETED'
+  }
+  if (canvas.output !== null) {
+    return canvas.output.workflowRevision === canvas.workflowRevision ? 'COMPLETED' : 'DIRTY_READY'
+  }
+  return 'READY'
+}
 
 /** Map one domain product state to the only primary control the shell may show. */
 export function canvasPrimaryAction(state: CanvasPresentation['state']): CanvasPrimaryAction {
@@ -17,12 +40,9 @@ export function canvasPrimaryAction(state: CanvasPresentation['state']): CanvasP
   }
 }
 
-/**
- * Derive the complete N07 presentation model from the authoritative Canvas projection.
- * No UI-owned business state is introduced here.
- */
+/** Derive the complete N07 presentation model from the authoritative Canvas projection. */
 export function deriveCanvasPresentation(canvas: CanvasPresentationInput): CanvasPresentation {
-  const state = deriveCanvasProductState(canvas)
+  const state = deriveCanvasViewProductState(canvas)
   return {
     state,
     primaryAction: canvasPrimaryAction(state),
