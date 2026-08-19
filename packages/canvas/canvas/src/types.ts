@@ -131,6 +131,9 @@ export type CanvasServiceErrorCode =
   | 'CANVAS_INVALID_EDIT'
   | 'CANVAS_OUTPUT_NOT_FOUND'
   | 'CANVAS_INVALID_OUTPUT_SELECTION'
+  | 'CANVAS_PERMISSION_DENIED'
+  | 'CANVAS_INVALID_ACCESS_CONTEXT'
+  | 'CANVAS_SENSITIVE_DATA'
 
 /** Wire-safe error detail attached to a failed or interrupted run. */
 export interface CanvasRunError {
@@ -214,6 +217,63 @@ export interface CanvasMigrationNotice {
 export interface CanvasMigrationResult<T> {
   readonly value: T
   readonly notices: readonly CanvasMigrationNotice[]
+}
+
+/** Host permissions consumed by CanvasService and later Remote/Tool/History/Asset routes. */
+export type CanvasPermission =
+  | 'canvas.read'
+  | 'canvas.edit'
+  | 'canvas.run'
+  | 'canvas.cancel'
+  | 'canvas.history.read'
+  | 'canvas.asset.read'
+  | 'canvas.asset.export'
+  | 'canvas.asset.delete'
+  | 'canvas.workflow.restore'
+  | 'canvas.variant.create'
+  | 'canvas.layout.write'
+
+/** Human, Agent, and Host-system identities recognized by Canvas authorization/audit. */
+export type CanvasActorKind = 'human' | 'agent' | 'system'
+
+/** Durable-safe Canvas actor identity. Provider credentials and request headers never belong here. */
+export type CanvasActor =
+  | { readonly kind: 'human'; readonly id: string }
+  | { readonly kind: 'agent'; readonly id: string }
+  | { readonly kind: 'system'; readonly id: string }
+
+/** Known Host entry points that may request Canvas permissions. */
+export type CanvasRequestSource = 'host' | 'browser-remote' | 'agent-tool' | 'system-reconciler' | 'asset-route'
+
+/** Request-scoped actor/source metadata sampled by the Host caller. */
+export interface CanvasAccessContext {
+  readonly actor: CanvasActor
+  readonly source: CanvasRequestSource
+  readonly requestId?: string
+  readonly correlationId?: string
+}
+
+/** Complete authorization request evaluated only on the Host. */
+export interface CanvasAuthorizationRequest extends CanvasAccessContext {
+  readonly permission: CanvasPermission
+  readonly sessionId: string
+  readonly canvasId?: CanvasId
+}
+
+/** Stable authorization result; deny reasons never contain credentials or arbitrary caller payloads. */
+export type CanvasAuthorizationDecision =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: 'actor-kind-not-allowed' }
+
+/** Single-user default policy with optional permission-specific actor-kind overrides. */
+export interface CanvasAuthorizationConfig {
+  readonly defaultActors?: readonly CanvasActorKind[]
+  readonly permissions?: Partial<Record<CanvasPermission, readonly CanvasActorKind[]>>
+}
+
+/** CanvasService configuration used when no external `canvasAuthorization` Cordis service is mounted. */
+export interface CanvasServiceConfig {
+  readonly authorization?: CanvasAuthorizationConfig
 }
 
 /** Compare-and-set identity for one current semantic workflow revision. */

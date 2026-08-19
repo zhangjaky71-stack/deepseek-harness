@@ -22,9 +22,15 @@ Durable Canvas 值在执行当前领域不变量前先经过明确的 decode/mig
 
 Workflow 编辑使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` 做 compare-and-set。该 fence 故意排除 `runRevision`，因此运行生命周期变化不会让无关的语义编辑 stale。一批 workflow operation 先应用到 detached draft，再作为完整 workflow 校验，最终只会由一个事件整体提交，或者完全不提交。
 
-`canvas/change.meta` 与 event envelope 独立版本化。初始 metadata version 不携带 actor 或 authorization decision；Authorization 节点会扩展该 metadata，同时保持历史数据可读。这样 Security Policy 一直由 Host 拥有，又不会迫使第一版 Event Sourcing 先发明一套不完整的权限模型。
+Canvas Authorization 属于 Host，并由所有 transport/tool consumer 共用。`CanvasPermission` 为 Browser Remote、Agent Tool、History、Asset、Restore、Variant 和 Layout 路径定义统一 action。`CanvasAuthorizationService` 是可选 Cordis Service；挂载后 CanvasService 始终调用它，未挂载时使用同一 allow-list policy implementation 作为当前单用户 fallback。UI 是否显示控件从来不承担权限 Enforcement。
 
-实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 在 Projection、Remote、Provider 执行和 UI 之前，先负责 Domain Value、Migration、严格 Replay、Runtime Invariant 与 Host Write Service。
+请求 identity 是显式数据。`CanvasAccessContext` 包含 `human`、`agent` 或 `system` actor、已知 request source，以及可选 request/correlation id。直接 Host 调用省略该上下文时，CanvasService 默认使用 owning exact live Agent；Browser、Agent Tool、Reconciler 和 Asset Route consumer 负责提供实际 source context。
+
+`canvas/change.meta` 与 event envelope 独立演进。历史 metadata schema version 1 保持可读，不会事后虚构从未记录的 actor。当前 writer 使用 metadata schema version 2，只持久化规范化 actor/source/request/correlation 字段。Authorization decision 本身不作为第二套 durable authority；真正的持久事实是被接受的 mutation 及其 actor/source attribution。
+
+Credential 和 binary 通过两层规则排除。Audit metadata 使用 allow-list projection，不序列化任意 caller context；语义 Workflow config 在 commit 前拒绝明显 credential/header/binary 字段。Diagnostic 只命名禁止字段／路径，从不回显被拒绝的 secret value。因此 Provider credential、Authorization Header、Callback Secret 和 binary payload 都不会进入 Workflow 或 Session data。
+
+实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 在 Projection、Remote、Provider 执行和 UI 之前，负责 Domain Value、Migration、严格 Replay、Runtime Invariant、Host Write Service，以及 Host Authorization/Audit。
 
 ## Alternatives considered
 
@@ -42,6 +48,10 @@ Workflow 编辑使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` �
 
 **在追加 Session Event 前先更新 Service Cache** — 不采用。Cache 是 derived state，不能在 durable commit point 前对外可见；append 失败必须同时保持 Log 与 Live View 不变。
 
+**只在 Browser 或 Agent Tool Adapter 做 Authorization** — 不采用。第二种 caller 可以直接绕过检查。Canvas permission 由所有当前和未来 consumer 共用的 Host Service 决定。
+
+**为了 Audit 直接序列化任意 Request Context** — 不采用。Request object 可能含 credential、header、callback 或 binary。Durable audit 只保留小型 allow-listed actor/source record。
+
 ## Acceptance criteria
 
 - 纯 Canvas Domain 拥有品牌 Canvas／workflow／node／edge／run／variant id 与媒体领域类型，不依赖 UI 或 Provider SDK。
@@ -54,8 +64,12 @@ Workflow 编辑使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` �
 - 一批 Workflow Operation 只推进一次 `workflowRevision`，并且不能部分提交。
 - Workflow CAS 拒绝过期 semantic revision，同时忽略独立的 `runRevision` 变化。
 - Package Invariant 在 Session 发布前拒绝格式错误或不可能的 Canvas Transition。
-- Authorization、Actor/Audit Metadata、Projection、Remote、Provider 执行、Agent Tool 与 UI 由各自节点负责，不能绕过 `CanvasService`。
+- 每个 CanvasService read/mutation 都经过 Host Authorization；被拒绝时 Session Log 保持不变。
+- Human、Agent、System Actor 共用同一 Permission Vocabulary，System Reconciler mutation 能在 durable audit metadata 中被识别。
+- 历史 metadata v1 原样 replay，当前 writer 记录规范化 metadata v2。
+- Audit serialization 丢弃任意 caller extra 字段；credential/header/binary Workflow 数据在 Session append 前被拒绝，且错误信息不回显 secret value。
+- Projection、Remote、Provider 执行、Agent Tool、Asset Route 与 UI 继续作为同一 CanvasService/Authorization seam 的独立 consumer，而不是绕过它们。
 
 ## Risks
 
-相比 delta event，完整 snapshot 会让单个 Canvas Event 更大，因此 `CanvasSnapshot` 必须保持 UI-scale：不得加入 Binary Payload、Full History、Provider Raw Response 或 Progress History。Service Cache 必须始终只是优化而不是 authority，所以任何 cache 行为都要有等价 cold-replay 结果。Authorization/Audit 字段加入时必须有意识地演进 Event Metadata Version，使历史 pre-authorization event 仍可读取，同时不能假装它们记录了从未存在的 actor。
+相比 delta event，完整 snapshot 会让单个 Canvas Event 更大，因此 `CanvasSnapshot` 必须保持 UI-scale：不得加入 Binary Payload、Full History、Provider Raw Response 或 Progress History。Service Cache 必须始终只是优化而不是 authority，所以任何 cache 行为都要有等价 cold-replay 结果。当前 Authorization Policy 只区分 Actor Kind，还不是完整 Tenant/ACL Ownership；后续 Identity 和 Governance 层必须在同一个 Host seam 后增强 policy，不能把 Authorization 逻辑分叉进每个 consumer。

@@ -3,7 +3,14 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { decodeCanvasChangeVersion, decodeCanvasSnapshot, CanvasMigrationError } from './migration.ts'
-import type { CanvasId, CanvasSnapshot } from './types.ts'
+import { canonicalCanvasAccessContext } from './audit.ts'
+import type {
+  CanvasAccessContext,
+  CanvasActor,
+  CanvasId,
+  CanvasRequestSource,
+  CanvasSnapshot,
+} from './types.ts'
 import type { CanvasChange, CanvasChangeMeta, CanvasOperation } from './events.ts'
 
 const OPERATIONS: ReadonlySet<CanvasOperation> = new Set([
@@ -50,10 +57,37 @@ function record(value: unknown, subject: string): Record<string, unknown> {
 
 function decodeMeta(value: unknown): CanvasChangeMeta {
   const source = record(value, 'canvas-change.meta')
-  if (Object.keys(source).sort().join(',') !== 'schemaVersion' || source.schemaVersion !== 1) {
-    invalid('canvas-change.meta', 'canvas-change.meta must contain only schemaVersion 1')
+  if (source.schemaVersion === 1) {
+    if (Object.keys(source).sort().join(',') !== 'schemaVersion') {
+      invalid('canvas-change.meta', 'Canvas change meta v1 must contain only schemaVersion')
+    }
+    return { schemaVersion: 1 }
   }
-  return { schemaVersion: 1 }
+  if (source.schemaVersion !== 2) {
+    invalid('canvas-change.meta', `unsupported Canvas change meta schema ${String(source.schemaVersion)}`)
+  }
+  const allowed = new Set(['actor', 'correlationId', 'requestId', 'schemaVersion', 'source'])
+  for (const key of Object.keys(source)) {
+    if (!allowed.has(key)) invalid('canvas-change.meta', `Canvas change meta v2 contains unsupported field "${key}"`)
+  }
+  try {
+    const access = canonicalCanvasAccessContext({
+      actor: source.actor as CanvasActor,
+      source: source.source as CanvasRequestSource,
+      ...(source.requestId === undefined ? {} : { requestId: source.requestId as string }),
+      ...(source.correlationId === undefined ? {} : { correlationId: source.correlationId as string }),
+    } satisfies CanvasAccessContext)
+    return {
+      schemaVersion: 2,
+      actor: access.actor,
+      source: access.source,
+      ...(access.requestId === undefined ? {} : { requestId: access.requestId }),
+      ...(access.correlationId === undefined ? {} : { correlationId: access.correlationId }),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'invalid Canvas change meta v2'
+    invalid('canvas-change.meta', message)
+  }
 }
 
 /**

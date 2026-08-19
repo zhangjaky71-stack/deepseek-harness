@@ -1,5 +1,5 @@
 /**
- * Session-scoped Canvas domain vocabulary, durable migration/replay, and Host write service.
+ * Session-scoped Canvas domain vocabulary, durable migration/replay, Host authorization, and write service.
  * Provider execution, projections, Remotes, Agent tools, and UI remain later Canvas layers.
  *
  * @module @deepseek-ai/dsh-canvas
@@ -39,6 +39,13 @@ export {
   decodeCanvasLayoutSnapshot,
   decodeCanvasRunHistoryEntry,
 } from './migration.ts'
+export {
+  CanvasSensitiveDataError,
+  canonicalCanvasAccessContext,
+  canvasChangeMeta,
+  assertCanvasWorkflowAuditSafe,
+} from './audit.ts'
+export { CanvasAuthorizationPolicy, CanvasAuthorizationService } from './authorization.ts'
 export {
   emptyCanvasFoldState,
   cloneCanvasFoldState,
