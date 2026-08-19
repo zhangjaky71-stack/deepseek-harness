@@ -45,6 +45,7 @@ function nonEmpty(value: unknown, subject: string): string {
 function canonicalActor(value: unknown): CanvasActor {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Canvas actor must be an object')
   const source = value as Record<string, unknown>
+  if (Object.keys(source).sort().join(',') !== 'id,kind') throw new Error('Canvas actor must contain exactly id and kind')
   if (!ACTOR_KINDS.has(source.kind as CanvasActorKind)) throw new Error(`unsupported Canvas actor kind ${String(source.kind)}`)
   const id = nonEmpty(source.id, 'Canvas actor id')
   switch (source.kind) {
