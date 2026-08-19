@@ -1,0 +1,23 @@
+{
+  "runId": "run-v1",
+  "variantId": "variant-a",
+  "workflowId": "workflow-v1",
+  "workflowRevision": 1,
+  "status": "completed",
+  "outputs": [
+    {
+      "kind": "video",
+      "video": {
+        "assetId": "video-v1",
+        "mediaType": "video/mp4",
+        "bytes": 4096,
+        "width": 1280,
+        "height": 720,
+        "durationMs": 4000
+      }
+    }
+  ],
+  "startedAt": 1787100010000,
+  "finishedAt": 1787100015000,
+  "promptSummary": "Turn the selected image into a short video"
+}

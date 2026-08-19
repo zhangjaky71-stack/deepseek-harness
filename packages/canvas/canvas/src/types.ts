@@ -1,6 +1,6 @@
 /**
  * Pure Canvas domain vocabulary shared by Host, future Remote contracts, Agent tools, and UI adapters.
- * Runtime construction and validation live in `./domain.ts`.
+ * Runtime construction and validation live in `./domain.ts`; durable decode/migration lives in `./migration.ts`.
  *
  * @module @deepseek-ai/dsh-canvas/types
  */
@@ -69,6 +69,19 @@ export interface MediaWorkflow {
   readonly outputNodeIds: readonly WorkflowNodeId[]
 }
 
+/** Persisted editor layout kept independent from semantic workflow revisioning. */
+export interface CanvasLayoutSnapshot {
+  readonly schemaVersion: number
+  readonly workflowId: MediaWorkflowId
+  readonly nodePositions: Readonly<Record<WorkflowNodeId, { readonly x: number; readonly y: number }>>
+  readonly viewport?: {
+    readonly x: number
+    readonly y: number
+    readonly zoom: number
+  }
+  readonly updatedAt: number
+}
+
 /** Durable reference for one generated or imported video. */
 export interface VideoAssetRef {
   readonly assetId: VideoAssetId
@@ -130,6 +143,19 @@ export interface CanvasRunSnapshot {
   readonly error?: CanvasRunError
 }
 
+/** Bounded history DTO derived from Session history; it is never a second authority. */
+export interface CanvasRunHistoryEntry {
+  readonly runId: CanvasRunId
+  readonly variantId?: CanvasVariantId
+  readonly workflowId: MediaWorkflowId
+  readonly workflowRevision: number
+  readonly status: CanvasRunStatus
+  readonly outputs: readonly CanvasAssetRef[]
+  readonly startedAt: number
+  readonly finishedAt?: number
+  readonly promptSummary?: string
+}
+
 /** Current user-facing output. A previous successful output may remain while a later run fails. */
 export interface CanvasOutput {
   readonly runId: CanvasRunId
@@ -151,6 +177,32 @@ export interface CanvasSnapshot {
   readonly output: CanvasOutput | null
   readonly createdAt: number
   readonly updatedAt: number
+}
+
+/** Version of the future durable `canvas/change` envelope. */
+export type CanvasChangeVersion = 1
+
+/** Stable migration/decode failure reasons at durable Canvas boundaries. */
+export type CanvasMigrationErrorCode =
+  | 'CANVAS_MIGRATION_INVALID_VALUE'
+  | 'CANVAS_UNSUPPORTED_SCHEMA_VERSION'
+  | 'CANVAS_UNSUPPORTED_FUTURE_SCHEMA'
+  | 'CANVAS_UNSUPPORTED_NODE_VERSION'
+  | 'CANVAS_UNSUPPORTED_FUTURE_NODE_VERSION'
+
+/** Non-fatal compatibility information surfaced while reading historical Canvas data. */
+export interface CanvasMigrationNotice {
+  readonly code: 'CANVAS_DEPRECATED_NODE'
+  readonly lifecycle: 'deprecated'
+  readonly nodeId: WorkflowNodeId
+  readonly fromType: string
+  readonly toType: MediaWorkflowNodeType
+}
+
+/** Result of migration before or after current-domain invariant validation. */
+export interface CanvasMigrationResult<T> {
+  readonly value: T
+  readonly notices: readonly CanvasMigrationNotice[]
 }
 
 /** Input for constructing a fresh Canvas before any run lifecycle exists. */
