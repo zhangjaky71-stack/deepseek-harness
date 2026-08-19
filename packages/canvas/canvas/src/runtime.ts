@@ -1,10 +1,11 @@
-/** Host CanvasService: the single same-session write path over durable Canvas events, layout, and Host authorization. */
+/** Host CanvasService: Session-native Canvas/layout writes, bounded history, Host authorization, and Typert mutation/query exports. */
 
 import { randomUUID } from 'node:crypto'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { CANVAS_CHANGE_VERSION } from './migration.ts'
 import {
   CanvasId,
@@ -31,13 +32,24 @@ import {
 } from './layout.ts'
 import type { CanvasLayoutChange } from './layout.ts'
 import { registerCanvasProjections } from './projection.ts'
-import type { SaveCanvasLayoutRequest } from './client.ts'
+import { getCanvasRunHistory, listCanvasRunHistory } from './history.ts'
+import type {
+  CanvasClearReceipt,
+  CanvasLayoutMutationReceipt,
+  CanvasOutputSelectionReceipt,
+  CanvasRunHistoryPage,
+  CanvasWorkflowMutationReceipt,
+  GetCanvasRunRequest,
+  ListCanvasRunsRequest,
+  SaveCanvasLayoutRequest,
+} from './client.ts'
 import type {
   CanvasAccessContext,
   CanvasAuthorizationDecision,
   CanvasAuthorizationRequest,
   CanvasLayoutSnapshot,
   CanvasPermission,
+  CanvasRunHistoryEntry,
   CanvasServiceConfig,
   CanvasServiceErrorCode,
   CanvasSnapshot,
@@ -173,8 +185,8 @@ function applyWorkflowOperations(current: MediaWorkflow, operations: readonly Wo
   return workflow
 }
 
-/** Session-backed Canvas write service (`ctx.canvas`). */
-export class CanvasService extends Service {
+/** Session-backed Canvas write/query service (`ctx.canvas`) and Typert namespace `canvas`. */
+export class CanvasService extends TypertRemoteService {
   static inject = ['agents']
 
   private readonly caches = new WeakMap<Session, CanvasCache>()
@@ -356,6 +368,30 @@ export class CanvasService extends Service {
   }
 
   /**
+   * List newest-first run history derived from this Session log.
+   * @param agent - exact live Agent whose Session owns the Canvas history.
+   * @param request - bounded cursor page request.
+   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
+   * @returns detached bounded page.
+   */
+  listRuns(agent: Agent, request: ListCanvasRunsRequest = {}, access?: CanvasAccessContext): CanvasRunHistoryPage {
+    this.prepare(agent, 'canvas.history.read', access)
+    return listCanvasRunHistory(agent.session.events, request)
+  }
+
+  /**
+   * Read one run-history entry by durable run id.
+   * @param agent - exact live Agent whose Session owns the Canvas history.
+   * @param request - exact run id.
+   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
+   * @returns detached entry or null when absent.
+   */
+  getRun(agent: Agent, request: GetCanvasRunRequest, access?: CanvasAccessContext): CanvasRunHistoryEntry | null {
+    this.prepare(agent, 'canvas.history.read', access)
+    return getCanvasRunHistory(agent.session.events, request.runId)
+  }
+
+  /**
    * Clear the current Canvas while retaining its append-only Session history and independent layout history.
    * @param agent - exact live Agent whose Session owns the Canvas.
    * @param canvasId - identity of the Canvas expected to be current.
@@ -369,6 +405,57 @@ export class CanvasService extends Service {
       throw new CanvasServiceError(`Canvas "${canvasId}" is not current`, 'CANVAS_NOT_FOUND')
     }
     this.commit(agent, prepared.cache, prepared.access, 'clear', null)
+  }
+
+  /** Browser Remote edit; actor/source are fixed by the Host wrapper, not caller-provided. */
+  @Remote('editWorkflow')
+  remoteExportEditWorkflow(
+    agent: Agent,
+    ref: WorkflowRef,
+    operations: readonly WorkflowEditOperation[],
+  ): CanvasWorkflowMutationReceipt {
+    return { ref: this.workflowRef(this.editWorkflow(agent, ref, operations, this.browserAccess(agent))) }
+  }
+
+  /** Browser Remote full workflow replacement. */
+  @Remote('replaceWorkflow')
+  remoteExportReplaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow): CanvasWorkflowMutationReceipt {
+    return { ref: this.workflowRef(this.replaceWorkflow(agent, ref, workflow, this.browserAccess(agent))) }
+  }
+
+  /** Browser Remote primary-output selection. */
+  @Remote('selectOutput')
+  remoteExportSelectOutput(agent: Agent, request: SelectCanvasOutputRequest): CanvasOutputSelectionReceipt {
+    const canvas = this.selectOutput(agent, request, this.browserAccess(agent))
+    const output = canvas.output
+    if (output === null) throw new Error('Canvas output selection committed without an output')
+    return { runId: output.runId, primaryAssetIndex: output.primaryAssetIndex }
+  }
+
+  /** Browser Remote editor-layout save. */
+  @Remote('saveLayout')
+  remoteExportSaveLayout(agent: Agent, request: SaveCanvasLayoutRequest): CanvasLayoutMutationReceipt {
+    const layout = this.saveLayout(agent, request, this.browserAccess(agent))
+    return { workflowId: layout.workflowId, updatedAt: layout.updatedAt }
+  }
+
+  /** Browser Remote clear tombstone. */
+  @Remote('clear')
+  remoteExportClear(agent: Agent, canvasId: CanvasSnapshot['id']): CanvasClearReceipt {
+    this.clear(agent, canvasId, this.browserAccess(agent))
+    return { canvasId }
+  }
+
+  /** Browser Remote bounded run-history page. */
+  @Remote('listRuns')
+  remoteExportListRuns(agent: Agent, request: ListCanvasRunsRequest): CanvasRunHistoryPage {
+    return this.listRuns(agent, request, this.browserAccess(agent))
+  }
+
+  /** Browser Remote exact run-history query. */
+  @Remote('getRun')
+  remoteExportGetRun(agent: Agent, request: GetCanvasRunRequest): CanvasRunHistoryEntry | null {
+    return this.getRun(agent, request, this.browserAccess(agent))
   }
 
   private prepare(agent: Agent, permission: CanvasPermission, access?: CanvasAccessContext): PreparedCanvasAccess {
@@ -394,6 +481,13 @@ export class CanvasService extends Service {
     return { cache, access: canonical }
   }
 
+  private browserAccess(agent: Agent): CanvasAccessContext {
+    return {
+      actor: { kind: 'human', id: String(agent.id) },
+      source: 'browser-remote',
+    }
+  }
+
   private resolveAccess(agent: Agent, access?: CanvasAccessContext): CanvasAccessContext {
     try {
       return canonicalCanvasAccessContext(access ?? {
@@ -414,6 +508,15 @@ export class CanvasService extends Service {
         throw new CanvasServiceError(error.message, 'CANVAS_SENSITIVE_DATA')
       }
       throw error
+    }
+  }
+
+  private workflowRef(canvas: CanvasSnapshot): WorkflowRef {
+    if (canvas.workflow === null) throw new Error(`Canvas "${canvas.id}" lacks a workflow`)
+    return {
+      canvasId: canvas.id,
+      workflowId: canvas.workflow.id,
+      workflowRevision: canvas.workflowRevision,
     }
   }
 

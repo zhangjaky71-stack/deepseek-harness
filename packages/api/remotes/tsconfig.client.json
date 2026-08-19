@@ -22,10 +22,12 @@
     },
     {
       "path": "../../credentials/credentials"
-
     },
     {
       "path": "../../extensions/cordis-host-runner"
+    },
+    {
+      "path": "../../canvas/canvas"
     },
     {
       "path": "../../goal/goal"

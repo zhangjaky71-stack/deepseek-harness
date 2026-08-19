@@ -15,6 +15,7 @@
     { "path": "../../util/brand" },
     { "path": "../../attachment/attachment" },
     { "path": "../../runtime-diagnostics/invariants" },
-    { "path": "../../session/session-projection" }
+    { "path": "../../session/session-projection" },
+    { "path": "../../typert/protocol" }
   ]
 }
