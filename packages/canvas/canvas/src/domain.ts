@@ -70,19 +70,47 @@ export class CanvasDomainError extends Error {
   }
 }
 
-/** @param id - raw opaque identifier. @returns the same runtime string with the Canvas brand. */
+/**
+ * Brand a Canvas identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the Canvas brand.
+ */
 export function CanvasId(id: string): CanvasIdType { return id as CanvasIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the workflow brand. */
+/**
+ * Brand a workflow identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the workflow brand.
+ */
 export function MediaWorkflowId(id: string): MediaWorkflowIdType { return id as MediaWorkflowIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the node brand. */
+/**
+ * Brand a workflow-node identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the node brand.
+ */
 export function WorkflowNodeId(id: string): WorkflowNodeIdType { return id as WorkflowNodeIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the edge brand. */
+/**
+ * Brand a workflow-edge identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the edge brand.
+ */
 export function WorkflowEdgeId(id: string): WorkflowEdgeIdType { return id as WorkflowEdgeIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the run brand. */
+/**
+ * Brand a Canvas-run identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the run brand.
+ */
 export function CanvasRunId(id: string): CanvasRunIdType { return id as CanvasRunIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the variant brand. */
+/**
+ * Brand a Canvas-variant identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the variant brand.
+ */
 export function CanvasVariantId(id: string): CanvasVariantIdType { return id as CanvasVariantIdType }
-/** @param id - raw opaque identifier. @returns the same runtime string with the video-asset brand. */
+/**
+ * Brand a video-asset identifier without changing its runtime value.
+ * @param id - raw opaque identifier.
+ * @returns the same runtime string with the video-asset brand.
+ */
 export function VideoAssetId(id: string): VideoAssetIdType { return id as VideoAssetIdType }
 
 /**
