@@ -1,6 +1,6 @@
-/** Canvas conversation view: Minimal result surface and Editor shell over one Projection. */
+/** Canvas conversation view: capability-gated Minimal result surface and Editor shell over one Projection. */
 
-import type { CanvasAssetRef, CanvasLayoutSnapshot, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasAssetRef, CanvasCapabilities, CanvasLayoutSnapshot, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -20,6 +20,7 @@ export function CanvasView({
   useProjection,
   useMode,
   useInteraction,
+  capabilities,
   setMode,
   selectNode,
   selectEdge,
@@ -31,34 +32,37 @@ export function CanvasView({
   const layout = useProjection('canvasLayout')
   const mode = useMode(value => value)
   const interaction = useInteraction(value => value)
+  const effectiveMode: CanvasMode = capabilities.editor.enabled ? mode : 'minimal'
 
   return (
     <section className={css.root} aria-label={t('view.canvas')}>
       <div className={css.toolbar}>
-        <div className={css.modeSwitch} role="group" aria-label={t('mode.aria')}>
-          <button
-            type="button"
-            className={mode === 'minimal' ? css.modeActive : css.modeButton}
-            aria-pressed={mode === 'minimal'}
-            onClick={() => { setMode('minimal') }}
-          >
-            {t('mode.minimal')}
-          </button>
-          <button
-            type="button"
-            className={mode === 'editor' ? css.modeActive : css.modeButton}
-            aria-pressed={mode === 'editor'}
-            onClick={() => { setMode('editor') }}
-          >
-            {t('mode.editor')}
-          </button>
-        </div>
+        {capabilities.editor.enabled && (
+          <div className={css.modeSwitch} role="group" aria-label={t('mode.aria')}>
+            <button
+              type="button"
+              className={effectiveMode === 'minimal' ? css.modeActive : css.modeButton}
+              aria-pressed={effectiveMode === 'minimal'}
+              onClick={() => { setMode('minimal') }}
+            >
+              {t('mode.minimal')}
+            </button>
+            <button
+              type="button"
+              className={effectiveMode === 'editor' ? css.modeActive : css.modeButton}
+              aria-pressed={effectiveMode === 'editor'}
+              onClick={() => { setMode('editor') }}
+            >
+              {t('mode.editor')}
+            </button>
+          </div>
+        )}
         <SaveStatus status="saved" t={t} />
       </div>
 
       {projectedCanvas === undefined
         ? <div className={css.loading} role="status">{t('projection.loading')}</div>
-        : mode === 'minimal'
+        : effectiveMode === 'minimal'
           ? (
             <MinimalCanvas
               canvas={projectedCanvas}
@@ -71,6 +75,7 @@ export function CanvasView({
             <WorkflowEditorShell
               canvas={projectedCanvas}
               layout={layout ?? null}
+              capabilities={capabilities}
               interaction={interaction}
               onSelectNode={selectNode}
               onSelectEdge={selectEdge}
@@ -110,15 +115,22 @@ export function MinimalCanvas({ canvas, interaction, onSelectOutput, t }: BodyPr
 
 interface EditorProps extends BodyProps {
   readonly layout: CanvasLayoutSnapshot | null
+  readonly capabilities?: CanvasCapabilities
   readonly onSelectNode?: CanvasViewInjected['selectNode']
   readonly onSelectEdge?: CanvasViewInjected['selectEdge']
   readonly onClearSelection?: CanvasViewInjected['clearSelection']
 }
 
-/** Editor mode shell. N08 adds selection semantics but still does not implement DAG mutation. */
+function videoNodeUnavailable(type: string, capabilities: CanvasCapabilities | undefined): boolean {
+  if (capabilities?.video.enabled !== false) return false
+  return type === 'video.generate' || type === 'video.image-to-video'
+}
+
+/** Editor mode shell. Disabled historical feature nodes remain visible but unavailable. */
 export function WorkflowEditorShell({
   canvas,
   layout,
+  capabilities,
   interaction,
   onSelectNode,
   onSelectEdge,
@@ -157,19 +169,24 @@ export function WorkflowEditorShell({
         {workflow !== null && (
           <>
             <div className={css.nodeList}>
-              {workflow.nodes.map(node => (
-                <button
-                  type="button"
-                  className={css.nodeCard}
-                  key={node.id}
-                  aria-pressed={selectedNodes.has(node.id)}
-                  data-selected={selectedNodes.has(node.id) ? 'true' : 'false'}
-                  onClick={() => { if (canvas !== null) onSelectNode?.(canvas, node.id) }}
-                >
-                  <strong>{node.name ?? node.type}</strong>
-                  <span>{node.type}</span>
-                </button>
-              ))}
+              {workflow.nodes.map((node) => {
+                const unavailable = videoNodeUnavailable(node.type, capabilities)
+                return (
+                  <button
+                    type="button"
+                    className={css.nodeCard}
+                    key={node.id}
+                    aria-pressed={selectedNodes.has(node.id)}
+                    data-selected={selectedNodes.has(node.id) ? 'true' : 'false'}
+                    data-unavailable={unavailable ? 'true' : 'false'}
+                    onClick={() => { if (canvas !== null) onSelectNode?.(canvas, node.id) }}
+                  >
+                    <strong>{node.name ?? node.type}</strong>
+                    <span>{node.type}</span>
+                    {unavailable && <em className={css.unavailableBadge}>{t('feature.unavailable')}</em>}
+                  </button>
+                )
+              })}
             </div>
             {workflow.edges.length > 0 && (
               <div className={css.edgeList} aria-label={t('editor.edges')}>
@@ -251,7 +268,7 @@ function OutputGrid({ canvas, interaction, onSelectOutput, t }: {
           key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId}
           asset={asset}
           primary={index === output.primaryAssetIndex}
-          selected={interaction?.focusedOutput?.runId === output.runId && interaction.focusedOutput.assetIndex === index}
+          selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index}
           onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }}
           t={t}
         />
