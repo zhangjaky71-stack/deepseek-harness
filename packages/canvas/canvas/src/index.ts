@@ -84,5 +84,7 @@ export {
   resolveCanvasInteractionContext,
   renderCanvasInteractionContext,
 } from './interaction.ts'
-export { CanvasService, CanvasServiceError } from './runtime.ts'
-export { default } from './runtime.ts'
+export { CanvasInteractionBridgeError } from './interaction-bridge.ts'
+export { CanvasService } from './service.ts'
+export { CanvasServiceError } from './runtime.ts'
+export { default } from './service.ts'
