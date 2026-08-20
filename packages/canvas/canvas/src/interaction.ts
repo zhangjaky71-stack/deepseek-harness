@@ -3,6 +3,7 @@
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {
   CanvasAssetRef,
+  CanvasRunId,
   CanvasSnapshot,
   VideoAssetRef,
 } from './types.ts'
@@ -154,9 +155,7 @@ export function decodeCanvasInteractionContext(value: unknown): CanvasInteractio
     const focused = record(source.focusedOutput, 'canvas-interaction.focusedOutput')
     exact(focused, ['runId', 'assetIndex'], 'canvas-interaction.focusedOutput')
     focusedOutput = {
-      runId: string(focused.runId, 'canvas-interaction.focusedOutput.runId') as CanvasInteractionContext['focusedOutput'] extends infer F
-        ? F extends { runId: infer R } ? R : never
-        : never,
+      runId: string(focused.runId, 'canvas-interaction.focusedOutput.runId') as CanvasRunId,
       assetIndex: integer(focused.assetIndex, 'canvas-interaction.focusedOutput.assetIndex'),
     }
   }
@@ -180,7 +179,8 @@ function assetKey(asset: CanvasAssetRef): string {
 /**
  * Resolve a decoded interaction snapshot against the current Host Canvas.
  * Same-revision semantic selections are membership-checked. Stale revisions stay admissible
- * so the Agent can observe staleness and re-read before mutating.
+ * so the Agent can observe staleness and re-read before mutating. Durable asset references
+ * remain meaningful even when a later run changes the current output.
  */
 export function resolveCanvasInteractionContext(
   context: CanvasInteractionContext,
@@ -200,17 +200,10 @@ export function resolveCanvasInteractionContext(
       if (!edgeIds.has(String(edgeId))) fail(`canvas-interaction selected edge "${edgeId}" is not in the current workflow`)
     }
   }
-  const currentAssets = new Set((canvas.output?.assets ?? []).map(assetKey))
-  for (const asset of context.selectedAssetRefs ?? []) {
-    if (!currentAssets.has(assetKey(asset))) fail(`canvas-interaction selected asset "${assetKey(asset)}" is not in the current output`)
-  }
   if (context.focusedOutput !== undefined) {
     const output = canvas.output
     if (output === null || output.runId !== context.focusedOutput.runId) fail('canvas-interaction focused output is not current')
     if (context.focusedOutput.assetIndex >= output.assets.length) fail('canvas-interaction focused output index is out of range')
-  }
-  if (context.region !== undefined && !currentAssets.has(assetKey(context.region.asset))) {
-    fail(`canvas-interaction region asset "${assetKey(context.region.asset)}" is not in the current output`)
   }
   return { context: structuredClone(context), currentWorkflowRevision: canvas.workflowRevision, stale }
 }
