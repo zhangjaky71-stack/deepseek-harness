@@ -6,12 +6,18 @@ import type { CanvasClipboard, CanvasEditorCommand, CanvasNodeDraft } from './dr
 
 const HISTORY_LIMIT = 100
 
+/** Revision fence carried with one undo/redo entry. */
+export interface CanvasEditorHistoryEntry {
+  readonly command: CanvasEditorCommand
+  readonly expectedRevision: number
+}
+
 /** Presentation-only Editor state surviving view remounts for one Session. */
 export interface CanvasEditorState {
   readonly saveStatus: CanvasSaveStatus
   readonly draft: CanvasNodeDraft | null
-  readonly undo: readonly CanvasEditorCommand[]
-  readonly redo: readonly CanvasEditorCommand[]
+  readonly undo: readonly CanvasEditorHistoryEntry[]
+  readonly redo: readonly CanvasEditorHistoryEntry[]
   readonly clipboard: CanvasClipboard | null
   readonly localPositions: Readonly<Record<string, { readonly x: number; readonly y: number }>>
 }
@@ -22,9 +28,9 @@ type CanvasEditorActions = {
   setDraftName: (draft: CanvasEditorState, value: string) => void
   setDraftConfig: (draft: CanvasEditorState, value: string) => void
   markDraftClean: (draft: CanvasEditorState, workflowRevision: number) => void
-  recordCommand: (draft: CanvasEditorState, command: CanvasEditorCommand) => void
-  completeUndo: (draft: CanvasEditorState) => void
-  completeRedo: (draft: CanvasEditorState) => void
+  recordCommand: (draft: CanvasEditorState, command: CanvasEditorCommand, expectedRevision: number) => void
+  completeUndo: (draft: CanvasEditorState, expectedRevision: number) => void
+  completeRedo: (draft: CanvasEditorState, expectedRevision: number) => void
   clearHistory: (draft: CanvasEditorState) => void
   setClipboard: (draft: CanvasEditorState, clipboard: CanvasClipboard | null) => void
   setLocalPosition: (draft: CanvasEditorState, nodeId: string, x: number, y: number) => void
@@ -58,21 +64,21 @@ export function createCanvasEditorStore(): EngineStoreHandle<CanvasEditorState, 
         if (d.draft === null) return
         d.draft = { ...d.draft, baseWorkflowRevision: workflowRevision, dirty: false }
       },
-      recordCommand: (d, command: CanvasEditorCommand) => {
-        d.undo = [...d.undo, command].slice(-HISTORY_LIMIT)
+      recordCommand: (d, command: CanvasEditorCommand, expectedRevision: number) => {
+        d.undo = [...d.undo, { command, expectedRevision }].slice(-HISTORY_LIMIT)
         d.redo = []
       },
-      completeUndo: (d) => {
-        const command = d.undo.at(-1)
-        if (command === undefined) return
+      completeUndo: (d, expectedRevision: number) => {
+        const entry = d.undo.at(-1)
+        if (entry === undefined) return
         d.undo = d.undo.slice(0, -1)
-        d.redo = [...d.redo, command].slice(-HISTORY_LIMIT)
+        d.redo = [...d.redo, { command: entry.command, expectedRevision }].slice(-HISTORY_LIMIT)
       },
-      completeRedo: (d) => {
-        const command = d.redo.at(-1)
-        if (command === undefined) return
+      completeRedo: (d, expectedRevision: number) => {
+        const entry = d.redo.at(-1)
+        if (entry === undefined) return
         d.redo = d.redo.slice(0, -1)
-        d.undo = [...d.undo, command].slice(-HISTORY_LIMIT)
+        d.undo = [...d.undo, { command: entry.command, expectedRevision }].slice(-HISTORY_LIMIT)
       },
       clearHistory: (d) => { d.undo = []; d.redo = [] },
       setClipboard: (d, clipboard: CanvasClipboard | null) => { d.clipboard = clipboard },

@@ -9,6 +9,8 @@ import type {
   CanvasRunId,
   CanvasSnapshot,
   MediaWorkflowId,
+  SaveCanvasLayoutRequest,
+  WorkflowEditOperation,
   WorkflowEdgeId,
   WorkflowNodeId,
 } from '@deepseek-ai/dsh-canvas/client'
@@ -17,8 +19,8 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 /** Canvas presentation preference. Never persisted into Session state. */
 export type CanvasMode = 'minimal' | 'editor'
 
-/** Save-status skeleton owned by N07 and expanded by the draft/autosave node. */
-export type CanvasSaveStatus = 'saved' | 'saving' | 'error'
+/** Explicit Editor persistence state. */
+export type CanvasSaveStatus = 'saved' | 'saving' | 'conflict' | 'offline' | 'save-failed'
 
 /** Primary control selected from the authoritative Canvas product state. */
 export type CanvasPrimaryAction = 'none' | 'run' | 'retry' | 'cancel'
@@ -51,10 +53,22 @@ export interface CanvasInteractionSelection {
   readonly region?: CanvasRegionSelection
 }
 
-/** Mutations exposed to the Canvas view without handing it the store implementation. */
+/** Semantic edit result after Host CAS. */
+export type CanvasWorkflowWriteResult =
+  | { readonly ok: true; readonly workflowRevision: number }
+  | { readonly ok: false; readonly status: 'conflict' | 'offline' | 'save-failed'; readonly message: string }
+
+/** Layout write result; layout persistence never advances workflowRevision. */
+export type CanvasLayoutWriteResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly status: 'offline' | 'save-failed'; readonly message: string }
+
+/** Mutations exposed to the Canvas view without handing it service/store implementations. */
 export interface CanvasInteractionActions {
   readonly selectNode: (canvas: CanvasSnapshot, nodeId: WorkflowNodeId) => void
+  readonly selectNodes: (canvas: CanvasSnapshot, nodeIds: readonly WorkflowNodeId[]) => void
   readonly selectEdge: (canvas: CanvasSnapshot, edgeId: WorkflowEdgeId) => void
+  readonly selectEdges: (canvas: CanvasSnapshot, edgeIds: readonly WorkflowEdgeId[]) => void
   readonly selectOutput: (canvas: CanvasSnapshot, assetIndex: number) => void
   readonly setRegion: (canvas: CanvasSnapshot, region: CanvasRegionSelection) => void
   readonly clearSelection: () => void
@@ -69,6 +83,13 @@ export interface CanvasViewInjected extends CanvasInteractionActions {
     readonly interaction: SnapshotStore<CanvasInteractionSelection>
   }
   readonly setMode: (mode: CanvasMode) => void
+  /** Commit one atomic operation batch against the exact revision used to derive it. */
+  readonly commitOperations: (
+    operations: readonly WorkflowEditOperation[],
+    expectedWorkflowRevision: number,
+  ) => Promise<CanvasWorkflowWriteResult>
+  /** Persist renderer-neutral layout independently from semantic workflow revisioning. */
+  readonly saveLayout: (request: SaveCanvasLayoutRequest) => Promise<CanvasLayoutWriteResult>
 }
 
 /** Narrow input accepted by presentation helpers and tests. */
