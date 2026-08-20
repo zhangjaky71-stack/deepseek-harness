@@ -27,7 +27,8 @@
 .modeButton,
 .modeActive,
 .primaryAction,
-.cancelAction {
+.cancelAction,
+.clearSelection {
   border: 0;
   border-radius: 9px;
   padding: 7px 12px;
@@ -106,6 +107,16 @@
   border: 1px solid var(--border-subtle, #e5e5e5);
   border-radius: 14px;
   background: var(--surface-primary, #fff);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assetCard:disabled { cursor: default; }
+.assetCard[data-selected='true'] {
+  border-color: var(--text-primary, #171717);
+  box-shadow: inset 0 0 0 1px var(--text-primary, #171717);
 }
 
 .assetCard div:not(.assetGlyph) { display: grid; gap: 3px; }
@@ -152,13 +163,26 @@
   background: var(--surface-subtle, #fafafa);
 }
 
+.graphHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
 .graphHeader p { margin: 0 0 18px; color: var(--text-secondary, #737373); font-size: 13px; }
+
+.clearSelection {
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text-secondary, #737373);
+  cursor: pointer;
+}
 
 .nodeList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .nodeCard {
@@ -168,8 +192,43 @@
   border: 1px solid var(--border-subtle, #dedede);
   border-radius: 12px;
   background: var(--surface-primary, #fff);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .nodeCard span { font-size: 11px; color: var(--text-secondary, #737373); }
+.nodeCard[data-selected='true'] {
+  border-color: var(--text-primary, #171717);
+  box-shadow: inset 0 0 0 1px var(--text-primary, #171717);
+}
+
+.edgeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.edgeCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle, #dedede);
+  border-radius: 999px;
+  background: var(--surface-primary, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.edgeCard span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edgeCard[data-selected='true'] {
+  border-color: var(--text-primary, #171717);
+  box-shadow: inset 0 0 0 1px var(--text-primary, #171717);
+}
 
 @media (max-width: 760px) {
   .root { padding: 14px 12px 28px; }
