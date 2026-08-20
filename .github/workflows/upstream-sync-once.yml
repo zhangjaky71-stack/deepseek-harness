@@ -11,10 +11,10 @@ permissions:
 jobs:
   merge-upstream:
     if: github.head_ref == 'sync/upstream-rc8'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout sync trigger
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
