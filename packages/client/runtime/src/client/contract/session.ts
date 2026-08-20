@@ -11,13 +11,9 @@ import type { AttachmentIdType, ImageAttachmentRef } from '@deepseek-ai/dsh-atta
 import type {
   MessageId, PromptContentPart, QueueAction, RpcResult, SessionId,
 } from '@deepseek-ai/dsh-api-remotes/client'
-import type { JsonValue } from '@deepseek-ai/dsh-session/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ConversationSnapshot } from '../sessions/conversation.ts'
 import type { ObservableSnapshot } from './store.ts'
-
-/** JSON-safe request-local context sampled by browser plugins at prompt submission. */
-export type PromptRequestContext = Readonly<Record<string, JsonValue>>
 
 /** Key-addressed projection read face (the useProjection resolution path; see ProjectionValueStore). */
 export interface ProjectionsFace {
@@ -40,16 +36,11 @@ export interface ISession {
    * Send a prompt into the session.
    * @param content - text plus browser-owned temporary image uploads.
    * @param mode - 'queue' appends a turn; 'steer' interrupts the running one.
-   * @param requestContext - optional JSON-safe send-time plugin context; Host owners decide which keys become logged model context.
    * @returns acceptance, or the business error (also mirrored into snapshot.promptError).
    */
-  prompt(
-    content: PromptContentPart[],
-    mode: 'queue' | 'steer',
-    requestContext?: PromptRequestContext,
-  ): Promise<RpcResult<{ accepted: true }>>
+  prompt(content: PromptContentPart[], mode: 'queue' | 'steer'): Promise<RpcResult<{ accepted: true }>>
   /**
-   * Resolve one durable image referenced by this session into browser-consumable bytes.
+   * Resolve one durable image referenced by this session.
    * @param attachmentId - opaque id found in the folded session log.
    * @returns the authenticated reference and decoded bytes.
    */
