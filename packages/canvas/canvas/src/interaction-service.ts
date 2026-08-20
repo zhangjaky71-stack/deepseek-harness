@@ -10,6 +10,7 @@ import type {
   DiscardCanvasInteractionRequest,
   StageCanvasInteractionRequest,
 } from './interaction-types.ts'
+import type {} from './feature-service.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -22,7 +23,7 @@ declare module '@deepseek-ai/cordis' {
  * remains `ctx.canvas`; this service only stages one-shot turn context.
  */
 export class CanvasInteractionService extends TypertRemoteService {
-  static inject = ['agents', 'canvas']
+  static inject = ['agents', 'canvas', 'canvasFeatures']
 
   private readonly bridge: CanvasInteractionBridge
 
@@ -37,6 +38,8 @@ export class CanvasInteractionService extends TypertRemoteService {
     agent: Agent,
     request: StageCanvasInteractionRequest,
   ): CanvasInteractionStageReceipt {
+    this.ctx.canvasFeatures.assertEnabled('canvas')
+    if (request.context.region !== undefined) this.ctx.canvasFeatures.assertEnabled('regionEdit')
     return this.bridge.stage(agent, request)
   }
 

@@ -126,6 +126,11 @@
     - id: session-projection
       name: '@deepseek-ai/dsh-session-projection'
 
+    # Deployment Canvas capabilities are independent from authorization and
+    # are consumed by Host operations, Browser UI, and later Agent tools.
+    - id: canvas-features
+      name: '@deepseek-ai/dsh-canvas/feature-service'
+
     # Canvas is a Host service in every profile so Browser Remotes and later
     # Agent tools share one Session-backed authority and Projection source.
     - id: canvas

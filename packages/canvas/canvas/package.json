@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-canvas",
-  "description": "Session-native media Canvas domain, event sourcing, Host authorization, projections, Remote mutations, bounded history, and request-local interaction context for the DeepSeek Harness",
+  "description": "Session-native media Canvas domain, event sourcing, Host authorization, deployment feature policy, projections, Remote mutations, bounded history, and request-local interaction context for the DeepSeek Harness",
   "version": "0.1.0-rc.7",
   "publishConfig": {
     "access": "public"
@@ -25,6 +25,10 @@
     "./client": {
       "types": "./lib/types/client.d.ts",
       "default": "./lib/types/client.js"
+    },
+    "./feature-service": {
+      "types": "./lib/types/feature-service.d.ts",
+      "default": "./lib/types/feature-service.js"
     },
     "./interaction-service": {
       "types": "./lib/types/interaction-service.d.ts",
@@ -68,6 +72,7 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:^",
     "zod": "^4.4.3"
   },
   "devDependencies": {

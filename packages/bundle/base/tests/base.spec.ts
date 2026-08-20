@@ -32,9 +32,12 @@ describe('dsh-base bundle', () => {
     const rows = patches.flatMap(patch => patch.insert ?? [])
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
+    expect(rows.filter(row => row.id === 'canvas-features')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'canvas-features')?.name).toBe('@deepseek-ai/dsh-canvas/feature-service')
     expect(rows.filter(row => row.id === 'canvas')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'canvas-interaction')).toHaveLength(1)
     expect(rows.find(row => row.id === 'canvas-interaction')?.name).toBe('@deepseek-ai/dsh-canvas/interaction-service')
+    expect(rows.findIndex(row => row.id === 'canvas-features')).toBeLessThan(rows.findIndex(row => row.id === 'canvas-interaction'))
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-canvas', 'workspace:^')
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
       __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",

@@ -1,6 +1,6 @@
 /**
- * Session-scoped Canvas domain, durable migration/replay, Host authorization, projections/layout,
- * bounded history, one-shot interaction context, and Typert-enabled services.
+ * Session-scoped Canvas domain, durable migration/replay, Host authorization, deployment feature
+ * policy, projections/layout, bounded history, one-shot interaction context, and Typert-enabled services.
  * Provider execution, Agent tools, and media assets remain later Canvas layers.
  *
  * @module @deepseek-ai/dsh-canvas
@@ -9,6 +9,7 @@
 export type * from './types.ts'
 export type * from './client.ts'
 export type * from './interaction-types.ts'
+export type * from './feature-types.ts'
 export type * from './events.ts'
 export type { CanvasLayoutChange, CanvasLayoutFoldState } from './layout.ts'
 export {
@@ -50,6 +51,14 @@ export {
   assertCanvasWorkflowAuditSafe,
 } from './audit.ts'
 export { CanvasAuthorizationPolicy, CanvasAuthorizationService } from './authorization.ts'
+export {
+  CanvasFeatureError,
+  resolveCanvasCapabilities,
+  canvasFeatureEnabled,
+  isVideoWorkflowNode,
+  unavailableWorkflowFeatures,
+  editUsesDisabledVideo,
+} from './features.ts'
 export {
   emptyCanvasFoldState,
   cloneCanvasFoldState,

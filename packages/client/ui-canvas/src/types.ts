@@ -2,6 +2,7 @@
 
 import type {
   CanvasAssetRef,
+  CanvasCapabilities,
   CanvasId,
   CanvasProductState,
   CanvasRegionSelection,
@@ -61,6 +62,8 @@ export interface CanvasInteractionActions {
 
 /** Session-bound UI-local faces injected into the Canvas conversation view. */
 export interface CanvasViewInjected extends CanvasInteractionActions {
+  /** Effective Host deployment capabilities sampled when the view registration is created. */
+  readonly capabilities: CanvasCapabilities
   readonly hooks: {
     readonly mode: SnapshotStore<CanvasMode>
     readonly interaction: SnapshotStore<CanvasInteractionSelection>

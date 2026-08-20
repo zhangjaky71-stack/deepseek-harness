@@ -1,4 +1,4 @@
-/** Host CanvasService: Session-native Canvas/layout writes, bounded history, Host authorization, and Typert mutation/query exports. */
+/** Host CanvasService: Session-native Canvas/layout writes, bounded history, Host authorization, feature policy, and Typert exports. */
 
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
@@ -33,6 +33,8 @@ import {
 import type { CanvasLayoutChange } from './layout.ts'
 import { registerCanvasProjections } from './projection.ts'
 import { getCanvasRunHistory, listCanvasRunHistory } from './history.ts'
+import type { CanvasFeatureService } from './feature-service.ts'
+import type { CanvasFeatureName } from './feature-types.ts'
 import type {
   CanvasClearReceipt,
   CanvasLayoutMutationReceipt,
@@ -215,7 +217,8 @@ export class CanvasService extends TypertRemoteService {
   }
 
   /**
-   * Read the authoritative current Canvas for one live agent.
+   * Read the authoritative current Canvas for one live agent. Reads remain available when a feature is disabled
+   * so historical workflows can still be decoded and inspected.
    * @param agent - exact live Agent whose Session owns the Canvas.
    * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
    * @returns detached current snapshot, or `null` before create/after clear.
@@ -234,8 +237,12 @@ export class CanvasService extends TypertRemoteService {
    */
   create(agent: Agent, request: CreateCanvasRequest, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
+    const features = this.featurePolicy()
+    features?.assertEnabled('canvas')
     const workflow = cloneWorkflow(request.workflow)
     assertMediaWorkflow(workflow)
+    features?.assertWorkflowCreatable(workflow)
+    if (request.currentVariantId !== undefined) features?.assertEnabled('variants')
     this.assertWorkflowAuditSafe(workflow)
     if (prepared.cache.state.canvas !== null) {
       throw new CanvasServiceError(`Canvas "${prepared.cache.state.canvas.id}" already exists`, 'CANVAS_ALREADY_EXISTS')
@@ -262,8 +269,12 @@ export class CanvasService extends TypertRemoteService {
    */
   replaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
+    const features = this.featurePolicy()
+    features?.assertEnabled('canvas')
+    this.assertBrowserEditorEnabled(prepared.access, features)
     const replacement = cloneWorkflow(workflow)
     assertMediaWorkflow(replacement)
+    features?.assertWorkflowCreatable(replacement)
     this.assertWorkflowAuditSafe(replacement)
     const current = this.expectCurrentWorkflow(prepared.cache, ref)
     if (replacement.id !== current.workflow.id) {
@@ -290,7 +301,11 @@ export class CanvasService extends TypertRemoteService {
     access?: CanvasAccessContext,
   ): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
+    const features = this.featurePolicy()
+    features?.assertEnabled('canvas')
+    this.assertBrowserEditorEnabled(prepared.access, features)
     const current = this.expectCurrentWorkflow(prepared.cache, ref)
+    features?.assertWorkflowEditable(current.workflow, operations)
     const workflow = applyWorkflowOperations(current.workflow, operations)
     this.assertWorkflowAuditSafe(workflow)
     return this.commitWorkflow(agent, prepared, current, 'workflow-edit', workflow)
@@ -305,6 +320,7 @@ export class CanvasService extends TypertRemoteService {
    */
   selectOutput(agent: Agent, request: SelectCanvasOutputRequest, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
+    this.assertFeature('canvas')
     const current = prepared.cache.state.canvas
     if (current === null) throw new CanvasServiceError('no current Canvas', 'CANVAS_NOT_FOUND')
     const output = current.output
@@ -335,6 +351,7 @@ export class CanvasService extends TypertRemoteService {
    */
   saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CanvasLayoutSnapshot {
     const prepared = this.prepare(agent, 'canvas.layout.write', access)
+    this.assertFeature('editor')
     const current = prepared.cache.state.canvas
     if (current === null || current.workflow === null) {
       throw new CanvasServiceError('no current Canvas workflow', 'CANVAS_NOT_FOUND')
@@ -376,6 +393,7 @@ export class CanvasService extends TypertRemoteService {
    */
   listRuns(agent: Agent, request: ListCanvasRunsRequest = {}, access?: CanvasAccessContext): CanvasRunHistoryPage {
     this.prepare(agent, 'canvas.history.read', access)
+    this.assertFeature('history')
     return listCanvasRunHistory(agent.session.events, request)
   }
 
@@ -388,6 +406,7 @@ export class CanvasService extends TypertRemoteService {
    */
   getRun(agent: Agent, request: GetCanvasRunRequest, access?: CanvasAccessContext): CanvasRunHistoryEntry | null {
     this.prepare(agent, 'canvas.history.read', access)
+    this.assertFeature('history')
     return getCanvasRunHistory(agent.session.events, request.runId)
   }
 
@@ -399,6 +418,7 @@ export class CanvasService extends TypertRemoteService {
    */
   clear(agent: Agent, canvasId: CanvasSnapshot['id'], access?: CanvasAccessContext): void {
     const prepared = this.prepare(agent, 'canvas.edit', access)
+    this.assertFeature('canvas')
     const current = prepared.cache.state.canvas
     if (current === null) throw new CanvasServiceError('no current Canvas', 'CANVAS_NOT_FOUND')
     if (current.id !== canvasId) {
@@ -498,6 +518,18 @@ export class CanvasService extends TypertRemoteService {
       const message = error instanceof Error ? error.message : 'invalid Canvas access context'
       throw new CanvasServiceError(message, 'CANVAS_INVALID_ACCESS_CONTEXT')
     }
+  }
+
+  private featurePolicy(): CanvasFeatureService | undefined {
+    return this.ctx.get('canvasFeatures')
+  }
+
+  private assertFeature(feature: CanvasFeatureName): void {
+    this.featurePolicy()?.assertEnabled(feature)
+  }
+
+  private assertBrowserEditorEnabled(access: CanvasAccessContext, features: CanvasFeatureService | undefined): void {
+    if (access.source === 'browser-remote') features?.assertEnabled('editor')
   }
 
   private assertWorkflowAuditSafe(workflow: MediaWorkflow): void {
