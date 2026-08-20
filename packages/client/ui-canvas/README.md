@@ -2,15 +2,25 @@
 
 English | [中文](README.zh.md)
 
-Browser-only Canvas conversation view over the session-native Canvas domain. The plugin registers one `conversation.view` entry named `canvas`; it does not own the conversation session, composer, Canvas durability, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`).
+Browser-only Canvas conversation view over the session-native Canvas domain. The plugin does not own the conversation session, composer, Canvas durability, deployment capability policy, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`), while deployment capability comes from the read-only Host `canvasFeatures` Remote.
 
 ## Surface contract
 
-The view has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** shows a workflow-oriented shell with semantic node/edge counts, revision/layout information, and selectable node/edge cards; N08 still deliberately stops before visual DAG mutation.
+The view has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** shows a workflow-oriented shell with semantic node/edge counts, revision/layout information, and selectable node/edge cards; N09 still deliberately stops before visual DAG mutation.
 
 Mode is browser-local per Session and never becomes a Session event. The person may switch Minimal/Editor without mutating Canvas state. The mode ledger has no Session-write or persistence dependency.
 
 The conversation composer remains resident because `ui-conversation` owns it outside the `conversation.view` ring. Switching Chat/Trajectory/Canvas changes the session body only; prompt entry remains the ordinary conversation composer rather than a Canvas-specific duplicate input.
+
+## Deployment capabilities
+
+N09 makes the Browser fail closed on deployment capability. The plugin waits for generated `remote.canvasFeatures`, calls its global read-only `get()` method, and registers the `canvas` conversation view only when the returned effective `canvas.enabled` value is true. A missing Remote, business failure, transport failure, or plugin disposal before the query settles registers no Canvas tab. Capability discovery is not stored in Session state and does not become a second business-state authority.
+
+`editor.enabled=false` makes the surface Minimal-only even if the browser-local mode store still contains `editor`; the mode switch is not rendered. The stored preference is not rewritten, so a later deployment that re-enables Editor can reuse normal local preference semantics without a Session mutation.
+
+Disabled feature data is not erased. In particular, a historical `video.generate` or `video.image-to-video` node remains visible in Editor when `video.enabled=false`, but is marked `Unavailable in this deployment`. Existing video output references also remain visible. This distinguishes “cannot use this capability now” from “the historical workflow/result no longer exists.”
+
+The send-time interaction preparer is registered only inside an enabled Canvas capability scope. `regionEdit.enabled=false` strips any stale browser-local region selection before staging an otherwise valid prompt; the Host independently rejects a direct region-bearing stage call, so UI filtering is an affordance rather than the security/enforcement boundary.
 
 ## Interaction selection and Agent turns
 
@@ -41,7 +51,7 @@ The primary-control skeleton is deterministic: READY/COMPLETED/DIRTY_READY → R
 
 ## Projection and client boundary
 
-`@deepseek-ai/dsh-canvas/client` is consumed type-only for Canvas DTOs, interaction DTOs, and the SessionProjectionMap declaration merge. The browser bundle owns small isomorphic product-state/interaction builders so it does not require Host-domain Canvas JavaScript at runtime. No client-side Canvas fold exists: the Host computes whole projection values and the standard Session runtime pushes them to the view.
+`@deepseek-ai/dsh-canvas/client` is consumed type-only for Canvas DTOs, capability DTOs, interaction DTOs, and the SessionProjectionMap declaration merge. The browser bundle owns small isomorphic product-state/interaction builders so it does not require Host-domain Canvas JavaScript at runtime. No client-side Canvas fold or feature-policy implementation exists: the Host computes whole projection values and effective deployment capabilities.
 
 Generated image/video bytes are not resolved by this shell yet. Result cards display durable media-reference metadata only; authorized media routes and richer previews belong to the asset/UI nodes that own those capabilities.
 
@@ -49,7 +59,9 @@ Generated image/video bytes are not resolved by this shell yet. Result cards dis
 
 ## Model Experience
 
-The package now contributes model-visible content only when the user sends a prompt with a concrete Canvas selection. The resulting context names the sampled Canvas/workflow revision and selected nodes, edges, durable assets, focused output, or region. Revision drift is explicit: stale context tells the Agent to call `canvas_read` before mutating selected workflow targets. No selection means no Canvas context is contributed.
+The package contributes model-visible content only when the user sends a prompt with a concrete Canvas selection. The resulting context names the sampled Canvas/workflow revision and selected nodes, edges, durable assets, focused output, or enabled region. Revision drift is explicit: stale context tells the Agent to call `canvas_read` before mutating selected workflow targets. No selection means no Canvas context is contributed.
+
+Feature discovery itself contributes zero model tokens. Disabled Canvas suppresses the Browser selection preparation path entirely; other flags change UI affordances but are not injected into the standing prompt.
 
 #### KV Cache effect
 
@@ -59,6 +71,7 @@ No standing prefix is added. Interaction context is turn-local user-role plugin 
 
 - **No live Run/Retry/Cancel behavior** — controls are state-correct but disabled until media execution and cancellation exist on the Host.
 - **Editor selection is not DAG editing** — node/edge selection is shipped for deictic Agent context, while connection mutation, Inspector editing, undo/redo, and partial execution arrive later.
+- **Feature-gated future surfaces are not fabricated** — History/Variant/Partial Run/Provider Fallback have capability values now, but their future UI appears only with their owning implementation nodes.
 - **Region selection is a seam, not a visual mask editor** — the DTO/store path exists, but drawing masks/regions and inpaint/outpaint operations are later UI/workflow work.
 - **Media cards are metadata placeholders** — actual image/video rendering requires authorized asset delivery.
 - **Save status is static** — draft/autosave behavior is deferred; the UI still creates no second durable source.
