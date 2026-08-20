@@ -19,11 +19,9 @@ import { CanvasModeStore } from './mode-store.ts'
 import { en, NS, zh, type CanvasKey } from './locales.ts'
 import type { CanvasViewInjected } from '../types.ts'
 
-export { CanvasView, MinimalCanvas, WorkflowEditorShell, SaveStatus } from './CanvasView.tsx'
-export { CanvasInteractionStore } from './interaction-store.ts'
-export { buildCanvasInteractionContext, hasCanvasInteractionTarget } from './interaction.ts'
-export { CanvasModeStore } from './mode-store.ts'
-export { canvasPrimaryAction, deriveCanvasPresentation } from './state.ts'
+// rc.8 client export discipline: the dynamic /client entry exposes only what
+// Cordis loading and declaration-merging need. Components, stores, and pure
+// helpers remain package internals and same-package tests import them directly.
 export type * from '../types.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -66,6 +64,10 @@ export const inject = ['slots', 'sessions', 'locale', 'conversation']
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-canvas: dictionaries')
   const t = ctx.locale.bind(NS)
+  // These sources are request-context inputs as well as view interaction state:
+  // prompt preparation reads them from this apply closure before the next RPC.
+  // The renderer-facing side therefore uses the reserved injected hooks
+  // compartment rather than duplicating them into a renderer-private store.
   const modes = new CanvasModeStore()
   const interactions = new CanvasInteractionStore()
 
