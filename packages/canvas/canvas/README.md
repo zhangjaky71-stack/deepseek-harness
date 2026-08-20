@@ -24,11 +24,15 @@ The package root exports branded-id factories, `createMediaWorkflow()`, `createC
 
 ## Durable decode and migration
 
-Durable Canvas values follow `decode stored value → migrate to current runtime value → run current domain invariant`. `migrateStoredMediaWorkflow()` and `migrateStoredCanvasSnapshot()` stop before relational invariants, while `decodeMediaWorkflow()` and `decodeCanvasSnapshot()` chain migration with current validation.
+Durable Canvas values follow `stored JSON → migrateStoredX() → current structural value → current invariant`. `migrateStoredMediaWorkflow()` and `migrateStoredCanvasSnapshot()` stop before relational invariants, while `decodeMediaWorkflow()` and `decodeCanvasSnapshot()` add current Canvas-domain validation. Layout uses the same split: `migrateStoredCanvasLayoutSnapshot()` is structural and `decodeCanvasLayoutSnapshot()` adds `assertCanvasLayoutSnapshot()`.
 
-Current versions are exported as `CANVAS_CHANGE_VERSION`, `CANVAS_LAYOUT_SCHEMA_VERSION`, `MEDIA_WORKFLOW_SCHEMA_VERSION`, `CANVAS_SCHEMA_VERSION`, and per-node `MEDIA_WORKFLOW_NODE_VERSIONS`. Unknown future schema or node versions fail with stable `CanvasMigrationError` codes instead of guessing a downgrade. Historical Session events are never rewritten.
+Current Canvas-owned versions are exported as `CANVAS_CHANGE_VERSION`, `CANVAS_LAYOUT_SCHEMA_VERSION`, `MEDIA_WORKFLOW_SCHEMA_VERSION`, `CANVAS_SCHEMA_VERSION`, and `CORE_MEDIA_WORKFLOW_NODE_VERSIONS`. The node-version map is deliberately closed over Canvas-owned node kinds only; it is not the catalog of every legal workflow node. Unknown plugin node types remain structurally readable with their type, optional positive node version, JSON-safe config, and graph relationships even when the plugin is not installed. N10/N12 decide whether the current Host has a matching `type@version` definition and executor.
 
-Golden fixtures freeze V1 workflow, snapshot, layout, run-history, and a retired pre-registry `image.create@v1` node. The retired alias is accepted only while decoding historical data, migrated to `image.generate@v1`, and surfaced as a `CANVAS_DEPRECATED_NODE` notice; current writers never emit the alias.
+Future Canvas/Core schema versions and future Canvas-owned node versions fail with stable `CanvasMigrationError` codes instead of guessing a downgrade. Unknown plugin node versions are preserved rather than misclassified as Core future versions. Current-version durable objects reject unsupported fields so a writer cannot add persistent data without an explicit version/migration change and have an older reader silently discard it. Historical Session events are never rewritten.
+
+Golden fixtures freeze V1 workflow, snapshot, layout, run-history compatibility data, a retired pre-registry `image.create@v1` node, and an unavailable plugin-node workflow. The retired alias is accepted only while decoding historical data, migrated to `image.generate@v1`, and surfaced as a `CANVAS_DEPRECATED_NODE` notice; current writers never emit the alias. The plugin fixture proves durable workflows remain readable without consulting a plugin registry.
+
+`CanvasRunHistoryEntry` remains a Session-derived bounded query/compatibility DTO, not a second durable schema authority. Its decoder validates current DTO fields, run lifecycle timestamps, and media-reference metadata; any future physical history cache must remain rebuildable from Session history and version its own storage independently.
 
 ## Event sourcing and replay
 
