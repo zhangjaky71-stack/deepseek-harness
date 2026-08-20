@@ -24,9 +24,6 @@
       "path": "../../boot/cmdline"
     },
     {
-      "path": "../../canvas/canvas-interaction"
-    },
-    {
       "path": "../../host/frontend-static"
     },
     {
