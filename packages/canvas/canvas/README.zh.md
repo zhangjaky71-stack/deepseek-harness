@@ -24,11 +24,15 @@ Package root 导出 branded id factory、`createMediaWorkflow()`、`createCanvas
 
 ## Durable Decode 与 Migration
 
-Durable Canvas 值遵循 `decode stored value → migrate to current runtime value → run current domain invariant`。`migrateStoredMediaWorkflow()` 与 `migrateStoredCanvasSnapshot()` 在关系 invariant 前停止，而 `decodeMediaWorkflow()` 与 `decodeCanvasSnapshot()` 会继续执行当前领域校验。
+Durable Canvas 值统一遵循 `stored JSON → migrateStoredX() → current structural value → current invariant`。`migrateStoredMediaWorkflow()` 与 `migrateStoredCanvasSnapshot()` 在关系 invariant 前停止，`decodeMediaWorkflow()` 与 `decodeCanvasSnapshot()` 再执行当前 Canvas Domain 校验。Layout 使用同样的分层：`migrateStoredCanvasLayoutSnapshot()` 只做 structural migration，`decodeCanvasLayoutSnapshot()` 再执行 `assertCanvasLayoutSnapshot()`。
 
-当前版本由 `CANVAS_CHANGE_VERSION`、`CANVAS_LAYOUT_SCHEMA_VERSION`、`MEDIA_WORKFLOW_SCHEMA_VERSION`、`CANVAS_SCHEMA_VERSION` 和每种 Node 的 `MEDIA_WORKFLOW_NODE_VERSIONS` 导出。未知未来 Schema/Node Version 使用稳定 `CanvasMigrationError` 显式失败，不猜测降级；历史 Session Event 永不重写。
+当前 Canvas-owned Version 由 `CANVAS_CHANGE_VERSION`、`CANVAS_LAYOUT_SCHEMA_VERSION`、`MEDIA_WORKFLOW_SCHEMA_VERSION`、`CANVAS_SCHEMA_VERSION` 与 `CORE_MEDIA_WORKFLOW_NODE_VERSIONS` 导出。Node Version Map 有意只闭合于 Canvas 自己拥有的 Node Kind，不代表系统中全部合法 Workflow Node。未知 Plugin Node 即使当前未安装，也会保留其 type、可选正整数 nodeVersion、JSON-safe config 与图关系并保持可读；当前 Host 是否存在对应 `type@version` Definition/Executor 由 N10/N12 决定。
 
-Golden fixture 固定 V1 workflow、snapshot、layout、run-history 和一个退役的 pre-registry `image.create@v1` Node。该别名只在读取历史数据时接受，迁移为 `image.generate@v1` 并产生 `CANVAS_DEPRECATED_NODE` notice；当前 writer 永不写出该别名。
+Future Canvas/Core Schema 与 Future Canvas-owned Node Version 使用稳定 `CanvasMigrationError` fail loud，不猜测降级。Unknown Plugin Node Version 会被原样保留，而不是被误判为 Core future version。Current-version durable object 会拒绝 unsupported field，避免 Writer 新增持久字段却忘记显式改 Version/Migration 时，被旧 Reader 静默丢弃。历史 Session Event 永不重写。
+
+Golden fixture 固定 V1 workflow、snapshot、layout、run-history compatibility data、一个退役的 pre-registry `image.create@v1` Node，以及一份 unavailable plugin-node workflow。退役别名只在读取历史数据时接受，迁移为 `image.generate@v1` 并产生 `CANVAS_DEPRECATED_NODE` notice；当前 Writer 永不写出该别名。Plugin fixture 证明 Durable Workflow 在不查询 Plugin Registry 的情况下仍保持可读。
+
+`CanvasRunHistoryEntry` 继续是由 Session 派生的 bounded query/compatibility DTO，不是第二套 Durable Schema Authority。其 decoder 校验当前 DTO field、Run Lifecycle 时间与 Media Reference metadata；未来任何物理 History Cache 都必须可从 Session History 重建，并独立版本化自己的存储格式。
 
 ## Event Sourcing 与 Replay
 
