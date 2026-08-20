@@ -1,15 +1,16 @@
 name: one-shot upstream sync
 
 on:
-  push:
+  pull_request:
     branches:
-      - sync/upstream-rc8
+      - main
 
 permissions:
   contents: write
 
 jobs:
   merge-upstream:
+    if: github.head_ref == 'sync/upstream-rc8'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sync trigger
@@ -26,7 +27,7 @@ jobs:
           git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
           git fetch upstream master --no-tags
 
-          trigger_sha="${GITHUB_SHA}"
+          trigger_sha="${{ github.event.pull_request.head.sha }}"
           git fetch origin main
           git reset --hard origin/main
 
