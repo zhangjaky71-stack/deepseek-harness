@@ -3,9 +3,9 @@
 | Node | 核心交付 | 关键验收 Gate |
 |---|---|---|
 | N00 | 工程实施总图与节点契约 | 节点编号、upstream baseline、跨节点不变量唯一可追溯。 |
-| N01 | Canvas Domain、类型系统与状态不变量 | `types.ts` 不包含运行时实现；Domain 不依赖 Browser。 |
+| N01 | Canvas Domain、类型系统与状态不变量 | `types.ts` 无运行时实现；Domain 不依赖 Browser；node type structural admission 是 open-world，不含 built-in whitelist；八种 Product State 有 Domain tests。 |
 | N02 | Schema Migration、Node Version 与 Golden Fixtures | 历史 fixture 可迁移；未知 plugin node 不因 built-in whitelist 丢失。 |
-| N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | Agent/Browser 业务写入都经 CanvasService。 |
+| N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | Agent/Browser 业务写入都经 CanvasService；相邻 workflow/run revision transition 严格按 operation 推进。 |
 | N04 | Authorization、Actor、Audit 与敏感数据边界 | UI 隐藏不是唯一权限控制。 |
 | N05 | Session Projection、Canvas Layout Projection | Browser 刷新/reconnect 得到 authoritative Workflow/Run/Output。 |
 | N06 | Remote、Mutation、History API | Browser 人工 mutation 不走私有 Session hack。 |

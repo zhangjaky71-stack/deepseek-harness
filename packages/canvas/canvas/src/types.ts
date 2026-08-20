@@ -32,8 +32,9 @@ export type CanvasJsonValue = CanvasJsonPrimitive | readonly CanvasJsonValue[] |
 export type MediaPortType = 'text' | 'image' | 'video' | 'image-list' | 'video-list' | 'mask'
 
 /**
- * Declaration-merge surface for semantic media-node type identifiers.
- * Node-definition plugins may augment this interface without changing Canvas Domain code.
+ * Declaration-merge surface for node identifiers known to the current TypeScript composition.
+ * Plugins may augment this map for discoverability and registry typing, but Canvas Domain runtime
+ * admission is intentionally open-world so durable workflows survive when a plugin is unavailable.
  */
 export interface MediaWorkflowNodeTypeMap {
   'asset.input': true
@@ -45,8 +46,13 @@ export interface MediaWorkflowNodeTypeMap {
   'output': true
 }
 
-/** Semantic node kind known to the current TypeScript composition. */
-export type MediaWorkflowNodeType = keyof MediaWorkflowNodeTypeMap
+/** Node identifiers known to the current TypeScript composition. */
+export type KnownMediaWorkflowNodeType = keyof MediaWorkflowNodeTypeMap
+/**
+ * Open-world semantic node identifier stored by Canvas Domain.
+ * N10/N12 registries decide whether an identifier is installed, valid for its ports/config, and executable.
+ */
+export type MediaWorkflowNodeType = string
 
 /** One semantic workflow node; renderer and provider-specific fields do not belong here. */
 export interface MediaWorkflowNode {
