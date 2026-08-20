@@ -211,13 +211,21 @@ export function resolveCanvasInteractionContext(
 /** Stable, compact model-facing rendering for one resolved selection/focus snapshot. */
 export function renderCanvasInteractionContext(resolved: ResolvedCanvasInteractionContext): string {
   const { context } = resolved
+  const currentRevision = resolved.currentWorkflowRevision === null
+    ? 'unavailable'
+    : String(resolved.currentWorkflowRevision)
+  const status = resolved.currentWorkflowRevision === null
+    ? 'STALE/UNAVAILABLE — call canvas_read before acting on any sampled target'
+    : resolved.stale
+      ? 'STALE — call canvas_read before acting on selected workflow targets'
+      : 'current'
   const lines = [
     'Canvas interaction context for this user turn:',
     `- canvas: ${context.canvasId}`,
     `- workflow: ${context.workflowId}`,
     `- selected workflow revision: ${context.workflowRevision}`,
-    `- current workflow revision: ${resolved.currentWorkflowRevision}`,
-    `- context status: ${resolved.stale ? 'STALE — call canvas_read before acting on selected workflow targets' : 'current'}`,
+    `- current workflow revision: ${currentRevision}`,
+    `- context status: ${status}`,
   ]
   if (context.mode !== undefined) lines.push(`- UI mode: ${context.mode}`)
   if ((context.selectedNodeIds?.length ?? 0) > 0) lines.push(`- selected nodes: ${context.selectedNodeIds!.join(', ')}`)
