@@ -16,7 +16,7 @@ Canvas 是会话范围内的领域，其 durable authority 是 Session log。Hos
 
 语义 Workflow 只包含媒体领域节点、边、输出 id 和 JSON-safe config。Editor Layout 是独立持久化的 presentation value；Provider 请求 payload 属于 Provider data，生成媒体使用 durable reference，而不是保存 binary bytes 或 bearer URL。图片复用 `dsh-attachment` 已拥有的 attachment identity；视频存储属于独立 capability。
 
-Durable Canvas value 在执行当前领域 invariant 前先经过明确的 decode/migration 链路。历史 Session data 保持 append-only；旧值只在内存中迁移。未知未来 Schema/Node Version 显式失败，不猜测降级；退役历史节点别名产生明确 lifecycle notice，同时不能成为当前 writer 的合法输出。
+Durable Canvas value 在执行当前领域 invariant 前先经过明确的 decode/migration 链路。历史 Session data 保持 append-only；旧值只在内存中迁移。未知 future Canvas/Core Schema Version 和 Canvas-owned Node Version 显式失败，不猜测降级。未知 Plugin Node 在 Registry Definition 缺失时仍保持结构可读，并保留 Stored Type/Version/Config；当前是否可用和可执行由 Node Registry/Engine 决定。退役历史 Core Node Alias 产生明确 lifecycle notice，同时不能成为当前 writer 的合法输出。详细 ownership 与 strict current-schema 规则见 [Canvas open-world node migration](../architecture/2026-08-20-canvas-open-world-migration.zh.md)。
 
 每个被接受的语义 Canvas mutation 对应一个 `canvas/change` Session Event，并携带完整 post-change `CanvasSnapshot`；`clear` 携带 null tombstone。严格纯 fold 校验相邻 mutation 的关系，package invariant 在 Session 发布前独立 stage 下一份 fold state。Host `CanvasService` cache 只从 committed log 派生，在 `session.append()` 成功前不会发布 cache state。
 
@@ -71,6 +71,7 @@ Web 表层现在把 `@deepseek-ai/dsh-client-ui-canvas` 作为一个 `conversati
 ## Acceptance criteria
 
 - Canvas/workflow/run value、Schema Migration 和语义 invariant 与 UI/Provider 解耦。
+- 包含当前 unavailable Plugin Node 的 Durable Workflow 仍保持可读、可 Replay；执行可用性由当前 Node Registry/Engine 在后续决定。
 - `canvas/change` cold replay 与 live Canvas state 完全一致。
 - Workflow CAS 只 fence semantic revision；run revision change 不会让 edit stale。
 - 当前 Canvas read/mutation 都经过 Host Authorization，被接受 mutation 带 durable actor/source attribution。
