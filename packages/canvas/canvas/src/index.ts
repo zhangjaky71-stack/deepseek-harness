@@ -1,12 +1,14 @@
 /**
- * Session-scoped Canvas domain, durable migration/replay, Host authorization, projections/layout, bounded history, and Typert-enabled write service.
- * Provider execution, Agent tools, media assets, and UI remain later Canvas layers.
+ * Session-scoped Canvas domain, durable migration/replay, Host authorization, projections/layout,
+ * bounded history, one-shot interaction context, and Typert-enabled write service.
+ * Provider execution, Agent tools, and media assets remain later Canvas layers.
  *
  * @module @deepseek-ai/dsh-canvas
  */
 
 export type * from './types.ts'
 export type * from './client.ts'
+export type * from './interaction-types.ts'
 export type * from './events.ts'
 export type { CanvasLayoutChange, CanvasLayoutFoldState } from './layout.ts'
 export {
@@ -76,5 +78,11 @@ export {
   listCanvasRunHistory,
   getCanvasRunHistory,
 } from './history.ts'
+export {
+  CanvasInteractionContextError,
+  decodeCanvasInteractionContext,
+  resolveCanvasInteractionContext,
+  renderCanvasInteractionContext,
+} from './interaction.ts'
 export { CanvasService, CanvasServiceError } from './runtime.ts'
 export { default } from './runtime.ts'
