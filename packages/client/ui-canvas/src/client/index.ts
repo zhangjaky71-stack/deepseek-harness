@@ -1,8 +1,13 @@
 /** Browser Canvas plugin: one conversation view over Session Projection plus request-local interaction context. */
 
-import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import type {
+  CanvasInteractionDiscardReceipt,
+  CanvasInteractionStageReceipt,
+  CanvasSnapshot,
+  DiscardCanvasInteractionRequest,
+  StageCanvasInteractionRequest,
+} from '@deepseek-ai/dsh-canvas/client'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-canvas/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -27,48 +32,67 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Required services: conversation view/input, Session projections, Remote bridge, and locale. */
-export const inject = [
-  'slots',
-  'sessions',
-  'locale',
-  'conversation',
-  'remote',
-  'remote.canvasInteraction',
-]
+type RemoteResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-/** Register the Canvas conversation tab and one-shot prompt-context provider. */
+/** Structural slice of the generated Canvas Remote used without importing the Remote assembly at runtime. */
+interface CanvasInteractionRemote {
+  stageInteraction(
+    sessionId: SessionId,
+    request: StageCanvasInteractionRequest,
+  ): Promise<RemoteResult<CanvasInteractionStageReceipt>>
+  discardInteraction(
+    sessionId: SessionId,
+    request: DiscardCanvasInteractionRequest,
+  ): Promise<RemoteResult<CanvasInteractionDiscardReceipt>>
+}
+
+interface RemoteRoot {
+  readonly canvas: CanvasInteractionRemote
+}
+
+/** Required services for the view itself; the prompt-context producer waits separately for `remote.canvas`. */
+export const inject = ['slots', 'sessions', 'locale', 'conversation']
+
+/** Register the Canvas conversation tab and exact-turn prompt-context provider. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-canvas: dictionaries')
   const t = ctx.locale.bind(NS)
   const modes = new CanvasModeStore()
   const interactions = new CanvasInteractionStore()
 
-  ctx.effect(() => ctx.conversation.registerPromptPreparation('canvas-interaction', (sessionId) => {
-    const binding = ctx.sessions.binding(sessionId)
-    if (binding === undefined) return undefined
-    const canvas = binding.session.projections.faceOf('canvas').getSnapshot() as CanvasSnapshot | null | undefined
-    const context = buildCanvasInteractionContext(
-      interactions.faceOf(sessionId).getSnapshot(),
-      canvas,
-      modes.faceOf(sessionId).getSnapshot(),
-    )
-    if (context === undefined) return undefined
-    return {
-      prepare: async (rpcId) => {
-        const result = await ctx.remote.canvasInteraction.stage(sessionId, { rpcId, context })
-        if (!result.ok) {
-          throw new Error(`canvas interaction stage failed: ${result.error.code}: ${result.error.message}`)
-        }
-      },
-      discard: async (rpcId) => {
-        const result = await ctx.remote.canvasInteraction.discard(sessionId, { rpcId })
-        if (!result.ok) {
-          throw new Error(`canvas interaction discard failed: ${result.error.code}: ${result.error.message}`)
-        }
-      },
-    }
-  }), 'ui-canvas: prompt interaction context')
+  // Remote readiness is independent from the view: Canvas remains readable
+  // from Projection while the generated Remote contribution is mounting.
+  ctx.inject(['remote.canvas'], (remoteCtx) => {
+    const remote = remoteCtx.get('remote') as RemoteRoot | undefined
+    if (remote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvas injection')
+    remoteCtx.effect(() => remoteCtx.conversation.registerPromptPreparation('canvas-interaction', (sessionId) => {
+      const binding = remoteCtx.sessions.binding(sessionId)
+      if (binding === undefined) return undefined
+      const canvas = binding.session.projections.faceOf('canvas').getSnapshot() as CanvasSnapshot | null | undefined
+      const context = buildCanvasInteractionContext(
+        interactions.faceOf(sessionId).getSnapshot(),
+        canvas,
+        modes.faceOf(sessionId).getSnapshot(),
+      )
+      if (context === undefined) return undefined
+      return {
+        prepare: async (rpcId) => {
+          const result = await remote.canvas.stageInteraction(sessionId, { rpcId, context })
+          if (!result.ok) {
+            throw new Error(`canvas interaction stage failed: ${result.error.code}: ${result.error.message}`)
+          }
+        },
+        discard: async (rpcId) => {
+          const result = await remote.canvas.discardInteraction(sessionId, { rpcId })
+          if (!result.ok) {
+            throw new Error(`canvas interaction discard failed: ${result.error.code}: ${result.error.message}`)
+          }
+        },
+      }
+    }), 'ui-canvas: prompt interaction context')
+  })
 
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
