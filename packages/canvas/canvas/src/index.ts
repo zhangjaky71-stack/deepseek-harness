@@ -1,6 +1,6 @@
 /**
  * Session-scoped Canvas domain, durable migration/replay, Host authorization, projections/layout,
- * bounded history, one-shot interaction context, and Typert-enabled write service.
+ * bounded history, one-shot interaction context, and Typert-enabled services.
  * Provider execution, Agent tools, and media assets remain later Canvas layers.
  *
  * @module @deepseek-ai/dsh-canvas
@@ -85,6 +85,5 @@ export {
   renderCanvasInteractionContext,
 } from './interaction.ts'
 export { CanvasInteractionBridgeError } from './interaction-bridge.ts'
-export { CanvasService } from './service.ts'
-export { CanvasServiceError } from './runtime.ts'
-export { default } from './service.ts'
+export { CanvasService, CanvasServiceError } from './runtime.ts'
+export { default } from './runtime.ts'
