@@ -55,8 +55,8 @@ export interface CanvasInteractionContext {
 /** Host-side interpretation facts attached to the rendered turn context. */
 export interface ResolvedCanvasInteractionContext {
   readonly context: CanvasInteractionContext
-  /** Host workflow revision observed during prompt admission. */
-  readonly currentWorkflowRevision: number
-  /** Whether browser selection was sampled from an older workflow revision. */
+  /** Host workflow revision observed at interpretation time; null after clear/replacement made it unavailable. */
+  readonly currentWorkflowRevision: number | null
+  /** Whether browser selection is older than, or no longer resolvable against, current Canvas state. */
   readonly stale: boolean
 }
