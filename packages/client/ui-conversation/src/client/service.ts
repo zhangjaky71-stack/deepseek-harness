@@ -20,6 +20,19 @@ import type { ComposerBlocks } from './input/blocks.ts'
 import type { DraftAttachmentId, SessionInputResolver } from './input/contract.ts'
 import type { InputSubmitMode } from './contract/composer-submission.ts'
 
+/** One side effect prepared from a synchronous send-time Browser snapshot. */
+export interface ConversationPromptPreparation {
+  /** Run immediately before the ordinary Session prompt admission. */
+  prepare(): Promise<void> | void
+}
+
+/**
+ * Synchronous send-time provider. The provider MUST capture browser-local state
+ * before the first await in a send path and return a detached preparation.
+ */
+export type ConversationPromptPreparationProvider =
+  (sessionId: SessionId) => ConversationPromptPreparation | undefined
+
 /**
  * The outward conversation face (`ctx.conversation`): the scope-addressed
  * verbs and the input registry other plugins may reach — and exactly what a
@@ -33,6 +46,14 @@ export interface IConversation {
    * cannot import makes a session's input inert with its own reason.
    */
   readonly blocks: ComposerBlocks
+  /**
+   * Register one synchronous send-time context preparer. Registration is
+   * application-local and does not mutate the Session or composer draft.
+   * @param id - globally unique owner id in this browser process.
+   * @param provider - synchronous snapshot callback for the addressed Session.
+   * @returns disposer for HMR/plugin unload.
+   */
+  registerPromptPreparation(id: string, provider: ConversationPromptPreparationProvider): () => void
   /**
    * Send a prompt into the caller scope's session (queued turn).
    * @param text - prompt text, sent verbatim as one text block.
@@ -93,6 +114,7 @@ export class ConversationController extends Service implements IConversation {
   readonly input: SessionInputResolver
   /** The per-session composer-block registry. */
   readonly blocks: ComposerBlocks
+  private readonly promptPreparations = new Map<string, ConversationPromptPreparationProvider>()
   private readonly draftAttachments = new Map<DraftAttachmentId, ComposerAttachment>()
   private readonly imageUrls = new Map<string, ImageUrlEntry>()
   private readonly imageGenerations = new Map<SessionId, number>()
@@ -112,12 +134,25 @@ export class ConversationController extends Service implements IConversation {
     this.blocks = config.blocks
     ctx.effect(() => () => {
       this.disposed = true
+      this.promptPreparations.clear()
       for (const url of this.createdImageUrls) revokePreview(url)
       this.createdImageUrls.clear()
       this.draftAttachments.clear()
       this.imageUrls.clear()
       this.imageGenerations.clear()
     }, 'conversation attachment URL cache')
+  }
+
+  /** Register one send-time prompt preparation provider. */
+  registerPromptPreparation(id: string, provider: ConversationPromptPreparationProvider): () => void {
+    if (id === '') throw new Error('conversation.registerPromptPreparation requires a non-empty id')
+    if (this.promptPreparations.has(id)) {
+      throw new Error(`conversation prompt preparation "${id}" is already registered`)
+    }
+    this.promptPreparations.set(id, provider)
+    return () => {
+      if (this.promptPreparations.get(id) === provider) this.promptPreparations.delete(id)
+    }
   }
 
   /**
@@ -128,6 +163,8 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
+    const preparations = this.snapshotPromptPreparations(session.sessionId)
+    await this.runPromptPreparations(preparations)
     const result = await session.prompt([{ type: 'text', text }], 'queue')
     if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
   }
@@ -145,12 +182,15 @@ export class ConversationController extends Service implements IConversation {
     imageIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
   ): Promise<void> {
+    // Snapshot plugin-owned interaction state before image serialization yields.
+    const preparations = this.snapshotPromptPreparations(session.sessionId)
     const attachments = this.draftImages(imageIds)
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
     const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
     const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
+    await this.runPromptPreparations(preparations)
     const result = await session.prompt(content, mode)
     if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
     this.releaseDraftImages(attachments)
@@ -171,11 +211,7 @@ export class ConversationController extends Service implements IConversation {
     })
   }
 
-  /**
-   * Resolve ordered input-state ids to runtime-owned draft images.
-   * @param ids - draft attachment ids.
-   * @returns descriptors that remain live, in requested order.
-   */
+  /** Resolve ordered input-state ids to runtime-owned draft images. */
   draftImages(ids: readonly DraftAttachmentId[]): readonly ComposerAttachment[] {
     const attachments: ComposerAttachment[] = []
     for (const id of ids) {
@@ -185,10 +221,7 @@ export class ConversationController extends Service implements IConversation {
     return attachments
   }
 
-  /**
-   * Release one browser-owned draft image and preview URL.
-   * @param id - draft attachment id.
-   */
+  /** Release one browser-owned draft image and preview URL. */
   releaseDraftImage(id: DraftAttachmentId): void {
     const attachment = this.draftAttachments.get(id)
     if (attachment === undefined) return
@@ -197,20 +230,12 @@ export class ConversationController extends Service implements IConversation {
     revokePreview(attachment.previewUrl)
   }
 
-  /**
-   * Release a set of browser-owned draft images.
-   * @param attachments - descriptors to release.
-   */
+  /** Release a set of browser-owned draft images. */
   releaseDraftImages(attachments: readonly ComposerAttachment[]): void {
     for (const attachment of attachments) this.releaseDraftImage(attachment.id)
   }
 
-  /**
-   * Resolve and cache one session-authorized historical image URL.
-   * @param sessionId - owning session authorization scope.
-   * @param attachment - durable image reference.
-   * @returns browser URL valid until its rendered session is released.
-   */
+  /** Resolve and cache one session-authorized historical image URL. */
   resolveImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string> {
     if (this.disposed) return Promise.reject(new Error('conversation.resolveImage: service is disposed'))
     const key = `${sessionId}:${attachment.attachmentId}`
@@ -244,10 +269,7 @@ export class ConversationController extends Service implements IConversation {
     return pending
   }
 
-  /**
-   * Release every historical image URL owned by one rendered session.
-   * @param sessionId - rendered session scope.
-   */
+  /** Release every historical image URL owned by one rendered session. */
   releaseSessionImages(sessionId: SessionId): void {
     this.imageGenerations.set(sessionId, (this.imageGenerations.get(sessionId) ?? 0) + 1)
     for (const [key, entry] of this.imageUrls) {
@@ -275,7 +297,7 @@ export class ConversationController extends Service implements IConversation {
     }
   }
 
-  /** Cancel the scoped session's in-flight turn while preserving Queue (failures land in promptError and reject, as in send). */
+  /** Cancel the scoped session's in-flight turn while preserving Queue. */
   async cancel(): Promise<void> {
     const session = this.scopedSession('cancel')
     const result = await session.cancel()
@@ -285,6 +307,21 @@ export class ConversationController extends Service implements IConversation {
   /** Pull one older history page for the scoped Session. */
   async loadOlder(): Promise<void> {
     await this.scopedSession('loadOlder').loadOlder()
+  }
+
+  /** Snapshot all registered preparation providers synchronously at the send boundary. */
+  private snapshotPromptPreparations(sessionId: SessionId): readonly ConversationPromptPreparation[] {
+    const preparations: ConversationPromptPreparation[] = []
+    for (const provider of this.promptPreparations.values()) {
+      const preparation = provider(sessionId)
+      if (preparation !== undefined) preparations.push(preparation)
+    }
+    return preparations
+  }
+
+  /** Execute detached preparations in deterministic registration order. */
+  private async runPromptPreparations(preparations: readonly ConversationPromptPreparation[]): Promise<void> {
+    for (const preparation of preparations) await preparation.prepare()
   }
 
   /** Resolve the caller scope's session face or throw on root contexts. */
@@ -305,8 +342,6 @@ export class ConversationController extends Service implements IConversation {
   }
 
   private requireSessions(): ISessions {
-    // Strict ctx.get, not the injection proxy: the scope-addressed pattern
-    // reads the service off whatever context the tracker rebound.
     const sessions = this.ctx.get('sessions')
     if (sessions === undefined) throw new Error('conversation: sessions service unavailable')
     return sessions
