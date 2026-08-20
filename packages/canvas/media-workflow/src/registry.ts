@@ -12,19 +12,18 @@ import type {
   MediaNodeRegistryErrorCode,
 } from './types.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    mediaNodes: MediaNodeRegistry
+  }
+}
+
 const DEFAULT_NODE_VERSION = 1
 const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/
 
 /** Stable registry rejection. */
 export class MediaNodeRegistryError extends Error {
-  /**
-   * @param message - human-readable registry failure.
-   * @param code - stable machine-readable failure code.
-   */
-  constructor(
-    message: string,
-    readonly code: MediaNodeRegistryErrorCode,
-  ) {
+  constructor(message: string, readonly code: MediaNodeRegistryErrorCode) {
     super(message)
     this.name = 'MediaNodeRegistryError'
   }
@@ -38,16 +37,10 @@ function assertPortNames(definition: MediaNodeDefinition, direction: 'inputs' | 
   const seen = new Set<string>()
   for (const port of definition[direction]) {
     if (!NAME_PATTERN.test(port.name)) {
-      throw new MediaNodeRegistryError(
-        `${keyOf(definition.type, definition.version)} ${direction} port ${JSON.stringify(port.name)} has an invalid name`,
-        'MEDIA_NODE_INVALID_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} ${direction} port ${JSON.stringify(port.name)} has an invalid name`, 'MEDIA_NODE_INVALID_DEFINITION')
     }
     if (seen.has(port.name)) {
-      throw new MediaNodeRegistryError(
-        `${keyOf(definition.type, definition.version)} has duplicate ${direction} port ${JSON.stringify(port.name)}`,
-        'MEDIA_NODE_INVALID_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} has duplicate ${direction} port ${JSON.stringify(port.name)}`, 'MEDIA_NODE_INVALID_DEFINITION')
     }
     seen.add(port.name)
   }
@@ -56,54 +49,33 @@ function assertPortNames(definition: MediaNodeDefinition, direction: 'inputs' | 
 /** Validate one definition independently from registry state. */
 export function assertMediaNodeDefinition(definition: MediaNodeDefinition): void {
   if (!Number.isSafeInteger(definition.version) || definition.version < 1) {
-    throw new MediaNodeRegistryError(
-      `${definition.type} node version must be a positive safe integer`,
-      'MEDIA_NODE_INVALID_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`${definition.type} node version must be a positive safe integer`, 'MEDIA_NODE_INVALID_DEFINITION')
   }
   if (definition.displayName.trim() === '') {
-    throw new MediaNodeRegistryError(
-      `${keyOf(definition.type, definition.version)} displayName must be non-empty`,
-      'MEDIA_NODE_INVALID_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} displayName must be non-empty`, 'MEDIA_NODE_INVALID_DEFINITION')
   }
   assertPortNames(definition, 'inputs')
   assertPortNames(definition, 'outputs')
   if (definition.lifecycle.deprecated && definition.lifecycle.creatable) {
-    throw new MediaNodeRegistryError(
-      `${keyOf(definition.type, definition.version)} cannot be both deprecated and creatable`,
-      'MEDIA_NODE_INVALID_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} cannot be both deprecated and creatable`, 'MEDIA_NODE_INVALID_DEFINITION')
   }
   const replacement = definition.lifecycle.replacement
   if (replacement !== undefined) {
     if (!Number.isSafeInteger(replacement.version) || replacement.version < 1) {
-      throw new MediaNodeRegistryError(
-        `${keyOf(definition.type, definition.version)} replacement version must be a positive safe integer`,
-        'MEDIA_NODE_INVALID_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} replacement version must be a positive safe integer`, 'MEDIA_NODE_INVALID_DEFINITION')
     }
     if (replacement.type === definition.type && replacement.version === definition.version) {
-      throw new MediaNodeRegistryError(
-        `${keyOf(definition.type, definition.version)} replacement cannot point to itself`,
-        'MEDIA_NODE_INVALID_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} replacement cannot point to itself`, 'MEDIA_NODE_INVALID_DEFINITION')
     }
   }
   if (definition.ui.category.trim() === '' || definition.ui.icon.trim() === '' || definition.ui.inspectorKind.trim() === '') {
-    throw new MediaNodeRegistryError(
-      `${keyOf(definition.type, definition.version)} UI metadata must use non-empty stable identifiers`,
-      'MEDIA_NODE_INVALID_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} UI metadata must use non-empty stable identifiers`, 'MEDIA_NODE_INVALID_DEFINITION')
   }
   try {
     definition.configSchema.parse(structuredClone(definition.defaultConfig))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new MediaNodeRegistryError(
-      `${keyOf(definition.type, definition.version)} default config violates its schema: ${message}`,
-      'MEDIA_NODE_INVALID_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} default config violates its schema: ${message}`, 'MEDIA_NODE_INVALID_DEFINITION')
   }
 }
 
@@ -112,28 +84,19 @@ export class MediaNodeRegistry extends Service {
   private readonly definitions = new Map<string, MediaNodeDefinition>()
   private readonly listeners = new Set<(change: MediaNodeRegistryChange) => void>()
 
-  /** @param ctx - owning Cordis context. */
   constructor(ctx: Context) {
     super(ctx, 'mediaNodes')
   }
 
-  /**
-   * Register one versioned definition on the caller plugin's effect lifetime.
-   * @param definition - immutable semantic metadata.
-   * @returns idempotent disposer; caller-fiber disposal invokes it automatically.
-   */
+  /** Register one versioned definition on the caller plugin's effect lifetime. */
   register(definition: MediaNodeDefinition): () => void {
     assertMediaNodeDefinition(definition)
     const key = keyOf(definition.type, definition.version)
-    const ctx = this.ctx
-    const disposeEffect = ctx.effect(() => {
+    const disposeEffect = this.ctx.effect(() => {
       if (this.definitions.has(key)) {
-        throw new MediaNodeRegistryError(
-          `media node definition ${key} is already registered`,
-          'MEDIA_NODE_DUPLICATE_DEFINITION',
-        )
+        throw new MediaNodeRegistryError(`media node definition ${key} is already registered`, 'MEDIA_NODE_DUPLICATE_DEFINITION')
       }
-      const stable = structuredCloneDefinition(definition)
+      const stable = stableDefinition(definition)
       this.definitions.set(key, stable)
       this.emit({ kind: 'registered', definition: stable })
       return () => {
@@ -145,87 +108,59 @@ export class MediaNodeRegistry extends Service {
     return () => { void disposeEffect() }
   }
 
-  /** Resolve one exact definition. Omitted version means the current V1 default. */
+  /** Resolve one exact definition. Omitted version means V1. */
   get(type: MediaWorkflowNodeType, version = DEFAULT_NODE_VERSION): MediaNodeDefinition | undefined {
     return this.definitions.get(keyOf(type, version))
   }
 
-  /** Resolve one definition or throw a stable unknown-node error. */
   require(ref: MediaNodeDefinitionRef): MediaNodeDefinition {
     const definition = this.get(ref.type, ref.version)
     if (definition !== undefined) return definition
-    throw new MediaNodeRegistryError(
-      `media node definition ${keyOf(ref.type, ref.version)} is not registered`,
-      'MEDIA_NODE_UNKNOWN_DEFINITION',
-    )
+    throw new MediaNodeRegistryError(`media node definition ${keyOf(ref.type, ref.version)} is not registered`, 'MEDIA_NODE_UNKNOWN_DEFINITION')
   }
 
-  /** Resolve the exact version referenced by one semantic workflow node. */
   resolveNode(node: MediaNodeLike): MediaNodeDefinition | undefined {
     return this.get(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)
   }
 
   /** Stable ordered snapshot of all active definitions. */
   list(): readonly MediaNodeDefinition[] {
-    return [...this.definitions.values()].sort((left, right) => {
-      const typeOrder = left.type.localeCompare(right.type)
-      return typeOrder === 0 ? left.version - right.version : typeOrder
-    })
+    return [...this.definitions.values()].sort((left, right) => left.type.localeCompare(right.type) || left.version - right.version)
   }
 
   /** Parse and normalize one node config through its registered schema. */
   parseConfig(node: MediaNodeLike): MediaNodeConfig {
     const definition = this.resolveNode(node)
     if (definition === undefined) {
-      throw new MediaNodeRegistryError(
-        `media node definition ${keyOf(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)} is not registered`,
-        'MEDIA_NODE_UNKNOWN_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`media node definition ${keyOf(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)} is not registered`, 'MEDIA_NODE_UNKNOWN_DEFINITION')
     }
     try {
       return definition.configSchema.parse(structuredClone(node.config))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new MediaNodeRegistryError(
-        `${keyOf(definition.type, definition.version)} config is invalid: ${message}`,
-        'MEDIA_NODE_INVALID_CONFIG',
-      )
+      throw new MediaNodeRegistryError(`${keyOf(definition.type, definition.version)} config is invalid: ${message}`, 'MEDIA_NODE_INVALID_CONFIG')
     }
   }
 
-  /** Reject use of a definition in node-creation surfaces. */
   assertCreatable(ref: MediaNodeDefinitionRef): MediaNodeDefinition {
     const definition = this.require(ref)
     if (definition.lifecycle.creatable) return definition
-    throw new MediaNodeRegistryError(
-      `media node definition ${keyOf(ref.type, ref.version)} is not creatable`,
-      'MEDIA_NODE_NOT_CREATABLE',
-    )
+    throw new MediaNodeRegistryError(`media node definition ${keyOf(ref.type, ref.version)} is not creatable`, 'MEDIA_NODE_NOT_CREATABLE')
   }
 
   /** Reject a node before execution when its intrinsic lifecycle forbids execution. */
   assertExecutable(node: MediaNodeLike): MediaNodeDefinition {
     const definition = this.resolveNode(node)
     if (definition === undefined) {
-      throw new MediaNodeRegistryError(
-        `media node definition ${keyOf(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)} is not registered`,
-        'MEDIA_NODE_UNKNOWN_DEFINITION',
-      )
+      throw new MediaNodeRegistryError(`media node definition ${keyOf(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)} is not registered`, 'MEDIA_NODE_UNKNOWN_DEFINITION')
     }
     if (!definition.lifecycle.executable) {
-      throw new MediaNodeRegistryError(
-        `media node definition ${keyOf(definition.type, definition.version)} is not executable`,
-        'MEDIA_NODE_NOT_EXECUTABLE',
-      )
+      throw new MediaNodeRegistryError(`media node definition ${keyOf(definition.type, definition.version)} is not executable`, 'MEDIA_NODE_NOT_EXECUTABLE')
     }
     return definition
   }
 
-  /**
-   * Subscribe on the caller plugin's effect lifetime.
-   * @param listener - synchronous registration/unregistration observer.
-   * @returns idempotent disposer.
-   */
+  /** Subscribe on the caller plugin's effect lifetime. */
   onChange(listener: (change: MediaNodeRegistryChange) => void): () => void {
     const disposeEffect = this.ctx.effect(() => {
       this.listeners.add(listener)
@@ -239,7 +174,7 @@ export class MediaNodeRegistry extends Service {
   }
 }
 
-function structuredCloneDefinition(definition: MediaNodeDefinition): MediaNodeDefinition {
+function stableDefinition(definition: MediaNodeDefinition): MediaNodeDefinition {
   return Object.freeze({
     ...definition,
     inputs: Object.freeze(definition.inputs.map(port => Object.freeze({ ...port }))),
@@ -248,13 +183,9 @@ function structuredCloneDefinition(definition: MediaNodeDefinition): MediaNodeDe
     execution: Object.freeze({ ...definition.execution }),
     lifecycle: Object.freeze({
       ...definition.lifecycle,
-      ...(definition.lifecycle.replacement === undefined
-        ? {}
-        : { replacement: Object.freeze({ ...definition.lifecycle.replacement }) }),
+      ...(definition.lifecycle.replacement === undefined ? {} : { replacement: Object.freeze({ ...definition.lifecycle.replacement }) }),
     }),
     ui: Object.freeze({ ...definition.ui }),
-    // Schemas carry functions/prototypes and must remain by reference; they are
-    // immutable metadata owned by the defining plugin rather than workflow data.
     configSchema: definition.configSchema,
   })
 }
