@@ -60,3 +60,25 @@ export interface ResolvedCanvasInteractionContext {
   /** Whether browser selection is older than, or no longer resolvable against, current Canvas state. */
   readonly stale: boolean
 }
+
+/** Browser request to stage one detached interaction snapshot against an ordinary prompt rpc id. */
+export interface StageCanvasInteractionRequest {
+  readonly rpcId: string
+  readonly context: CanvasInteractionContext
+}
+
+/** Successful process-local stage receipt. */
+export interface CanvasInteractionStageReceipt {
+  readonly staged: true
+  readonly expiresAt: number
+}
+
+/** Browser rollback request used only when the corresponding ordinary prompt was not admitted. */
+export interface DiscardCanvasInteractionRequest {
+  readonly rpcId: string
+}
+
+/** Idempotent rollback result. */
+export interface CanvasInteractionDiscardReceipt {
+  readonly discarded: boolean
+}
