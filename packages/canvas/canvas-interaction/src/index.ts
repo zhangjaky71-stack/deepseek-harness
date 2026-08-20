@@ -8,7 +8,7 @@
  * to the Session log beside the user prompt.
  */
 
-import { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   CanvasInteractionContextError,
@@ -133,10 +133,7 @@ export class CanvasInteractionService extends TypertRemoteService {
     }, 'canvas interaction correlation state')
   }
 
-  /**
-   * Stage a detached Browser snapshot against an rpc id that the ordinary
-   * prompt carrier has minted but not sent yet.
-   */
+  /** Stage a detached Browser snapshot against an rpc id minted immediately before prompt transport. */
   stage(agent: Agent, request: StageCanvasInteractionRequest): CanvasInteractionStageReceipt {
     const rpcId = this.assertRpcId(request.rpcId)
     const context = this.decode(request.context)
@@ -246,7 +243,7 @@ export class CanvasInteractionService extends TypertRemoteService {
     for (const event of agent.session.events) {
       if (event.type !== 'canvas/change') continue
       const change = decodeCanvasChange(event.data)
-      for (const asset of change.canvas?.output?.assets ?? []) {
+      for (const asset of change?.canvas?.output?.assets ?? []) {
         const key = assetKey(asset)
         const fingerprints = known.get(key) ?? new Set<string>()
         fingerprints.add(assetFingerprint(asset))
@@ -267,17 +264,17 @@ export class CanvasInteractionService extends TypertRemoteService {
   private bindInserted(agent: Agent, message: UserMessage): void {
     const rpcId = sourceRpcId(message)
     if (rpcId === undefined) return
-    const key = this.stageKey(agent, rpcId)
-    const entry = this.staged.get(key)
+    const stageKey = this.stageKey(agent, rpcId)
+    const entry = this.staged.get(stageKey)
     if (entry === undefined) return
     if (Date.now() >= entry.expiresAt) {
       clearTimeout(entry.timer)
-      this.staged.delete(key)
+      this.staged.delete(stageKey)
       return
     }
     clearTimeout(entry.timer)
-    this.staged.delete(key)
-    this.bound.set(String(message.id), {
+    this.staged.delete(stageKey)
+    this.bound.set(this.boundKey(agent, message), {
       agentId: String(agent.id),
       rpcId,
       context: entry.context,
@@ -286,9 +283,7 @@ export class CanvasInteractionService extends TypertRemoteService {
 
   /** A discarded inbox message can no longer consume its bound context. */
   private dropBound(agent: Agent, message: UserMessage): void {
-    const key = String(message.id)
-    const entry = this.bound.get(key)
-    if (entry?.agentId === String(agent.id)) this.bound.delete(key)
+    this.bound.delete(this.boundKey(agent, message))
   }
 
   private dropAgent(agent: Agent): void {
@@ -333,9 +328,9 @@ export class CanvasInteractionService extends TypertRemoteService {
     let changed = false
     const messages: UserMessage[] = []
     for (const message of decision.messages) {
-      const key = String(message.id)
+      const key = this.boundKey(agent, message)
       const bound = this.bound.get(key)
-      if (bound === undefined || bound.agentId !== String(agent.id)) {
+      if (bound === undefined) {
         messages.push(message)
         continue
       }
@@ -360,7 +355,7 @@ export class CanvasInteractionService extends TypertRemoteService {
     for (const message of claimed) this.dropBound(agent, message)
   }
 
-  /** Re-evaluate staleness at execution time, while never failing an admitted user prompt after later Canvas churn. */
+  /** Re-evaluate staleness at execution time without failing an admitted prompt after later Canvas churn. */
   private renderAtClaim(agent: Agent, context: CanvasInteractionContext): string {
     let resolved: ResolvedCanvasInteractionContext
     try {
@@ -378,6 +373,10 @@ export class CanvasInteractionService extends TypertRemoteService {
 
   private stageKey(agent: Agent, rpcId: string): string {
     return `${agent.id}\u0000${rpcId}`
+  }
+
+  private boundKey(agent: Agent, message: UserMessage): string {
+    return `${agent.id}\u0000${message.id}`
   }
 }
 
