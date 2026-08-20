@@ -36,23 +36,23 @@ type RemoteResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-/** Structural slice of the generated Canvas Remote used without importing the Remote assembly at runtime. */
+/** Structural slice of the generated Canvas interaction Remote. */
 interface CanvasInteractionRemote {
-  stageInteraction(
+  stage(
     sessionId: SessionId,
     request: StageCanvasInteractionRequest,
   ): Promise<RemoteResult<CanvasInteractionStageReceipt>>
-  discardInteraction(
+  discard(
     sessionId: SessionId,
     request: DiscardCanvasInteractionRequest,
   ): Promise<RemoteResult<CanvasInteractionDiscardReceipt>>
 }
 
 interface RemoteRoot {
-  readonly canvas: CanvasInteractionRemote
+  readonly canvasInteraction: CanvasInteractionRemote
 }
 
-/** Required services for the view itself; the prompt-context producer waits separately for `remote.canvas`. */
+/** Required services for the view itself; prompt-context production waits separately for the generated interaction Remote. */
 export const inject = ['slots', 'sessions', 'locale', 'conversation']
 
 /** Register the Canvas conversation tab and exact-turn prompt-context provider. */
@@ -62,11 +62,11 @@ export function apply(ctx: ClientContext): void {
   const modes = new CanvasModeStore()
   const interactions = new CanvasInteractionStore()
 
-  // Remote readiness is independent from the view: Canvas remains readable
-  // from Projection while the generated Remote contribution is mounting.
-  ctx.inject(['remote.canvas'], (remoteCtx) => {
+  // Remote readiness is independent from the view: Canvas stays readable
+  // from Projection while the generated interaction contribution is mounting.
+  ctx.inject(['remote.canvasInteraction'], (remoteCtx) => {
     const remote = remoteCtx.get('remote') as RemoteRoot | undefined
-    if (remote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvas injection')
+    if (remote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvasInteraction injection')
     remoteCtx.effect(() => remoteCtx.conversation.registerPromptPreparation('canvas-interaction', (sessionId) => {
       const binding = remoteCtx.sessions.binding(sessionId)
       if (binding === undefined) return undefined
@@ -79,13 +79,13 @@ export function apply(ctx: ClientContext): void {
       if (context === undefined) return undefined
       return {
         prepare: async (rpcId) => {
-          const result = await remote.canvas.stageInteraction(sessionId, { rpcId, context })
+          const result = await remote.canvasInteraction.stage(sessionId, { rpcId, context })
           if (!result.ok) {
             throw new Error(`canvas interaction stage failed: ${result.error.code}: ${result.error.message}`)
           }
         },
         discard: async (rpcId) => {
-          const result = await remote.canvas.discardInteraction(sessionId, { rpcId })
+          const result = await remote.canvasInteraction.discard(sessionId, { rpcId })
           if (!result.ok) {
             throw new Error(`canvas interaction discard failed: ${result.error.code}: ${result.error.message}`)
           }
