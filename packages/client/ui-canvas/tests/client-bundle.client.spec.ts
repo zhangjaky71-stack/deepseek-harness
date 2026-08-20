@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/** Built client artifact smoke: the Canvas bundle registers exactly one conversation view. */
+/** Built client artifact smoke: Host capabilities gate Canvas view registration. */
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -7,6 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import type { CanvasCapabilities } from '@deepseek-ai/dsh-canvas/client'
 
 const PLUGIN_ID = '@deepseek-ai/dsh-client-ui-canvas'
 interface Handoff { id: string; factory: (require: (spec: string) => unknown) => Record<string, unknown> }
@@ -17,6 +18,19 @@ function readBundle(): string | undefined {
     return readFileSync(resolve('packages/client/ui-canvas/lib/client.js'), 'utf8')
   } catch {
     return undefined
+  }
+}
+
+function capabilities(canvasEnabled: boolean): CanvasCapabilities {
+  return {
+    canvas: { enabled: canvasEnabled },
+    editor: { enabled: canvasEnabled },
+    history: { enabled: canvasEnabled },
+    video: { enabled: false },
+    variants: { enabled: false },
+    partialRun: { enabled: false },
+    regionEdit: { enabled: false },
+    providerFallback: { enabled: false },
   }
 }
 
@@ -48,15 +62,7 @@ describe('ui-canvas built client artifact', () => {
     return { handoff: handoff!, exports }
   }
 
-  it.skipIf(code === undefined)('hands off with the manifest id and expected service injection', async () => {
-    const { handoff, exports } = await loadArtifact()
-    expect(handoff.id).toBe(PLUGIN_ID)
-    expect(exports.apply).toBeTypeOf('function')
-    expect(exports.inject).toEqual(['slots', 'sessions', 'locale'])
-  })
-
-  it.skipIf(code === undefined)('registers only the Canvas view and withdraws it on disposal', async () => {
-    const { exports } = await loadArtifact()
+  async function composed(exports: Record<string, unknown>, canvasEnabled: boolean) {
     const ctx = new Context()
     const slots = new SlotRegistry(ctx)
     slots.register({
@@ -68,18 +74,42 @@ describe('ui-canvas built client artifact', () => {
     }, (_p: { renderSlot?: unknown }) => null)
     ctx.provide('sessions', { binding: () => ({ session: {} }) } as never)
     ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
-    ctx.provide('remote', { $on: () => () => {} } as never)
+    ctx.provide('conversation', { registerPromptPreparation: () => () => {} } as never)
+    ctx.provide('remote', {
+      canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }) },
+    } as never)
+    ctx.provide('remote.canvasFeatures', {} as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
     const locale = await import('@deepseek-ai/dsh-client-locale/client')
     ctx.plugin({ inject: [...locale.inject], apply: locale.apply })
-
     const beforeComposer = slots.entries('conversation.composer').length
     const fiber = ctx.plugin(exports as { apply: (ctx: Context) => void })
     await fiber.await()
-    expect(slots.entries('conversation.view').map(entry => entry.options.id)).toEqual(['canvas'])
-    expect(slots.entries('conversation.composer')).toHaveLength(beforeComposer)
-    await fiber.dispose()
-    expect(slots.entries('conversation.view')).toHaveLength(0)
+    await new Promise(resolveTick => setTimeout(resolveTick, 0))
+    return { ctx, slots, fiber, beforeComposer }
+  }
+
+  it.skipIf(code === undefined)('hands off with the manifest id and expected service injection', async () => {
+    const { handoff, exports } = await loadArtifact()
+    expect(handoff.id).toBe(PLUGIN_ID)
+    expect(exports.apply).toBeTypeOf('function')
+    expect(exports.inject).toEqual(['slots', 'sessions', 'locale', 'conversation'])
+  })
+
+  it.skipIf(code === undefined)('registers Canvas only when the Host deployment enables it', async () => {
+    const { exports } = await loadArtifact()
+    const enabled = await composed(exports, true)
+    expect(enabled.slots.entries('conversation.view').map(entry => entry.options.id)).toEqual(['canvas'])
+    expect(enabled.slots.entries('conversation.composer')).toHaveLength(enabled.beforeComposer)
+    await enabled.fiber.dispose()
+    expect(enabled.slots.entries('conversation.view')).toHaveLength(0)
+    await enabled.ctx.dispose()
+
+    const disabled = await composed(exports, false)
+    expect(disabled.slots.entries('conversation.view')).toHaveLength(0)
+    expect(disabled.slots.entries('conversation.composer')).toHaveLength(disabled.beforeComposer)
+    await disabled.fiber.dispose()
+    await disabled.ctx.dispose()
   })
 
   it.skipIf(code === undefined)('injects plugin-tagged CSS', async () => {
