@@ -128,6 +128,12 @@ describe('Canvas product state', () => {
     expect(deriveCanvasProductState(snapshot)).toBe('DIRTY_READY')
   })
 
+  it('derives RUNNING for a queued run', () => {
+    const snapshot: CanvasSnapshot = { ...fresh(), runRevision: 1, run: run('queued'), updatedAt: 110 }
+    assertCanvasSnapshot(snapshot)
+    expect(deriveCanvasProductState(snapshot)).toBe('RUNNING')
+  })
+
   it('keeps an old-revision run RUNNING while the current workflow is newer', () => {
     const snapshot: CanvasSnapshot = { ...fresh(), workflowRevision: 2, runRevision: 1, run: run('running', 1), updatedAt: 130 }
     assertCanvasSnapshot(snapshot)
@@ -140,10 +146,28 @@ describe('Canvas product state', () => {
     expect(deriveCanvasProductState(snapshot)).toBe('FAILED')
   })
 
+  it('derives CANCELLED for a current cancelled run', () => {
+    const snapshot: CanvasSnapshot = { ...fresh(), runRevision: 1, run: run('cancelled'), updatedAt: 120 }
+    assertCanvasSnapshot(snapshot)
+    expect(deriveCanvasProductState(snapshot)).toBe('CANCELLED')
+  })
+
+  it('derives INTERRUPTED for a current interrupted run', () => {
+    const snapshot: CanvasSnapshot = { ...fresh(), runRevision: 1, run: run('interrupted'), updatedAt: 120 }
+    assertCanvasSnapshot(snapshot)
+    expect(deriveCanvasProductState(snapshot)).toBe('INTERRUPTED')
+  })
+
   it('derives COMPLETED from a current completed run and output', () => {
     const snapshot: CanvasSnapshot = { ...fresh(), runRevision: 2, run: run('completed'), output: videoOutput(), updatedAt: 120 }
     assertCanvasSnapshot(snapshot)
     expect(deriveCanvasProductState(snapshot)).toBe('COMPLETED')
+  })
+
+  it('falls back to READY after an old-revision terminal run without a current output', () => {
+    const snapshot: CanvasSnapshot = { ...fresh(), workflowRevision: 2, runRevision: 1, run: run('failed', 1), updatedAt: 130 }
+    assertCanvasSnapshot(snapshot)
+    expect(deriveCanvasProductState(snapshot)).toBe('READY')
   })
 })
 
@@ -178,6 +202,30 @@ describe('Canvas revision and output invariants', () => {
 })
 
 describe('workflow and JSON invariants', () => {
+  it('accepts structurally valid open-world node identifiers without a built-in whitelist', () => {
+    const customNodeId = WorkflowNodeId('custom-1')
+    const custom = createMediaWorkflow({
+      id: MediaWorkflowId('workflow-custom'),
+      name: 'Plugin workflow',
+      nodes: [{
+        id: customNodeId,
+        type: 'plugin.example.custom-transform',
+        nodeVersion: 7,
+        config: { strength: 0.5 },
+      }],
+      outputNodeIds: [customNodeId],
+    })
+    expect(custom.nodes[0]?.type).toBe('plugin.example.custom-transform')
+  })
+
+  it('rejects an empty node type identifier', () => {
+    expectCanvasError(() => createMediaWorkflow({
+      id: MediaWorkflowId('workflow-empty-type'),
+      name: 'invalid',
+      nodes: [{ id: WorkflowNodeId('node-empty-type'), type: '', config: {} }],
+    }), 'CANVAS_INVALID_WORKFLOW')
+  })
+
   it('rejects duplicate node ids', () => {
     expectCanvasError(() => createMediaWorkflow({
       id: ids.workflow,

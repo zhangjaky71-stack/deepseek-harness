@@ -20,7 +20,6 @@ import type {
   MediaWorkflowEdge,
   MediaWorkflowId as MediaWorkflowIdType,
   MediaWorkflowNode,
-  MediaWorkflowNodeType,
   VideoAssetId as VideoAssetIdType,
   VideoAssetRef,
   WorkflowEdgeId as WorkflowEdgeIdType,
@@ -32,9 +31,6 @@ export const CANVAS_SCHEMA_VERSION = 1
 /** Current semantic media-workflow schema version. */
 export const MEDIA_WORKFLOW_SCHEMA_VERSION = 1
 
-const NODE_TYPES: ReadonlySet<MediaWorkflowNodeType> = new Set([
-  'asset.input', 'prompt', 'image.generate', 'image.edit', 'video.generate', 'video.image-to-video', 'output',
-])
 const RUN_STATUSES: ReadonlySet<CanvasRunStatus> = new Set([
   'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted',
 ])
@@ -200,7 +196,8 @@ export function assertCanvasJsonValue(value: unknown, path = 'value'): asserts v
 
 /**
  * Assert scalar and relational invariants owned by the semantic workflow value.
- * @param workflow - semantic workflow to validate.
+ * Node-type availability, version support, config schema, and port compatibility belong to N10/N12 registries.
+ * @param workflow - semantic workflow to validate structurally.
  */
 export function assertMediaWorkflow(workflow: MediaWorkflow): void {
   if (workflow.schemaVersion !== MEDIA_WORKFLOW_SCHEMA_VERSION) fail('CANVAS_INVALID_WORKFLOW', `workflow.schemaVersion must be ${MEDIA_WORKFLOW_SCHEMA_VERSION}`)
@@ -261,7 +258,7 @@ export function assertCanvasSnapshot(snapshot: CanvasSnapshot): void {
 
 function assertWorkflowNode(node: MediaWorkflowNode): void {
   assertId(node.id, 'workflow.nodes[].id')
-  if (!NODE_TYPES.has(node.type)) fail('CANVAS_INVALID_WORKFLOW', `unsupported workflow node type ${String(node.type)}`)
+  assertNonEmptyString(node.type, 'workflow.nodes[].type', 'CANVAS_INVALID_WORKFLOW')
   if (node.nodeVersion !== undefined) assertPositiveSafeInteger(node.nodeVersion, 'workflow.nodes[].nodeVersion', 'CANVAS_INVALID_WORKFLOW')
   if (node.name !== undefined && typeof node.name !== 'string') fail('CANVAS_INVALID_WORKFLOW', 'workflow node name must be a string')
   assertCanvasJsonValue(node.config, `workflow.nodes[${node.id}].config`)
