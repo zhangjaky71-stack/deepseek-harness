@@ -30,6 +30,9 @@
       "path": "../../canvas/canvas"
     },
     {
+      "path": "../../canvas/canvas-interaction"
+    },
+    {
       "path": "../../goal/goal"
     },
     {
