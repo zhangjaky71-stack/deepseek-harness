@@ -1,123 +1,101 @@
-# N11 — Workflow Editor、Draft、Auto-save、Undo/Redo、Copy/Paste 与 Layout
-
-> 项目：`zhangjaky71-stack/deepseek-harness`  
-> 基线：Canvas / Media Workflow V2.1 Production Hardening  
-> 文档性质：工程实施节点文档  
-> 使用方式：后续可以直接引用节点编号进行“实施 / Code Review / 验收 / 修复”。  
-> 总原则：具体 TypeScript API 签名以实施时仓库当前源码为准；职责边界、状态不变量和验收条件以本节点文档为准。
+# N11 — Workflow Editor、Draft、Auto-save、Undo/Redo、Copy/Paste 与 Layout（rc.8 Revision）
 
 ## 1. 节点目标
 
-完成真正可用的人工 Workflow 编辑器，并保证编辑动作最终以 atomic semantic operations 进入 CanvasService。
+完成真正可用的人工 Workflow 编辑器，并保证所有 semantic edits 最终以 atomic operations 进入 CanvasService；Editor 同时必须消费 Host authoritative Node Catalog，支持 open-world plugin nodes。
 
 ## 2. 前置依赖
 
 `N06, N07, N10`
 
-依赖节点未验收时，不应把本节点公开 API 视为稳定。
-
 ## 3. 本节点范围
 
-- XYFlow/React Flow adapter。
+- renderer-neutral graph adapter / XYFlow seam。
 - NodeLibrary、Inspector、ValidationPanel、MediaStage。
-- Local Draft。
-- debounce/blur 提交。
-- SaveStatus。
+- Local Draft、debounce/blur、SaveStatus。
 - Undo/Redo command stack。
 - Copy/Paste/Select All/Delete。
-- drag-end layout persistence。
+- node drag layout persistence。
+- port-level connect/disconnect authoring。
+- Host Node Catalog client projection。
 
 ## 4. 明确不在本节点处理
 
-- 不越级实现尚未到达的后续 Provider/UI/治理能力，除非为编译所需的最小 seam。
-- 不改变 V2.1 已冻结的核心不变量。
-- 不通过临时 Browser state、直接 Provider 调用或 Session 私有 hack 绕过前置架构。
+- 不把 graph-library JSON 保存进 Domain。
+- 不在 Browser 维护长期 Workflow authority。
+- 不由 current workflow 猜“可创建节点全集”。
+- 不静态复制 Host MediaNodeRegistry。
 
 ## 5. 预计代码位置
 
-- `packages/client/ui-canvas/src/client/WorkflowEditor.tsx`
-- `NodeLibrary.tsx`
-- `NodeInspector.tsx`
-- `ValidationPanel.tsx`
-- `draft.ts`
-- `adapters.ts`
-- `store.ts`
-
-实际开始实施时必须再次读取目标目录附近的 `AGENTS.md`，代码位置可依仓库当前结构小幅调整。
+- `packages/client/ui-canvas/**`
+- client-safe node catalog service/remote
 
 ## 6. 核心接口 / 行为契约
 
-硬边界：
-
 ```text
-ReactFlow Node/Edge
-  ↕ adapter
+Graph Renderer Node/Edge
+       ↕ adapter
 MediaWorkflow Node/Edge
+       ↕ operations
+CanvasService
 ```
 
-不能把 React Flow JSON 保存进 Domain。
+Undo/Redo 是新的合法 mutation，不改历史 Event。
 
-Undo/Redo 是“新的合法 mutation”，不是修改历史 Event。
+Node Library：
+
+```text
+Host MediaNodeRegistry
+  → client-safe catalog
+  → NodeLibrary/Inspector
+```
 
 ## 7. 实施步骤
 
-1. 实现 workflowToFlow 和 flowEventToOperations。
-2. Inspector 使用 local Draft；提交前读取最新 workflowRevision。
-3. operations[] 以一个 Remote transaction 提交。
-4. 实现 Saved/Saving/Conflict/Offline/Save failed。
-5. Ctrl/Cmd+Z/Shift+Z、Delete、Copy/Paste、Select All。
+1. workflowToGraph / graphEventToOperations。
+2. Inspector local Draft + latest workflowRevision CAS。
+3. operations[] 单 Remote transaction。
+4. Saved/Saving/Conflict/Offline/Save failed。
+5. Undo/Redo/Delete/Copy/Paste/Select All。
 6. Paste 生成新 NodeId/EdgeId。
-7. drag 只 local；drag-end saveLayout。
-8. stale V1 行为：提示并刷新 authoritative state，不 silent overwrite。
+7. drag local，drag-end `saveLayout`，不改 workflowRevision。
+8. port-level connect/disconnect 转 semantic edge operations。
+9. Node Library 改为 Host catalog 驱动。
+10. unavailable custom node 仍显示 placeholder/Inspector read-only diagnostics。
 
-## 8. 工程约束
+## 8. rc.8 Compatibility
 
-- 所有 durable state 只在 commit point 发布。
-- 产品可见 plugin 必须有符合仓库要求的 REAL composition coverage。
-- package 行为变化同步更新 README/JSDoc。
-- `src/types.ts` 保持 types-only；测试放 package-level `tests/`。
-- 新增 package 必须提供 `./invariant` 并正确接 aggregate/build 配置。
-- Registry/listener/subscription 必须证明 disposal/HMR 安全。
+- store/slot/listener 必须是 client plugin lifecycle safe。
+- Browser metadata 不从 Host-only registry package 运行时代码静态 import。
+- `render-service`/`ui-layout` 不持有 editor draft。
 
 ## 9. 测试要求
 
-- [ ] 输入每个字符不会产生 Session revision。
-- [ ] blur/debounce 产生一次合法 edit。
-- [ ] 复制多节点/边 atomic。
+- [ ] 每字符输入不产生 Session revision。
+- [ ] blur/debounce 一次合法 edit。
+- [ ] copy/paste/delete atomic。
 - [ ] Undo 后产生新 revision。
-- [ ] layout 拖动不改 workflowRevision。
-- [ ] 网络失败显示 Save failed，不假装 Saved。
+- [ ] layout 不改 workflowRevision。
+- [ ] port connect/disconnect 可保存并刷新恢复。
+- [ ] network failure 不假装 Saved。
+- [ ] custom plugin node 出现在 Node Library。
+- [ ] provider/definition unavailable 的历史 node 仍可显示。
 
 ## 10. 验收标准
 
 - [ ] 人工可完成基本 DAG 编辑。
-- [ ] 刷新后 semantic state + layout 恢复。
-- [ ] 任何 UI edit 都能映射成 Domain operations。
+- [ ] semantic state + layout 刷新恢复。
+- [ ] UI edit 全部映射 Domain operations。
+- [ ] Node Library 不维护第二份 Host registry。
 
 ## 11. Definition of Done
 
-- [ ] 代码通过 typecheck/lint/build（按仓库对应命令）。
-- [ ] 本节点单元测试通过。
-- [ ] 必要 integration / REAL composition 测试通过。
-- [ ] README/JSDoc 与公开行为一致。
-- [ ] 没有未说明的架构偏差。
-- [ ] 提交/PR 描述包含测试证据与剩余限制。
+- [ ] focused unit tests。
+- [ ] typecheck/lint/build。
+- [ ] REAL composition/editor smoke test。
+- [ ] 当前已知 N11 draft blockers 清零或明确 follow-up。
 
 ## 12. 风险与禁止项
 
-- 在 UI store 保留长期 Workflow 副本；只能有 Draft/呈现态。
-
-## 13. 验收时应输出的结果
-
-后续如果用户要求“验收本节点”，应至少输出：
-
-1. 实际修改文件清单。
-2. 关键接口与设计是否符合本节点契约。
-3. 测试命令与结果。
-4. REAL composition/E2E 证据（如适用）。
-5. 未解决问题及严重度。
-6. `ACCEPTED / ACCEPTED WITH FOLLOW-UP / REJECTED` 结论。
-
-## 14. 实施指令示例
-
-后续可以直接说：`实施 N11`、`检查 N11`、`验收 N11` 或 `修复 N11 验收问题`。
+禁止在 UI store 保留长期 Workflow 副本；只允许 Draft/presentation state。

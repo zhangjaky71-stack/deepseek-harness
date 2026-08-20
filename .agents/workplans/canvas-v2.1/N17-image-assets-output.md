@@ -1,119 +1,78 @@
-# N17 — 图片资产、Attachment、多候选结果与 Primary Output
-
-> 项目：`zhangjaky71-stack/deepseek-harness`  
-> 基线：Canvas / Media Workflow V2.1 Production Hardening  
-> 文档性质：工程实施节点文档  
-> 使用方式：后续可以直接引用节点编号进行“实施 / Code Review / 验收 / 修复”。  
-> 总原则：具体 TypeScript API 签名以实施时仓库当前源码为准；职责边界、状态不变量和验收条件以本节点文档为准。
+# N17 — 图片资产、Harness Attachment、多候选结果与 Primary Output（rc.8 Revision）
 
 ## 1. 节点目标
 
-完成图片生成结果的 durable 存储、多个候选、Primary 选择和 Minimal 展示基础。
+利用 Harness durable attachment/asset 能力完成图片输入和生成结果的持久化、多候选、Primary 选择与 Minimal 展示，同时与 rc.8 动态 `ui-attachment` presentation ownership 对齐。
 
 ## 2. 前置依赖
 
 `N16`
 
-依赖节点未验收时，不应把本节点公开 API 视为稳定。
-
 ## 3. 本节点范围
 
-- 复用 `ctx.attachments.saveImage`。
-- CanvasAssetRef image。
-- CanvasOutput assets[]/primaryAssetIndex。
+- Harness attachment store/image save seam。
+- CanvasImageAssetRef / AttachmentRef normalization。
+- CanvasOutput assets[] / primaryAssetIndex。
 - count 多候选。
 - provenance/metadata。
-- 图片授权读取。
+- authorized image read。
+- user message image attachment → Canvas input asset linking seam。
 
 ## 4. 明确不在本节点处理
 
-- 不越级实现尚未到达的后续 Provider/UI/治理能力，除非为编译所需的最小 seam。
-- 不改变 V2.1 已冻结的核心不变量。
-- 不通过临时 Browser state、直接 Provider 调用或 Session 私有 hack 绕过前置架构。
+- Session/Workflow 不保存 base64/bytes/object URL/provider temp URL。
+- Canvas 不建立第二套 image upload store。
+- `ui-canvas` 不复制 `ui-attachment` 组件 ownership。
 
-## 5. 预计代码位置
+## 5. 核心契约
 
-- `packages/canvas/canvas/**`
-- `packages/client/ui-canvas/src/client/MediaStage.tsx`
-- `现有 attachment integration`
-
-实际开始实施时必须再次读取目标目录附近的 `AGENTS.md`，代码位置可依仓库当前结构小幅调整。
-
-## 6. 核心接口 / 行为契约
-
-Session 只保存：
+Session/Workflow 只保存稳定引用和 provenance：
 
 ```text
-ImageAttachmentRef
-metadata/provenance
+asset/attachment id
+mime/type
+safe metadata
+run/workflow/node/model/provider provenance
 ```
 
-不保存：
+Binary 先 durable save，成功后才能 commit Run completed/output linked。
+
+## 6. rc.8 Attachment Ownership
 
 ```text
-base64
-bytes
-object URL
-provider temp URL
+Harness Attachment Store      = binary authority
+ui-conversation               = message/composer data owner
+ui-attachment                 = attachment presentation owner
+Canvas AssetRef               = Workflow/Run semantic reference
+ui-canvas MediaStage          = Canvas-specific output composition
 ```
+
+Canvas 可以显示 asset，但不得把 attachment presentation 重新静态复制进 conversation shell。
 
 ## 7. 实施步骤
 
-1. Node result bytes 先 durable save，再 Canvas complete commit。
-2. 支持 image.generate count。
-3. 保存每个 candidate ref。
-4. 实现 selectOutput/primary index mutation，不重新调用 Provider。
-5. Minimal 支持 gallery/primary。
-6. 复用现有 authorized image loader。
-7. 记录 run/workflowRevision/node/model/provider provenance。
+1. Provider/Executor result bytes 先 durable save。
+2. 生成稳定 AssetRef/AttachmentRef。
+3. count candidates 全部保存。
+4. `selectOutput` 只改 primary，不重新 Provider run。
+5. Minimal gallery/primary。
+6. authorized image loader。
+7. 用户附件作为 image node input 时只传 ref/content fingerprint。
+8. 记录 provenance。
 
-## 8. 工程约束
+## 8. 测试要求
 
-- 所有 durable state 只在 commit point 发布。
-- 产品可见 plugin 必须有符合仓库要求的 REAL composition coverage。
-- package 行为变化同步更新 README/JSDoc。
-- `src/types.ts` 保持 types-only；测试放 package-level `tests/`。
-- 新增 package 必须提供 `./invariant` 并正确接 aggregate/build 配置。
-- Registry/listener/subscription 必须证明 disposal/HMR 安全。
+- [ ] 4 candidates 全 durable。
+- [ ] primary 切换不生成新图。
+- [ ] 刷新恢复。
+- [ ] save failure 时 Run 不 commit completed。
+- [ ] Session event 无 binary/base64。
+- [ ] composer image 可通过 ref 成为 Canvas input。
+- [ ] ui-attachment plugin 缺失不会损坏 durable asset。
 
-## 9. 测试要求
+## 9. 验收标准
 
-- [ ] 4 candidates 全部 durable。
-- [ ] primary index 切换不生成新图。
-- [ ] 刷新后图片恢复。
-- [ ] Attachment 保存失败时 Run 不 commit completed。
-- [ ] Session event 中无 binary/base64。
-
-## 10. 验收标准
-
-- [ ] 文生图 Mock E2E 可在 Minimal 显示。
-- [ ] 多候选和 primary 语义稳定。
-- [ ] 资产与 Workflow 有可追溯关系。
-
-## 11. Definition of Done
-
-- [ ] 代码通过 typecheck/lint/build（按仓库对应命令）。
-- [ ] 本节点单元测试通过。
-- [ ] 必要 integration / REAL composition 测试通过。
-- [ ] README/JSDoc 与公开行为一致。
-- [ ] 没有未说明的架构偏差。
-- [ ] 提交/PR 描述包含测试证据与剩余限制。
-
-## 12. 风险与禁止项
-
-- Provider 成功但 Session commit 失败产生 orphan；由 N24 GC 处理。
-
-## 13. 验收时应输出的结果
-
-后续如果用户要求“验收本节点”，应至少输出：
-
-1. 实际修改文件清单。
-2. 关键接口与设计是否符合本节点契约。
-3. 测试命令与结果。
-4. REAL composition/E2E 证据（如适用）。
-5. 未解决问题及严重度。
-6. `ACCEPTED / ACCEPTED WITH FOLLOW-UP / REJECTED` 结论。
-
-## 14. 实施指令示例
-
-后续可以直接说：`实施 N17`、`检查 N17`、`验收 N17` 或 `修复 N17 验收问题`。
+- [ ] Mock 文生图 Minimal 可显示。
+- [ ] 多候选/primary 语义稳定。
+- [ ] Asset 与 Workflow/Run 可追溯。
+- [ ] 与 Harness attachment store 共用同一 binary authority。

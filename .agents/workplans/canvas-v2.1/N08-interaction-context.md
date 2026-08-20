@@ -1,20 +1,12 @@
-# N08 — Canvas Interaction Context 与自然语言指代
-
-> 项目：`zhangjaky71-stack/deepseek-harness`  
-> 基线：Canvas / Media Workflow V2.1 Production Hardening  
-> 文档性质：工程实施节点文档  
-> 使用方式：后续可以直接引用节点编号进行“实施 / Code Review / 验收 / 修复”。  
-> 总原则：具体 TypeScript API 签名以实施时仓库当前源码为准；职责边界、状态不变量和验收条件以本节点文档为准。
+# N08 — Canvas Interaction Context 与自然语言指代（rc.8 Revision）
 
 ## 1. 节点目标
 
-让 Agent 能正确理解用户在 Canvas 上选中的节点、边、资产、输出或区域，从而支持“这个 / 这张 / 这里 / 这一段”。
+让 Agent 在发送当前用户 turn 时获得准确的 Canvas selection/focus 快照，从而理解“这个 / 这张 / 这里 / 这一段”，并与 rc.8 Session/Client plugin 生命周期兼容。
 
 ## 2. 前置依赖
 
 `N07`
-
-依赖节点未验收时，不应把本节点公开 API 视为稳定。
 
 ## 3. 本节点范围
 
@@ -22,89 +14,65 @@
 - selectedNodeIds / selectedEdgeIds / selectedAssets。
 - focusedOutput。
 - CanvasRegionSelection seam。
-- 用户发起下一次 Agent turn 时采样 UI context。
+- workflowRevision。
+- session-scoped context builder。
+- 用户发起 Agent turn 时的一次性采样。
 
 ## 4. 明确不在本节点处理
 
-- 不越级实现尚未到达的后续 Provider/UI/治理能力，除非为编译所需的最小 seam。
-- 不改变 V2.1 已冻结的核心不变量。
-- 不通过临时 Browser state、直接 Provider 调用或 Session 私有 hack 绕过前置架构。
+- Interaction Context 不写入 Workflow。
+- 不把 selection 作为 durable Session event。
+- 不解析 Agent 输出文本来猜 Canvas selection。
 
 ## 5. 预计代码位置
 
-- `packages/client/ui-canvas/src/client/store.ts`
-- `packages/client/ui-canvas/src/client/interaction.ts（建议）`
-- `Agent request/context 现有扩展点对应文件`
+- `packages/client/ui-canvas/**`
+- Harness 当前 prompt/request context extension seam
 
-实际开始实施时必须再次读取目标目录附近的 `AGENTS.md`，代码位置可依仓库当前结构小幅调整。
-
-## 6. 核心接口 / 行为契约
-
-Interaction Context：
+## 6. 核心契约
 
 ```text
-不是 durable Workflow state
-不是长期 Projection
-是发送当前用户消息时的一次性上下文快照
+Interaction Context
+= 当前 turn 的 transient UI snapshot
+≠ durable Workflow state
+≠ Session Projection
 ```
 
-必须带 workflowRevision，便于 Agent 判断上下文是否已经过期。
+必须携带 `workflowRevision`。Agent 如果发现 revision 已过期，应先 `canvas_read/inspect`。
+
+rc.8 下现有 `canvas/change` 仍是 durable Canvas Session event；Interaction Context 与它是两个不同层级，不得合并。
 
 ## 7. 实施步骤
 
-1. 定义 Interaction Context DTO。
-2. Editor selection 写入 UI-local store。
-3. Minimal focused output/selected candidate 写入同一 context builder。
-4. 发送 user message 时把 context 放入现有 Agent request/context seam。
-5. Agent tool instructions 明确代词优先解释 selection。
-6. 如果 selection 指向过时 revision，Agent 应 `canvas_read` 后再行动。
+1. 定义 DTO。
+2. Editor/Minimal 把 selection/focused output 写入同一 session-scoped presentation store。
+3. 发送 user message 时通过官方当前 request/context seam 注入。
+4. Agent instructions 明确代词优先解释 selection。
+5. session switch/dispose 清空 presentation context。
+6. stale revision 触发重新 read，而不是 silent edit。
 
-## 8. 工程约束
+## 8. 测试要求
 
-- 所有 durable state 只在 commit point 发布。
-- 产品可见 plugin 必须有符合仓库要求的 REAL composition coverage。
-- package 行为变化同步更新 README/JSDoc。
-- `src/types.ts` 保持 types-only；测试放 package-level `tests/`。
-- 新增 package 必须提供 `./invariant` 并正确接 aggregate/build 配置。
-- Registry/listener/subscription 必须证明 disposal/HMR 安全。
+- [ ] node A + “修改这个”指向 A。
+- [ ] 第 3 张 output + “用这张做视频”指向正确 AssetRef。
+- [ ] 无 selection 时不虚构 target。
+- [ ] session 切换不泄漏上一 session selection。
+- [ ] plugin dispose/reload 不复用 stale context。
+- [ ] context 不产生 `canvas/change`。
 
-## 9. 测试要求
+## 9. 验收标准
 
-- [ ] 选择 node A 后“修改这个”能把 A 传给 Agent。
-- [ ] 选择第 3 张 output 后“用这张做视频”能解析正确 asset。
-- [ ] 没有 selection 时不虚构 target。
-- [ ] 切换 session 不泄漏上一 session selection。
+- [ ] 自然语言指代与 Canvas 当前选择打通。
+- [ ] 不污染 Session Domain。
+- [ ] 跨 session/revision 安全。
+- [ ] 不依赖 rc.7 Web shell 私有 send path。
 
-## 10. 验收标准
+## 10. Definition of Done
 
-- [ ] 自然语言指代和 Canvas 当前选择打通。
-- [ ] Interaction Context 不污染 Session Domain。
-- [ ] 上下文跨 session 隔离。
+- [ ] typecheck/lint/build。
+- [ ] request-context integration test。
+- [ ] session isolation/disposal test。
 
-## 11. Definition of Done
+## 11. 风险与禁止项
 
-- [ ] 代码通过 typecheck/lint/build（按仓库对应命令）。
-- [ ] 本节点单元测试通过。
-- [ ] 必要 integration / REAL composition 测试通过。
-- [ ] README/JSDoc 与公开行为一致。
-- [ ] 没有未说明的架构偏差。
-- [ ] 提交/PR 描述包含测试证据与剩余限制。
-
-## 12. 风险与禁止项
-
-- 把 UI selection 持久化到 Workflow；禁止。
-
-## 13. 验收时应输出的结果
-
-后续如果用户要求“验收本节点”，应至少输出：
-
-1. 实际修改文件清单。
-2. 关键接口与设计是否符合本节点契约。
-3. 测试命令与结果。
-4. REAL composition/E2E 证据（如适用）。
-5. 未解决问题及严重度。
-6. `ACCEPTED / ACCEPTED WITH FOLLOW-UP / REJECTED` 结论。
-
-## 14. 实施指令示例
-
-后续可以直接说：`实施 N08`、`检查 N08`、`验收 N08` 或 `修复 N08 验收问题`。
+禁止把 UI selection 持久化到 Workflow/Session 以图省事。

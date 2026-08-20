@@ -1,112 +1,108 @@
-# N07 — Canvas UI Shell、Minimal/Editor 与产品状态机
+# N07 — Canvas UI Shell、Minimal/Editor 与产品状态机（rc.8 Revision）
 
-> 项目：`zhangjaky71-stack/deepseek-harness`  
-> 基线：Canvas / Media Workflow V2.1 Production Hardening  
-> 文档性质：工程实施节点文档  
-> 使用方式：后续可以直接引用节点编号进行“实施 / Code Review / 验收 / 修复”。  
-> 总原则：具体 TypeScript API 签名以实施时仓库当前源码为准；职责边界、状态不变量和验收条件以本节点文档为准。
+> 当前执行基线：Canvas V2.2 / Harness rc.8 Compatibility Revision
 
 ## 1. 节点目标
 
-把 Canvas 作为 `conversation.view` 接入 Web，会话 Composer 保持可用，并用统一产品状态机驱动 Minimal/Editor 行为。
+把 Canvas 作为正式 dynamic client plugin 通过 Harness UI composition seam 接入 Web；保持会话 Composer 可用，并让 Minimal/Editor 只控制 Canvas presentation，而不侵入 `render-service` root ownership 或 `ui-layout` business ownership。
 
 ## 2. 前置依赖
 
 `N05, N06`
 
-依赖节点未验收时，不应把本节点公开 API 视为稳定。
-
 ## 3. 本节点范围
 
-- `ui-canvas` package。
+- `ui-canvas` client plugin。
 - `conversation.view` slot。
 - CanvasView / MinimalCanvas / WorkflowEditor shell。
 - EMPTY/READY/DIRTY_READY/RUNNING/COMPLETED/FAILED/CANCELLED/INTERRUPTED UI。
+- session-scoped CanvasViewState。
 - SaveStatus skeleton 与移动端策略。
+- plugin activation/dispose/HMR contract。
 
 ## 4. 明确不在本节点处理
 
-- 不越级实现尚未到达的后续 Provider/UI/治理能力，除非为编译所需的最小 seam。
-- 不改变 V2.1 已冻结的核心不变量。
-- 不通过临时 Browser state、直接 Provider 调用或 Session 私有 hack 绕过前置架构。
+- 不让 `AppFrame`/`ui-layout` 持有 Workflow/Run/selection state。
+- 不修改 `render-service` 私有 React mount 来接 Canvas。
+- 不创建第二个 Canvas Chat/Composer。
+- 不直接调用 Provider。
 
 ## 5. 预计代码位置
 
 - `packages/client/ui-canvas/**`
-- `packages/bundle/web-app/cordis.patch.yml`
-
-实际开始实施时必须再次读取目标目录附近的 `AGENTS.md`，代码位置可依仓库当前结构小幅调整。
+- 必要的 bundle/client roster registration
+- `packages/client/ui-layout/**` 仅限最小 region/layout seam
 
 ## 6. 核心接口 / 行为契约
 
-模式：
-
 ```text
-Minimal / Editor
-=
-UI-local preference
+render-service = React root owner
+ui-layout      = layout owner
+ui-conversation= composer/chat owner
+ui-canvas      = Canvas UI owner
 ```
 
-不会产生 Canvas workflow mutation。
+Minimal/Editor：
 
-Composer 继续属于 Conversation Shell，不创建第二个 Canvas Chat。
+```text
+UI-local/session-scoped CanvasViewState
+≠ Workflow mutation
+```
+
+Minimal 与 Editor 必须读取同一 Session Projection/Run/Asset authority。
 
 ## 7. 实施步骤
 
-1. 按 ui-trajectory 模式注册 `conversation.view`。
-2. 按 ui-goal 模式从 session binding/projection 读取 `canvas`。
-3. 实现 Minimal / Editor mode store。
-4. 根据产品状态机控制 Run/Cancel/Retry/结果显示。
-5. 加入 SaveStatus 占位，为 N11 Draft/Autosave 接入。
-6. 窄屏默认 Minimal；Editor 可以全屏/简化进入。
+1. 通过 Harness 当前 client plugin graph 注册 `ui-canvas`。
+2. 继续使用 `conversation.view` 作为 Canvas composition seam。
+3. mode/selection/draft 等 presentation state 放 Canvas store。
+4. 根据 Domain derive function 驱动产品状态，不在 UI 拼第二套状态机。
+5. 三栏布局保留，但 layout 只决定区域，不决定 Canvas 数据。
+6. 为 N11 Draft/Autosave 预留 SaveStatus。
+7. 窄屏默认 Minimal，Editor 可全屏/简化进入。
+8. dispose 时移除 slot/listener/subscription/timer。
 
-## 8. 工程约束
+## 8. rc.8 Compatibility
 
-- 所有 durable state 只在 commit point 发布。
-- 产品可见 plugin 必须有符合仓库要求的 REAL composition coverage。
-- package 行为变化同步更新 README/JSDoc。
-- `src/types.ts` 保持 types-only；测试放 package-level `tests/`。
-- 新增 package 必须提供 `./invariant` 并正确接 aggregate/build 配置。
-- Registry/listener/subscription 必须证明 disposal/HMR 安全。
+- Web boot 只负责启动；不能假设 shell 持有 React AppRoot。
+- `render-service` failure/boot page 必须保持官方行为。
+- ui-theme/ui-attachment 等动态插件缺失时 Canvas 应按能力降级，不应破坏基本 Harness boot。
 
 ## 9. 测试要求
 
-- [ ] Canvas tab 可见。
-- [ ] 切模式不产生 Session Event。
-- [ ] RUNNING 只显示 Cancel，不允许重复 Run。
-- [ ] DIRTY_READY 保留旧结果并提示工作流未运行修改。
+- [ ] Canvas view 可见。
 - [ ] Composer 在 Canvas view 下仍存在。
+- [ ] 切模式不产生 Session Event/Workflow revision。
+- [ ] RUNNING 不允许重复 Run。
+- [ ] DIRTY_READY 保留旧结果并提示未运行修改。
+- [ ] ui-canvas activation/dispose/re-activation 无重复 slot/listener。
+- [ ] render-service assembled boot 下 Canvas 可挂载。
+- [ ] 三栏布局/Conversation details overlay 不退化。
 
 ## 10. 验收标准
 
 - [ ] UI 不维护第二份 authoritative Canvas。
 - [ ] Minimal/Editor 显示同一 Projection。
+- [ ] Canvas 不依赖修改 Web shell/react root owner。
 - [ ] 所有产品状态有明确 UI。
 
 ## 11. Definition of Done
 
-- [ ] 代码通过 typecheck/lint/build（按仓库对应命令）。
-- [ ] 本节点单元测试通过。
-- [ ] 必要 integration / REAL composition 测试通过。
-- [ ] README/JSDoc 与公开行为一致。
-- [ ] 没有未说明的架构偏差。
-- [ ] 提交/PR 描述包含测试证据与剩余限制。
+- [ ] typecheck/lint/build。
+- [ ] unit/integration/REAL composition 有真实结果。
+- [ ] README/JSDoc 更新。
+- [ ] HMR/disposal 有测试证据。
 
 ## 12. 风险与禁止项
 
-- UI 自己拼业务状态；优先复用 N01 derive function 或同构规则。
+- UI 自己拼业务状态。
+- Canvas mode 写入 Workflow。
+- 把 iframe URL 当 Canvas Domain API。
 
-## 13. 验收时应输出的结果
+## 13. 验收输出
 
-后续如果用户要求“验收本节点”，应至少输出：
-
-1. 实际修改文件清单。
-2. 关键接口与设计是否符合本节点契约。
-3. 测试命令与结果。
-4. REAL composition/E2E 证据（如适用）。
-5. 未解决问题及严重度。
-6. `ACCEPTED / ACCEPTED WITH FOLLOW-UP / REJECTED` 结论。
+文件清单、ownership 检查、测试证据、REAL composition、已知限制、结论。
 
 ## 14. 实施指令示例
 
-后续可以直接说：`实施 N07`、`检查 N07`、`验收 N07` 或 `修复 N07 验收问题`。
+`实施 N07`、`按 rc.8 复查 N07`。
