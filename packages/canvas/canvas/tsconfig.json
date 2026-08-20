@@ -9,6 +9,7 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
     { "path": "../../core/agent" },
     { "path": "../../core/session" },
     { "path": "../../llm/llm" },
