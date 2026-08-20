@@ -2,15 +2,25 @@
 
 [English](README.md) | 中文
 
-基于 Session-native Canvas Domain 的 Browser-only Canvas Conversation View。该插件只注册一个名为 `canvas` 的 `conversation.view`；它不拥有 Conversation Session、Composer、Canvas durability 或 Provider execution。当前 Canvas 与 Editor Layout 状态只来自标准 Session Projection hook（`canvas` / `canvasLayout`）。
+基于 Session-native Canvas Domain 的 Browser-only Canvas Conversation View。该插件不拥有 Conversation Session、Composer、Canvas durability、部署 Capability Policy 或 Provider execution。当前 Canvas 与 Editor Layout 状态只来自标准 Session Projection hook（`canvas` / `canvasLayout`），部署能力则来自 Host 只读 `canvasFeatures` Remote。
 
 ## Surface 契约
 
-View 在同一个 projected Canvas 上提供两种 presentation mode。**Minimal** 只展示产品状态与生成结果引用，不暴露 Workflow topology。**Editor** 展示以 Workflow 为中心的 shell，包括语义 Node/Edge 数量、Revision/Layout 信息以及可选择的 Node/Edge card；N08 仍有意停在可视化 DAG mutation 之前。
+View 在同一个 projected Canvas 上提供两种 presentation mode。**Minimal** 只展示产品状态与生成结果引用，不暴露 Workflow topology。**Editor** 展示以 Workflow 为中心的 shell，包括语义 Node/Edge 数量、Revision/Layout 信息以及可选择的 Node/Edge card；N09 仍有意停在可视化 DAG mutation 之前。
 
 Mode 是每个 Session 的 Browser-local state，永远不会成为 Session Event。用户可以自由切换 Minimal/Editor，且不会产生 Canvas mutation。Mode ledger 不依赖 Session write 或 persistence。
 
 Conversation Composer 始终由 `ui-conversation` 在 `conversation.view` ring 之外常驻拥有。因此在 Chat/Trajectory/Canvas 之间切换只会切换 Session body；输入仍使用普通 Conversation Composer，不复制一套 Canvas 专属输入框。
+
+## 部署 Capability
+
+N09 让 Browser 对部署能力采取 fail-closed 策略。Plugin 会等待 generated `remote.canvasFeatures`，调用其 deployment-global 只读 `get()`；只有返回的 effective `canvas.enabled=true` 时才注册 `canvas` Conversation View。Remote 缺失、业务失败、Transport 失败，或查询完成前 Plugin 已 dispose，都不会注册 Canvas Tab。Capability discovery 不写入 Session State，也不会成为第二套业务状态 authority。
+
+`editor.enabled=false` 时，即使 Browser-local Mode Store 里仍保存着 `editor`，Surface 也会强制使用 Minimal，并且不渲染 Mode Switch。已有本地偏好不会被重写，因此未来部署重新开启 Editor 时仍可沿用普通的 local preference 语义，不需要 Session mutation。
+
+关闭能力不会删除历史数据。尤其是当 `video.enabled=false` 时，历史 `video.generate` 或 `video.image-to-video` Node 仍会在 Editor 中显示，但标记为“当前部署不可用”；已有 Video Output Reference 也继续可见。这样能明确区分“当前不能使用该能力”和“历史 Workflow/Result 已不存在”。
+
+Send-time Interaction Preparer 只会在 Canvas capability 已启用的 scope 内注册。`regionEdit.enabled=false` 时，如果 Browser-local store 中还残留旧 Region Selection，会在 stage 一条其它方面合法的 Prompt 前先剥掉 Region；Host 同时会独立拒绝直接携带 Region 的 stage 调用，因此 UI 过滤只是交互友好层，不是安全或 enforcement 边界。
 
 ## Interaction Selection 与 Agent Turn
 
@@ -41,7 +51,7 @@ Primary control skeleton 是确定的：READY/COMPLETED/DIRTY_READY → Run，�
 
 ## Projection 与 Client Boundary
 
-`@deepseek-ai/dsh-canvas/client` 只以 type-only 方式提供 Canvas DTO、Interaction DTO 与 SessionProjectionMap declaration merge。Browser bundle 自己持有很小的同构 product-state/interaction builder，从而不需要在运行时加载 Host-domain Canvas JavaScript。Client 不执行 Canvas fold：Host 计算 whole projection value，标准 Session runtime 将其推送给 View。
+`@deepseek-ai/dsh-canvas/client` 只以 type-only 方式提供 Canvas DTO、Capability DTO、Interaction DTO 与 SessionProjectionMap declaration merge。Browser bundle 自己持有很小的同构 product-state/interaction builder，从而不需要在运行时加载 Host-domain Canvas JavaScript。Client 不执行 Canvas fold，也不实现 Feature Policy：Host 负责计算 whole Projection Value 和 effective deployment capabilities。
 
 该 Shell 目前不会解析生成图片／视频 bytes。Result card 只展示 durable media reference metadata；授权媒体 Route 和更完整预览属于后续 Asset/UI 节点。
 
@@ -49,7 +59,9 @@ Primary control skeleton 是确定的：READY/COMPLETED/DIRTY_READY → Run，�
 
 ## 模型体验
 
-当且仅当用户发送 Prompt 时存在具体 Canvas Selection，本 Package 才会贡献模型可见内容。Context 会说明采样时的 Canvas/Workflow Revision，以及被选择的 Node、Edge、durable asset、focused output 或 Region。Revision 发生漂移时会明确标记 stale，并要求 Agent 在修改被选 Workflow Target 前先执行 `canvas_read`。没有 Selection 就没有 Canvas Context。
+当且仅当用户发送 Prompt 时存在具体 Canvas Selection，本 Package 才会贡献模型可见内容。Context 会说明采样时的 Canvas/Workflow Revision，以及被选择的 Node、Edge、durable asset、focused output 或已启用的 Region。Revision 发生漂移时会明确标记 stale，并要求 Agent 在修改被选 Workflow Target 前先执行 `canvas_read`。没有 Selection 就没有 Canvas Context。
+
+Feature discovery 本身不增加任何模型 Token。Canvas 被关闭时 Browser Selection Preparation 整条路径不会注册；其它 Flag 只改变 UI affordance，不会被注入常驻 Prompt。
 
 #### KV Cache 影响
 
@@ -59,6 +71,7 @@ Primary control skeleton 是确定的：READY/COMPLETED/DIRTY_READY → Run，�
 
 - **没有真实 Run/Retry/Cancel 行为** — 控件的状态语义已经正确，但在 Host Media execution/cancellation 接通前保持 disabled。
 - **Editor Selection 不是 DAG Editing** — Node/Edge Selection 已为自然语言指代上线，但连线 Mutation、Inspector Editing、Undo/Redo 与 Partial Execution 属于后续节点。
+- **不会伪造尚未实现的 Feature Surface** — History/Variant/Partial Run/Provider Fallback 已有 capability value，但对应 UI 只会随各自实现节点真正出现。
 - **Region Selection 只是 Seam，不是可视化 Mask Editor** — DTO/Store 通路已存在，但绘制 Mask/Region 以及 Inpaint/Outpaint 操作属于后续 UI/Workflow 工作。
 - **Media card 只是 metadata placeholder** — 真实图片／视频展示依赖授权 Asset delivery。
 - **Save status 仍是静态 skeleton** — Draft/Autosave 延后处理；UI 仍不建立第二套 durable source。
