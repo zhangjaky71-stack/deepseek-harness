@@ -1,6 +1,6 @@
 /** Canvas conversation view: Minimal result surface and N11 semantic Workflow Editor over one Projection. */
 
-import type { CanvasAssetRef, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasAssetRef, CanvasSnapshot, MediaWorkflow } from '@deepseek-ai/dsh-canvas/client'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CanvasInteractionSelection, CanvasMode, CanvasSaveStatus, CanvasViewInjected } from '../types.ts'
@@ -9,11 +9,18 @@ import { createCanvasEditorStore } from './store.ts'
 import { WorkflowEditor } from './WorkflowEditor.tsx'
 import css from './CanvasView.module.css'
 
+type EditableCanvasSnapshot = CanvasSnapshot & { readonly workflow: MediaWorkflow }
+
 /** Full Canvas view props composed by the conversation slot. */
 export type CanvasViewProps = ConvViewProps
   & InjectFace<CanvasViewInjected>
   & PropsLocale<'canvas'>
   & PropsStore<ReturnType<typeof createCanvasEditorStore>>
+
+/** Narrow one projected Canvas to the semantic Editor precondition. */
+function hasWorkflow(canvas: CanvasSnapshot | null): canvas is EditableCanvasSnapshot {
+  return canvas !== null && canvas.workflow !== null
+}
 
 /** Canvas tab root. Current business state comes only from Session Projection. */
 export function CanvasView({
@@ -41,7 +48,7 @@ export function CanvasView({
         ? <div className={css.loading} role="status">{t('projection.loading')}</div>
         : effectiveMode === 'minimal'
           ? <MinimalCanvas canvas={projectedCanvas} interaction={interaction} onSelectOutput={selectOutput} t={t} />
-          : projectedCanvas === null || projectedCanvas.workflow === null
+          : !hasWorkflow(projectedCanvas)
             ? <div className={css.loading}>{t('editor.noWorkflow')}</div>
             : <WorkflowEditor
                 canvas={projectedCanvas}
