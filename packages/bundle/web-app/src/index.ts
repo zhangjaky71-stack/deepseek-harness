@@ -5,8 +5,9 @@
  * the built frontend dist (workspace knowledge of this bundle, never user
  * config), mounts the `frontend-static` fallback owner over it, registers the
  * harness-source and web-surface prompt sections, the bash-visible web runtime
- * variable, and the URL line. App command-line values arrive through the
- * `webStartup` service expressions in the bundle patch.
+ * variable, the request-local Canvas interaction bridge, and the URL line. App
+ * command-line values arrive through the `webStartup` service expressions in
+ * the bundle patch.
  * @module @deepseek-ai/dsh-web-app
  */
 
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { addHarnessSourceSection } from '@deepseek-ai/dsh-app-boot'
+import CanvasInteractionService from '@deepseek-ai/dsh-canvas-interaction'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -127,8 +129,8 @@ function resolveDistIndex(): string {
 export const internals: { resolveDistIndex: () => string } = { resolveDistIndex }
 
 /**
- * Mount the Web runtime: dist serving, surface prompt, the bash runtime
- * variable, and the URL line.
+ * Mount the Web runtime: dist serving, request-local Canvas interaction bridge,
+ * surface prompt, the bash runtime variable, and the URL line.
  * @param ctx - plugin context carrying the webServer service.
  * @param config - validated {@link Config}.
  */
@@ -137,6 +139,9 @@ export function apply(ctx: Context, config: Config): void {
   // Release dependent rows only after bind-dependent trust has been sampled once.
   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
+  // Browser-only N08 Host capability. The child plugin's own injections wait
+  // for agents + Canvas and its lifecycle unwinds with this Web assembly.
+  ctx.plugin(CanvasInteractionService)
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
       addHarnessSourceSection(promptCtx, SOURCE_ROOT)
