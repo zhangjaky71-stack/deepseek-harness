@@ -1,10 +1,12 @@
 /** N11 workflow editor over Session Projection, atomic Host CAS, and independent layout persistence. */
 
 import { useCallback, useEffect, useRef } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
   CanvasCapabilities,
   CanvasLayoutSnapshot,
   CanvasSnapshot,
+  MediaWorkflow,
   MediaWorkflowNode,
   SaveCanvasLayoutRequest,
   WorkflowNodeId,
@@ -32,9 +34,10 @@ import { ValidationPanel } from './ValidationPanel.tsx'
 import css from './WorkflowEditor.module.css'
 
 type EditorStoreProps = PropsStore<ReturnType<typeof createCanvasEditorStore>>
+type EditableCanvasSnapshot = CanvasSnapshot & { readonly workflow: MediaWorkflow }
 
 export interface WorkflowEditorProps extends EditorStoreProps {
-  readonly canvas: CanvasSnapshot
+  readonly canvas: EditableCanvasSnapshot
   readonly layout: CanvasLayoutSnapshot | null
   readonly capabilities: CanvasCapabilities
   readonly interaction: CanvasInteractionSelection
@@ -61,8 +64,6 @@ interface DragState {
 export function WorkflowEditor(props: WorkflowEditorProps) {
   const { canvas, layout, interaction, actions, useStore, t } = props
   const workflow = canvas.workflow
-  if (workflow === null) return <div className={css.empty}>{t('editor.noWorkflow')}</div>
-
   const saveStatus = useStore(state => state.saveStatus)
   const draft = useStore(state => state.draft)
   const undo = useStore(state => state.undo)
@@ -186,7 +187,7 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
     } as SaveCanvasLayoutRequest['nodePositions'])
   }, [actions, canvas.workflowRevision, commitCommand, layout, localPositions, persistPositions, t, workflow])
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement
     if (target.matches('input, textarea, [contenteditable="true"]')) return
     const command = event.metaKey || event.ctrlKey
