@@ -10,7 +10,7 @@ import type {
 // Value import from the inline-safe wire layer (not the connection plugin):
 // plugin-to-plugin value imports are a bundle purity error.
 import { transportError } from '@deepseek-ai/dsh-host-apiproxy/api'
-import type { SessionFace } from '../contract/session.ts'
+import type { PromptRpcPreparation, SessionFace } from '../contract/session.ts'
 import { ConversationNodeAssembler } from './conversation-assembler.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import type { ConversationEventInput, ConversationPublication } from '../contract/conversation.ts'
@@ -185,9 +185,14 @@ export class Session implements SessionFace {
    * Send (queue/steer passed through 1:1); failures land in the snapshot's promptError.
    * @param content - text plus browser-owned temporary image uploads.
    * @param mode - queue appends after the current turn; steer interrupts it.
+   * @param prepareRpcId - optional request-local preparation after the ordinary prompt rpc id is minted.
    * @returns the prompt result (also mirrored into promptError on failure).
    */
-  async prompt(content: PromptContentPart[], mode: 'queue' | 'steer'): Promise<RpcResult<{ accepted: true }>> {
+  async prompt(
+    content: PromptContentPart[],
+    mode: 'queue' | 'steer',
+    prepareRpcId?: PromptRpcPreparation,
+  ): Promise<RpcResult<{ accepted: true }>> {
     this.promptError = null
     this.lastAgentError = null
     // Synchronous, before the first await: the blank → engaging edge must be
@@ -204,7 +209,16 @@ export class Session implements SessionFace {
           mode,
           content,
           clientTimeZone: resolvedClientTimeZone(),
-        })).result
+        }, undefined, prepareRpcId)).result
+      } else if (prepareRpcId !== undefined) {
+        result = {
+          ok: false,
+          error: {
+            code: 'subagent-delivery-unavailable',
+            message: 'request-local prompt context is unavailable for subagent continuations',
+            details: { childSessionId: this.address.childSessionId },
+          },
+        }
       } else if (this.address.mode === 'one-shot') {
         result = {
           ok: false,
