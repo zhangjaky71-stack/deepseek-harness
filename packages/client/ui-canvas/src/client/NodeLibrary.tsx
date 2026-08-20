@@ -1,27 +1,37 @@
-/** Editor node library derived from node types already present in the authoritative workflow. */
+/** Installed media-node library projected from the Host registry catalog. */
 
-import type { MediaWorkflow, MediaWorkflowNode } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasNodeCatalogEntry } from '@deepseek-ai/dsh-canvas/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './WorkflowEditor.module.css'
 
-export function NodeLibrary({ workflow, onAdd, t }: {
-  readonly workflow: MediaWorkflow
-  readonly onAdd: (exemplar: MediaWorkflowNode) => void
+export function NodeLibrary({ catalog, onAdd, t }: {
+  readonly catalog: readonly CanvasNodeCatalogEntry[]
+  readonly onAdd: (definition: CanvasNodeCatalogEntry) => void
   readonly t: TranslateNS<'canvas'>
 }) {
-  const exemplars = new Map<string, MediaWorkflowNode>()
-  for (const node of workflow.nodes) if (!exemplars.has(String(node.type))) exemplars.set(String(node.type), node)
+  const groups = new Map<string, CanvasNodeCatalogEntry[]>()
+  for (const definition of catalog) {
+    if (!definition.lifecycle.creatable || definition.lifecycle.deprecated) continue
+    const rows = groups.get(definition.ui.category) ?? []
+    rows.push(definition)
+    groups.set(definition.ui.category, rows)
+  }
   return (
     <section className={css.library} aria-label={t('editor.library')}>
-      <div className={css.panelHeader}><h4>{t('editor.library')}</h4><span>{t('editor.libraryCurrent')}</span></div>
-      <div className={css.libraryList}>
-        {[...exemplars.values()].map(node => (
-          <button key={String(node.type)} type="button" onClick={() => { onAdd(node) }}>
-            <strong>＋</strong><span>{node.type}</span>
-          </button>
-        ))}
-      </div>
-      <small>{t('editor.libraryCatalogPending')}</small>
+      <div className={css.panelHeader}><h4>{t('editor.library')}</h4><span>{catalog.length}</span></div>
+      {[...groups.entries()].map(([category, definitions]) => (
+        <div className={css.libraryGroup} key={category}>
+          <strong>{category}</strong>
+          <div className={css.libraryList}>
+            {definitions.map(definition => (
+              <button key={`${String(definition.type)}@${definition.version}`} type="button" onClick={() => { onAdd(definition) }}>
+                <strong>＋</strong><span>{definition.displayName}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      {groups.size === 0 && <small>{t('editor.libraryEmpty')}</small>}
     </section>
   )
 }

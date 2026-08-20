@@ -1,4 +1,6 @@
-/** Types for deployment-resolved Canvas feature capabilities. */
+/** Types for deployment-resolved Canvas feature capabilities and Browser-safe node catalog. */
+
+import type { CanvasJsonValue, MediaPortType, MediaWorkflowNodeType } from './types.ts'
 
 /** Feature switches owned by the Canvas deployment policy. */
 export type CanvasFeatureName =
@@ -12,9 +14,7 @@ export type CanvasFeatureName =
   | 'providerFallback'
 
 /** One optional deployment toggle before defaults and parent capability folding. */
-export interface CanvasFeatureToggleConfig {
-  readonly enabled?: boolean
-}
+export interface CanvasFeatureToggleConfig { readonly enabled?: boolean }
 
 /** Raw Canvas feature configuration accepted from Cordis config. */
 export interface CanvasFeatureConfig {
@@ -29,9 +29,7 @@ export interface CanvasFeatureConfig {
 }
 
 /** One effective feature value exposed to Browser and future Agent consumers. */
-export interface CanvasCapability {
-  readonly enabled: boolean
-}
+export interface CanvasCapability { readonly enabled: boolean }
 
 /** Effective deployment capabilities. Child capabilities are false while Canvas itself is disabled. */
 export interface CanvasCapabilities {
@@ -43,6 +41,38 @@ export interface CanvasCapabilities {
   readonly partialRun: CanvasCapability
   readonly regionEdit: CanvasCapability
   readonly providerFallback: CanvasCapability
+}
+
+/** Browser-safe semantic port metadata projected from the Host media-node registry. */
+export interface CanvasNodeCatalogPort {
+  readonly name: string
+  readonly type: MediaPortType
+  readonly required: boolean
+  readonly multiple?: boolean
+  readonly description?: string
+}
+
+/** Browser-safe installed media-node descriptor. Runtime schemas/functions never cross this DTO. */
+export interface CanvasNodeCatalogEntry {
+  readonly type: MediaWorkflowNodeType
+  readonly version: number
+  readonly displayName: string
+  readonly inputs: readonly CanvasNodeCatalogPort[]
+  readonly outputs: readonly CanvasNodeCatalogPort[]
+  readonly defaultConfig: Readonly<Record<string, CanvasJsonValue>>
+  readonly feature?: CanvasFeatureName
+  readonly lifecycle: {
+    readonly deprecated: boolean
+    readonly creatable: boolean
+    readonly executable: boolean
+    readonly replacement?: { readonly type: MediaWorkflowNodeType; readonly version: number }
+  }
+  readonly ui: {
+    readonly category: string
+    readonly icon: string
+    readonly inspectorKind: string
+    readonly description?: string
+  }
 }
 
 /** Stable feature-policy failure surfaced before a disabled operation starts. */
