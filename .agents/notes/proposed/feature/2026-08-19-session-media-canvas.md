@@ -16,7 +16,7 @@ The domain separates `workflowRevision` from `runRevision`. Semantic workflow ed
 
 Semantic workflows contain only media-domain nodes, edges, output ids, and JSON-safe configuration. Editor layout is a separately persisted presentation value; provider request payloads remain provider data, and generated media is represented by durable references rather than binary bytes or bearer URLs. Images reuse the attachment identity already owned by `dsh-attachment`; video storage is a separate capability.
 
-Durable Canvas values pass through an explicit decode/migration path before current-domain invariants run. Historical Session data stays append-only; old values are migrated only in memory. Unknown future schema or node versions fail loud instead of guessing a downgrade, while deprecated historical node aliases produce explicit lifecycle notices without becoming valid output of current writers.
+Durable Canvas values pass through an explicit decode/migration path before current-domain invariants run. Historical Session data stays append-only; old values are migrated only in memory. Unknown future Canvas/Core schema versions and Canvas-owned node versions fail loud instead of guessing a downgrade. Unknown plugin nodes remain structurally readable with their stored type/version/config when their registry definition is absent; current availability and execution belong to the node registry/engine. Deprecated historical Core node aliases produce explicit lifecycle notices without becoming valid output of current writers. The detailed ownership and strict-current-schema rule live in [Canvas open-world node migration](../architecture/2026-08-20-canvas-open-world-migration.md).
 
 Every accepted semantic Canvas mutation is one `canvas/change` Session event containing the complete post-change `CanvasSnapshot`; `clear` contains a null tombstone. A strict pure fold validates consecutive mutations, and the package invariant independently stages the next fold state before Session publication. The Host `CanvasService` derives its cache from the committed log and publishes no cache state before `session.append()` succeeds.
 
@@ -71,6 +71,7 @@ The implementation is divided into independently reviewable nodes in the [Canvas
 ## Acceptance criteria
 
 - Canvas/workflow/run values, schema migration, and semantic invariants are UI/provider independent.
+- A durable workflow containing an unavailable plugin node remains readable and replayable; execution availability is decided later by the current node registry/engine.
 - `canvas/change` cold replay reconstructs the same current Canvas as live service state.
 - Workflow CAS fences semantic revision only; run revision changes do not stale an edit.
 - Every current Canvas read/mutation goes through Host authorization and accepted mutations carry durable actor/source attribution.
