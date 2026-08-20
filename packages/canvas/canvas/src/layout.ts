@@ -7,7 +7,7 @@ import type { CanvasChangeMetaV2 } from './events.ts'
 import {
   CANVAS_LAYOUT_SCHEMA_VERSION,
   CanvasMigrationError,
-  decodeCanvasLayoutSnapshot,
+  migrateStoredCanvasLayoutSnapshot,
 } from './migration.ts'
 import type {
   CanvasLayoutSnapshot,
@@ -64,7 +64,7 @@ function requireAllowedKeys(source: Record<string, unknown>, allowed: ReadonlySe
   }
 }
 
-/** Assert current runtime layout relationships that the structural decoder does not own. */
+/** Assert current runtime layout relationships after structural migration. */
 export function assertCanvasLayoutSnapshot(layout: CanvasLayoutSnapshot): void {
   if (layout.schemaVersion !== CANVAS_LAYOUT_SCHEMA_VERSION) {
     throw new CanvasLayoutError(
@@ -104,38 +104,25 @@ export function createCanvasLayoutSnapshot(request: SaveCanvasLayoutRequest, upd
   return layout
 }
 
-function decodeStrictLayout(value: unknown): CanvasLayoutSnapshot {
-  const source = record(value, 'canvas-layout-change.layout')
-  requireAllowedKeys(
-    source,
-    new Set(['nodePositions', 'schemaVersion', 'updatedAt', 'viewport', 'workflowId']),
-    'canvas-layout-change.layout',
-  )
-  for (const required of ['nodePositions', 'schemaVersion', 'updatedAt', 'workflowId'] as const) {
-    if (!(required in source)) invalid('canvas-layout-change.layout', `canvas-layout-change.layout requires ${required}`)
-  }
-  const positions = record(source.nodePositions, 'canvas-layout-change.layout.nodePositions')
-  for (const [nodeId, valueAtNode] of Object.entries(positions)) {
-    if (nodeId.length === 0) invalid('canvas-layout-change.layout.nodePositions', 'layout node id must be non-empty')
-    const position = record(valueAtNode, `canvas-layout-change.layout.nodePositions.${nodeId}`)
-    if (Object.keys(position).sort().join(',') !== 'x,y') {
-      invalid(`canvas-layout-change.layout.nodePositions.${nodeId}`, 'layout position must contain exactly x and y')
-    }
-  }
-  if (source.viewport !== undefined) {
-    const viewport = record(source.viewport, 'canvas-layout-change.layout.viewport')
-    if (Object.keys(viewport).sort().join(',') !== 'x,y,zoom') {
-      invalid('canvas-layout-change.layout.viewport', 'layout viewport must contain exactly x, y, and zoom')
-    }
-  }
-  const layout = decodeCanvasLayoutSnapshot(value)
-  try {
-    assertCanvasLayoutSnapshot(layout)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'invalid Canvas layout'
-    invalid('canvas-layout-change.layout', message)
-  }
+/**
+ * Decode one stored layout by running N02 structural migration followed by the current layout invariant.
+ * @param value - stored layout JSON value.
+ * @returns validated current layout.
+ */
+export function decodeCanvasLayoutSnapshot(value: unknown): CanvasLayoutSnapshot {
+  const layout = migrateStoredCanvasLayoutSnapshot(value)
+  assertCanvasLayoutSnapshot(layout)
   return layout
+}
+
+function decodeStrictLayout(value: unknown): CanvasLayoutSnapshot {
+  try {
+    return decodeCanvasLayoutSnapshot(value)
+  } catch (error) {
+    if (error instanceof CanvasMigrationError) throw error
+    const message = error instanceof Error ? error.message : 'invalid Canvas layout'
+    return invalid('canvas-layout-change.layout', message)
+  }
 }
 
 function decodeMeta(value: unknown): CanvasChangeMetaV2 {
