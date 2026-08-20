@@ -1,4 +1,4 @@
-/** Client-safe Canvas projection, Remote DTO, layout-write, bounded-history, and interaction-context types. */
+/** Client-safe Canvas projection, Remote DTO, layout-write, bounded-history, interaction-context, and capability types. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type {
@@ -13,6 +13,7 @@ import type {
 
 export type * from './types.ts'
 export type * from './interaction-types.ts'
+export type * from './feature-types.ts'
 
 /** Opaque cursor over a stable Session-event boundary in Canvas run history. */
 export type CanvasHistoryCursor = Branded<'CanvasHistoryCursor'>
