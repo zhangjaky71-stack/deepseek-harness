@@ -57,6 +57,14 @@ export function canvasFeatureEnabled(capabilities: CanvasCapabilities, feature: 
   return capabilities[feature].enabled
 }
 
+/** Require one effective deployment capability. */
+export function assertCanvasFeatureEnabled(
+  capabilities: CanvasCapabilities,
+  feature: CanvasFeatureName,
+): void {
+  if (!canvasFeatureEnabled(capabilities, feature)) throw new CanvasFeatureError(feature)
+}
+
 /** Whether one current semantic node requires the Video capability. */
 export function isVideoWorkflowNode(type: MediaWorkflow['nodes'][number]['type']): boolean {
   return type === 'video.generate' || type === 'video.image-to-video'
@@ -71,6 +79,16 @@ export function unavailableWorkflowFeatures(
   if (!capabilities.canvas.enabled) unavailable.push('canvas')
   if (!capabilities.video.enabled && workflow.nodes.some(node => isVideoWorkflowNode(node.type))) unavailable.push('video')
   return unavailable
+}
+
+/** Require a workflow to be creatable as new semantic state in this deployment. */
+export function assertCanvasWorkflowCreatable(
+  capabilities: CanvasCapabilities,
+  workflow: MediaWorkflow,
+): void {
+  assertCanvasFeatureEnabled(capabilities, 'canvas')
+  const disabled = unavailableWorkflowFeatures(capabilities, workflow).find(feature => feature !== 'canvas')
+  if (disabled !== undefined) throw new CanvasFeatureError(disabled)
 }
 
 /**
@@ -112,4 +130,25 @@ export function editUsesDisabledVideo(
     }
   }
   return false
+}
+
+/** Require one atomic edit batch to avoid active use of disabled features. */
+export function assertCanvasWorkflowEditable(
+  capabilities: CanvasCapabilities,
+  workflow: MediaWorkflow,
+  operations: readonly WorkflowEditOperation[],
+): void {
+  assertCanvasFeatureEnabled(capabilities, 'canvas')
+  if (!capabilities.video.enabled && editUsesDisabledVideo(workflow, operations)) {
+    throw new CanvasFeatureError('video')
+  }
+}
+
+/** Host admission check for workflow execution. */
+export function assertCanvasWorkflowExecutable(
+  capabilities: CanvasCapabilities,
+  workflow: MediaWorkflow,
+): void {
+  const disabled = unavailableWorkflowFeatures(capabilities, workflow)[0]
+  if (disabled !== undefined) throw new CanvasFeatureError(disabled)
 }
