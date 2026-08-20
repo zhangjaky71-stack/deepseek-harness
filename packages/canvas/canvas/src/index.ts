@@ -34,14 +34,14 @@ export {
 export {
   CANVAS_CHANGE_VERSION,
   CANVAS_LAYOUT_SCHEMA_VERSION,
-  MEDIA_WORKFLOW_NODE_VERSIONS,
+  CORE_MEDIA_WORKFLOW_NODE_VERSIONS,
   CanvasMigrationError,
   migrateStoredMediaWorkflow,
   decodeMediaWorkflow,
   migrateStoredCanvasSnapshot,
   decodeCanvasSnapshot,
   decodeCanvasChangeVersion,
-  decodeCanvasLayoutSnapshot,
+  migrateStoredCanvasLayoutSnapshot,
   decodeCanvasRunHistoryEntry,
 } from './migration.ts'
 export {
@@ -72,6 +72,7 @@ export {
   CanvasLayoutError,
   assertCanvasLayoutSnapshot,
   createCanvasLayoutSnapshot,
+  decodeCanvasLayoutSnapshot,
   decodeCanvasLayoutChange,
   emptyCanvasLayoutFoldState,
   cloneCanvasLayoutFoldState,
