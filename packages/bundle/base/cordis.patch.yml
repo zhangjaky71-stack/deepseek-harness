@@ -131,6 +131,11 @@
     - id: canvas
       name: '@deepseek-ai/dsh-canvas'
 
+    # Request-local Browser Canvas selection is staged separately from durable
+    # Canvas state, then logged only when its exact correlated user prompt enters a step.
+    - id: canvas-interaction
+      name: '@deepseek-ai/dsh-canvas/interaction-service'
+
     # Session telemetry is mounted but disabled by default. DSH_TELEMETRY_MODE
     # explicitly opts into FULL or FEEDBACK_ONLY reporting; uploading mirrors
     # session-log records onto OTLP/HTTP logs with no session-telemetry/record redaction
