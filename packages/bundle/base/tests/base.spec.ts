@@ -27,12 +27,14 @@ describe('dsh-base bundle', () => {
     )
     expect(Array.isArray(parsed)).toBe(true)
     // The base layer is one insert list over the empty profile root.
-    const patches = parsed as { insert?: { id?: string; config?: Record<string, unknown> }[] }[]
+    const patches = parsed as { insert?: { id?: string; name?: string; config?: Record<string, unknown> }[] }[]
     expect(patches).toHaveLength(1)
     const rows = patches.flatMap(patch => patch.insert ?? [])
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
     expect(rows.filter(row => row.id === 'canvas')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'canvas-interaction')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'canvas-interaction')?.name).toBe('@deepseek-ai/dsh-canvas/interaction-service')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-canvas', 'workspace:^')
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
       __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",
