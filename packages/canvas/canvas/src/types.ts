@@ -31,15 +31,22 @@ export type CanvasJsonValue = CanvasJsonPrimitive | readonly CanvasJsonValue[] |
 /** Media values that a node port may accept or produce. */
 export type MediaPortType = 'text' | 'image' | 'video' | 'image-list' | 'video-list' | 'mask'
 
-/** Semantic node kinds available to the initial media workflow vocabulary. */
-export type MediaWorkflowNodeType =
-  | 'asset.input'
-  | 'prompt'
-  | 'image.generate'
-  | 'image.edit'
-  | 'video.generate'
-  | 'video.image-to-video'
-  | 'output'
+/**
+ * Declaration-merge surface for semantic media-node type identifiers.
+ * Node-definition plugins may augment this interface without changing Canvas Domain code.
+ */
+export interface MediaWorkflowNodeTypeMap {
+  'asset.input': true
+  'prompt': true
+  'image.generate': true
+  'image.edit': true
+  'video.generate': true
+  'video.image-to-video': true
+  'output': true
+}
+
+/** Semantic node kind known to the current TypeScript composition. */
+export type MediaWorkflowNodeType = keyof MediaWorkflowNodeTypeMap
 
 /** One semantic workflow node; renderer and provider-specific fields do not belong here. */
 export interface MediaWorkflowNode {

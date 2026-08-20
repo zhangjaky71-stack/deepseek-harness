@@ -26,19 +26,32 @@ describe('dsh-base bundle', () => {
       { schema: entryListSchema },
     )
     expect(Array.isArray(parsed)).toBe(true)
-    // The base layer is one insert list over the empty profile root.
     const patches = parsed as { insert?: { id?: string; name?: string; config?: Record<string, unknown> }[] }[]
     expect(patches).toHaveLength(1)
     const rows = patches.flatMap(patch => patch.insert ?? [])
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
+
     expect(rows.filter(row => row.id === 'canvas-features')).toHaveLength(1)
     expect(rows.find(row => row.id === 'canvas-features')?.name).toBe('@deepseek-ai/dsh-canvas/feature-service')
+    expect(rows.filter(row => row.id === 'media-workflow')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'media-workflow')?.name).toBe('@deepseek-ai/dsh-media-workflow')
+    expect(rows.filter(row => row.id === 'media-workflow-builtins')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'media-workflow-builtins')?.name).toBe('@deepseek-ai/dsh-media-workflow/builtins')
     expect(rows.filter(row => row.id === 'canvas')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'canvas-interaction')).toHaveLength(1)
     expect(rows.find(row => row.id === 'canvas-interaction')?.name).toBe('@deepseek-ai/dsh-canvas/interaction-service')
-    expect(rows.findIndex(row => row.id === 'canvas-features')).toBeLessThan(rows.findIndex(row => row.id === 'canvas-interaction'))
+
+    const featureIndex = rows.findIndex(row => row.id === 'canvas-features')
+    const registryIndex = rows.findIndex(row => row.id === 'media-workflow')
+    const builtinsIndex = rows.findIndex(row => row.id === 'media-workflow-builtins')
+    const interactionIndex = rows.findIndex(row => row.id === 'canvas-interaction')
+    expect(featureIndex).toBeLessThan(registryIndex)
+    expect(registryIndex).toBeLessThan(builtinsIndex)
+    expect(builtinsIndex).toBeLessThan(interactionIndex)
+
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-canvas', 'workspace:^')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-media-workflow', 'workspace:^')
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
       __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",
     })
@@ -60,11 +73,6 @@ describe('dsh-base bundle', () => {
         ? (patch as { insert?: Record<string, unknown>[] }).insert ?? []
         : [],
     )
-    // Symmetric gating: each stack's executor and tool rows carry the same
-    // platform fact, inverted between the bash and pwsh twins, so exactly one
-    // shell stack mounts per host. Evaluate with a platform-scoped context
-    // (the `with` scope shadows the global `process`) so both outcomes pin on
-    // every host.
     for (const [id, win32, linux] of [
       ['bash-sandbox', true, false],
       ['tool-bash', true, false],
@@ -78,7 +86,6 @@ describe('dsh-base bundle', () => {
       expect(Boolean(evaluate({ process: { platform: 'win32' } }, expression)), `${id} on win32`).toBe(win32)
       expect(Boolean(evaluate({ process: { platform: 'linux' } }, expression)), `${id} on linux`).toBe(linux)
     }
-    // The platform layer folded into these rows: no separate patch file ships.
     expect(existsSync(resolve(root, 'windows.cordis.patch.yml'))).toBe(false)
   })
 })

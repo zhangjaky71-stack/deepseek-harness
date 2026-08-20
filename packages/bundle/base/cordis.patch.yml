@@ -131,6 +131,16 @@
     - id: canvas-features
       name: '@deepseek-ai/dsh-canvas/feature-service'
 
+    # One Host registry supplies semantic media-node definitions to later
+    # Validator, Editor, Agent-summary, and Executor consumers.
+    - id: media-workflow
+      name: '@deepseek-ai/dsh-media-workflow'
+
+    # V1 built-ins register on their own plugin fiber so HMR/unload removes the
+    # exact definitions before a replacement plugin registers newer metadata.
+    - id: media-workflow-builtins
+      name: '@deepseek-ai/dsh-media-workflow/builtins'
+
     # Canvas is a Host service in every profile so Browser Remotes and later
     # Agent tools share one Session-backed authority and Projection source.
     - id: canvas
