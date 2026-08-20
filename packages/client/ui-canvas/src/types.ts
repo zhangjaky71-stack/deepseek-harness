@@ -1,6 +1,16 @@
 /** Browser-local Canvas UI vocabulary. Types only. */
 
-import type { CanvasProductState, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import type {
+  CanvasAssetRef,
+  CanvasId,
+  CanvasProductState,
+  CanvasRegionSelection,
+  CanvasRunId,
+  CanvasSnapshot,
+  MediaWorkflowId,
+  WorkflowEdgeId,
+  WorkflowNodeId,
+} from '@deepseek-ai/dsh-canvas/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** Canvas presentation preference. Never persisted into Session state. */
@@ -20,10 +30,40 @@ export interface CanvasPresentation {
   readonly staleOutput: boolean
 }
 
-/** Session-bound UI-local mode face injected into the Canvas conversation view. */
-export interface CanvasViewInjected {
+/** Semantic revision at which the current browser selection was made. */
+export interface CanvasInteractionAnchor {
+  readonly canvasId: CanvasId
+  readonly workflowId: MediaWorkflowId
+  readonly workflowRevision: number
+}
+
+/** Per-session browser-local selection/focus state; never a Session Projection. */
+export interface CanvasInteractionSelection {
+  readonly anchor?: CanvasInteractionAnchor
+  readonly selectedNodeIds: readonly WorkflowNodeId[]
+  readonly selectedEdgeIds: readonly WorkflowEdgeId[]
+  readonly selectedAssetRefs: readonly CanvasAssetRef[]
+  readonly focusedOutput?: {
+    readonly runId: CanvasRunId
+    readonly assetIndex: number
+  }
+  readonly region?: CanvasRegionSelection
+}
+
+/** Mutations exposed to the Canvas view without handing it the store implementation. */
+export interface CanvasInteractionActions {
+  readonly selectNode: (canvas: CanvasSnapshot, nodeId: WorkflowNodeId) => void
+  readonly selectEdge: (canvas: CanvasSnapshot, edgeId: WorkflowEdgeId) => void
+  readonly selectOutput: (canvas: CanvasSnapshot, assetIndex: number) => void
+  readonly setRegion: (canvas: CanvasSnapshot, region: CanvasRegionSelection) => void
+  readonly clearSelection: () => void
+}
+
+/** Session-bound UI-local faces injected into the Canvas conversation view. */
+export interface CanvasViewInjected extends CanvasInteractionActions {
   readonly hooks: {
     readonly mode: SnapshotStore<CanvasMode>
+    readonly interaction: SnapshotStore<CanvasInteractionSelection>
   }
   readonly setMode: (mode: CanvasMode) => void
 }

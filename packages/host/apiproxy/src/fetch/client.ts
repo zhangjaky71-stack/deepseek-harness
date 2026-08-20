@@ -69,10 +69,21 @@ import {
 } from '../api/subagents.schema.ts'
 
 /**
+ * One caller-owned side effect that must finish after the carrier mints the
+ * request id but before the corresponding unary request becomes observable or
+ * reaches transport. The id is correlation only; the callback cannot mutate
+ * the request payload or envelope.
+ */
+export type UnaryRpcPreparation = (rpcId: RpcId) => Promise<void> | void
+
+/**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
  * methods take the business payload directly — the carrier mints the rpcId and wraps the
  * envelope. Business code needing the call's rpcId reads it from the RpcResponse echo.
  * Unary methods and respond accept an optional external AbortSignal as the last parameter.
+ * `session.prompt` additionally accepts an optional rpc-id preparation callback after the
+ * signal; it runs before the request leaves the client and exists for request-local correlation
+ * such as Canvas interaction context without widening the Host prompt payload.
  * Bounded calls merge it with the instance timeout via AbortSignal.any; user-paced calls
  * carry only that external signal. In both cases the signal rides beside the request, never
  * on the wire, like the stream signatures.
@@ -94,7 +105,11 @@ export interface IApiClient {
     selectModel(payload: RequestPayload<'session.selectModel'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.selectModel'>>>
     rename(payload: RequestPayload<'session.rename'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.rename'>>>
     fork(payload: RequestPayload<'session.fork'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.fork'>>>
-    prompt(payload: RequestPayload<'session.prompt'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.prompt'>>>
+    prompt(
+      payload: RequestPayload<'session.prompt'>,
+      signal?: AbortSignal,
+      prepareRpcId?: UnaryRpcPreparation,
+    ): Promise<RpcResponse<ResponseValue<'session.prompt'>>>
     attachment(payload: RequestPayload<'session.attachment'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.attachment'>>>
     updateQueue(payload: RequestPayload<'session.updateQueue'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.updateQueue'>>>
     cancel(payload: RequestPayload<'session.cancel'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.cancel'>>>
@@ -326,17 +341,20 @@ export abstract class AbstractApiClient implements IApiClient {
   }
 
   /**
-   * Unary protocol path: mint → tap → POST full form → envelope parse → verify
-   * echo → value parse → tap → narrow. Virtual so a fake carrier (fixture) can
-   * override transport at this layer.
+   * Unary protocol path: mint → optional caller preparation → tap → POST full
+   * form → envelope parse → verify echo → value parse → tap → narrow. Virtual
+   * so a fake carrier (fixture) can override transport at this layer.
    */
   protected async callUnary<K extends keyof RpcMethodMap>(
     method: K,
     payload: RequestPayload<K>,
     signal?: AbortSignal,
     timeoutPolicy: UnaryTimeoutPolicy = 'default',
+    prepareRpcId?: UnaryRpcPreparation,
   ): Promise<RpcResponse<ResponseValue<K>>> {
     const message: ClientRequest = { type: 'client-request', rpcId: this.mintRpcId(), method, payload }
+    await prepareRpcId?.(message.rpcId)
+    signal?.throwIfAborted()
     this.onEnvelope(message)
     const response = await this.postJson(`/api/${method}`, message, signal, timeoutPolicy)
     const full = serverResponseSchema.parse(await response.json())
@@ -418,7 +436,9 @@ export abstract class AbstractApiClient implements IApiClient {
     selectModel: (payload, signal) => this.callUnary('session.selectModel', payload, signal),
     rename: (payload, signal) => this.callUnary('session.rename', payload, signal),
     fork: (payload, signal) => this.callUnary('session.fork', payload, signal),
-    prompt: (payload, signal) => this.callUnary('session.prompt', payload, signal),
+    prompt: (payload, signal, prepareRpcId) => this.callUnary(
+      'session.prompt', payload, signal, 'default', prepareRpcId,
+    ),
     attachment: (payload, signal) => this.callUnary('session.attachment', payload, signal),
     updateQueue: (payload, signal) => this.callUnary('session.updateQueue', payload, signal),
     cancel: (payload, signal) => this.callUnary('session.cancel', payload, signal),
