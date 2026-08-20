@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-/** REAL composition smoke for the second Canvas Typert namespace. */
+/** REAL composition smoke for Canvas's generated Typert namespaces. */
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
 const root = resolve(packageDir, '../../..')
 const artifact = (path: string): string => join(root, path)
@@ -17,6 +17,7 @@ const requiredArtifacts = [
   'packages/core/agent/lib/index.js',
   'packages/core/session/lib/index.js',
   'packages/canvas/canvas/lib/index.js',
+  'packages/canvas/canvas/lib/types/feature-service.js',
   'packages/canvas/canvas/lib/types/interaction-service.js',
   'packages/canvas/canvas/lib/typert.host.js',
   'packages/api/gateway/lib/client.js',
@@ -25,13 +26,14 @@ const requiredArtifacts = [
   'packages/typert/registry/lib/index.js',
 ].every(path => existsSync(artifact(path)))
 
-describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain', () => {
-  it('mounts both Canvas namespaces from one generated contribution and crosses real HTTP', async () => {
+describe.skipIf(!requiredArtifacts)('Canvas feature/interaction Remote built LIB chain', () => {
+  it('mounts Canvas namespaces from one generated contribution and crosses real HTTP', async () => {
     const urls = Object.fromEntries(Object.entries({
       agent: 'packages/core/agent/lib/index.js',
       apiGatewayClient: 'packages/api/gateway/lib/client.js',
       apiGatewayHost: 'packages/api/gateway/lib/index.js',
       canvas: 'packages/canvas/canvas/lib/index.js',
+      canvasFeatures: 'packages/canvas/canvas/lib/types/feature-service.js',
       canvasInteraction: 'packages/canvas/canvas/lib/types/interaction-service.js',
       canvasTypert: 'packages/canvas/canvas/lib/typert.host.js',
       connectionClient: 'packages/client/connection/lib/client.js',
@@ -52,6 +54,7 @@ describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain',
       const connectionHost = await import(urls.connectionHost)
       const { default: TypertRemoteService } = await import(urls.apiGatewayHost)
       const { default: CanvasService } = await import(urls.canvas)
+      const { default: CanvasFeatureService } = await import(urls.canvasFeatures)
       const { default: CanvasInteractionService } = await import(urls.canvasInteraction)
       const { TYPERT: CANVAS_TYPERT } = await import(urls.canvasTypert)
       const { default: TypertRegistry } = await import(urls.registryHost)
@@ -71,6 +74,7 @@ describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain',
       await host.plugin(TypertRegistry)
       await host.plugin(AgentRegistry)
       await host.plugin(TypertRemoteService)
+      await host.plugin(CanvasFeatureService, { editor: { enabled: false } })
       await host.plugin(CanvasService)
       await host.plugin(CanvasInteractionService)
       host.typert.register(CANVAS_TYPERT)
@@ -138,6 +142,7 @@ describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain',
         await client.plugin({ inject: plugin.inject, apply: plugin.apply })
       }
 
+      const featureResult = await client.remote.canvasFeatures.get()
       const context = {
         canvasId: canvas.id,
         workflowId: canvas.workflow.id,
@@ -149,10 +154,12 @@ describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain',
       const discarded = await client.remote.canvasInteraction.discard(agent.id, { rpcId: 'rpc-built-1' })
       const discardedAgain = await client.remote.canvasInteraction.discard(agent.id, { rpcId: 'rpc-built-1' })
       const result = {
+        features: featureResult.value,
         staged: staged.value,
         discarded: discarded.value,
         discardedAgain: discardedAgain.value,
         hasCanvas: client.remote.canvas !== undefined,
+        hasCanvasFeatures: client.remote.canvasFeatures !== undefined,
         hasCanvasInteraction: client.remote.canvasInteraction !== undefined,
       }
 
@@ -168,14 +175,20 @@ describe.skipIf(!requiredArtifacts)('Canvas interaction Remote built LIB chain',
     const result = await runPlainNode(script)
     expect(result.exitCode, `stderr:\n${result.stderr}`).toBe(0)
     const output = JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}') as {
+      features: { canvas: { enabled: boolean }; editor: { enabled: boolean }; video: { enabled: boolean } }
       staged: { staged: boolean; expiresAt: number }
       discarded: { discarded: boolean }
       discardedAgain: { discarded: boolean }
       hasCanvas: boolean
+      hasCanvasFeatures: boolean
       hasCanvasInteraction: boolean
     }
     expect(output.hasCanvas).toBe(true)
+    expect(output.hasCanvasFeatures).toBe(true)
     expect(output.hasCanvasInteraction).toBe(true)
+    expect(output.features.canvas.enabled).toBe(true)
+    expect(output.features.editor.enabled).toBe(false)
+    expect(output.features.video.enabled).toBe(false)
     expect(output.staged.staged).toBe(true)
     expect(output.staged.expiresAt).toBeGreaterThan(0)
     expect(output.discarded).toEqual({ discarded: true })
