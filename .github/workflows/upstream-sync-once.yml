@@ -11,7 +11,7 @@ permissions:
 jobs:
   merge-upstream:
     if: github.head_ref == 'sync/upstream-rc8'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, vm-backup]
     steps:
       - name: Checkout sync trigger
         uses: actions/checkout@v6
