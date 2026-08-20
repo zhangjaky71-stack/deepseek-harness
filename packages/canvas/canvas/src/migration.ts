@@ -27,7 +27,6 @@ import type {
   CanvasRunSnapshot,
   CanvasRunStatus,
   CanvasSnapshot,
-  KnownMediaWorkflowNodeType,
   MediaWorkflow,
   MediaWorkflowEdge,
   MediaWorkflowNode,
@@ -39,8 +38,18 @@ import type {
 export const CANVAS_CHANGE_VERSION: CanvasChangeVersion = 1
 /** Current separately persisted editor-layout schema version. */
 export const CANVAS_LAYOUT_SCHEMA_VERSION = 1
+
+type CanvasCoreMediaWorkflowNodeType =
+  | 'asset.input'
+  | 'prompt'
+  | 'image.generate'
+  | 'image.edit'
+  | 'video.generate'
+  | 'video.image-to-video'
+  | 'output'
+
 /** Current durable versions for Canvas-owned V1 semantic node kinds only. Plugin versions are registry-owned. */
-export const CORE_MEDIA_WORKFLOW_NODE_VERSIONS: Readonly<Record<KnownMediaWorkflowNodeType, number>> = {
+export const CORE_MEDIA_WORKFLOW_NODE_VERSIONS: Readonly<Record<CanvasCoreMediaWorkflowNodeType, number>> = {
   'asset.input': 1,
   'prompt': 1,
   'image.generate': 1,
@@ -147,10 +156,6 @@ function optionalString(value: unknown, subject: string): string | undefined {
   return value === undefined ? undefined : string(value, subject)
 }
 
-function optionalNumber(value: unknown, subject: string): number | undefined {
-  return value === undefined ? undefined : number(value, subject)
-}
-
 function optionalPositiveInteger(value: unknown, subject: string): number | undefined {
   return value === undefined ? undefined : positiveInteger(value, subject)
 }
@@ -214,7 +219,7 @@ function coreNodeVersion(value: unknown, current: number, subject: string): numb
   return decoded
 }
 
-function isCoreNodeType(type: string): type is KnownMediaWorkflowNodeType {
+function isCoreNodeType(type: string): type is CanvasCoreMediaWorkflowNodeType {
   return Object.prototype.hasOwnProperty.call(CORE_MEDIA_WORKFLOW_NODE_VERSIONS, type)
 }
 
