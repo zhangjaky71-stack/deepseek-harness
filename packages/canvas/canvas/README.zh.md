@@ -74,6 +74,14 @@ Package 默认导出 `CanvasService`，挂载为 `ctx.canvas`，并发布到 Typ
 
 Package 通过仓库 Typert build 发布生成的 `./typert` 与 `./remote` artifact，沿用 Goal 的 artifact-plane 模式。源码只维护 decorator 与 client-safe DTO；generated file 不手工维护。
 
+## Browser Presentation Consumer
+
+Shipped Web 现在把 `@deepseek-ai/dsh-client-ui-canvas` 作为一个 `conversation.view` consumer 挂载。它只从 Session Projection 读取当前 Canvas 与 Layout，并把 Minimal/Editor mode 保持为 Browser-local presentation state，因此 UI 不会成为第二套 Canvas authority。常驻 Conversation Composer 仍由 `ui-conversation` 在 view ring 之外拥有。
+
+N07 提供 Minimal result presentation、Editor workflow shell、同一套八状态 Product State 规则、DIRTY_READY 旧结果保留，以及状态正确的 Run/Retry/Cancel control skeleton。真实 Run/Cancel 在 Host 行为存在前保持 disabled；Visual DAG editing、Draft/Autosave、Interaction Context 与授权 Media rendering 属于后续 UI 层。
+
+Canvas client outlet 对 Browser 保持 runtime-free：UI package 只以 type-only 方式消费其 DTO 与 Projection declaration，不会把 Host-domain Canvas JavaScript 加载进 Browser bundle。
+
 ## 模型体验
 
 ### Session-native Canvas service
@@ -84,7 +92,7 @@ Package 通过仓库 Typert build 发布生成的 `./typert` 与 `./remote` arti
 
 #### Token 影响
 
-直接影响为零。Event Sourcing、Projection、Layout Persistence、Migration、Authorization、Audit、Replay、Remote 调用和 Host Mutation 不改变模型请求。
+直接影响为零。Event Sourcing、Projection、Layout Persistence、Migration、Authorization、Audit、Replay、Remote 调用、Host Mutation 与 Browser presentation consumer 都不改变模型请求。
 
 #### KV Cache 影响
 
@@ -92,7 +100,7 @@ Package 通过仓库 Typert build 发布生成的 `./typert` 与 `./remote` arti
 
 ## 已知限制与后续工作
 
-- **尚无 Canvas UI consumer** — Browser mutation/History transport 与 current-state Projection 已存在，但 Minimal/Editor Rendering 和 Interaction Context 属于独立 Client 工作。
+- **Canvas UI 目前仍是 Shell** — Minimal/Editor Rendering 已随 Web 发布，但真实 Media execution control、Visual DAG Editing、Draft/Autosave、Interaction Context 与授权 Media Preview 属于后续 Client/Host 工作。
 - **当前 Authorization Policy 只按 Actor Kind 判断** — Identity Ownership、多用户 Tenant、Workspace ACL、Approval Policy、Quota 与 Provider Cost Admission 属于同一 Host seam 后的后续治理层。
 - **尚未实现 Run Execution** — `run` 与 `cancel` 只是预留 Remote 名称，不是已注册 endpoint；Jobs、Provider 执行、Retry、Cancel 和完整 Run Lifecycle 保持独立实现。
 - **尚未实现 Variant Create 与 Workflow Restore** — Remote 名称已预留，但在 Host mutation 存在前不会发布 endpoint。

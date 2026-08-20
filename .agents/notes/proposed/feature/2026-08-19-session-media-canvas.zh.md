@@ -42,7 +42,9 @@ Remote namespace 只发布 Host 上已经存在的行为。当前 active endpoin
 
 `dsh-base` 在每个 profile 中挂载 `@deepseek-ai/dsh-canvas`。Browser Remote 与后续 Agent Tool 因而解析到同一个 Host Service，不依赖 Web-only Canvas owner。
 
-实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 在 Provider 执行、Agent Tool、Media Asset 与 UI 之前，负责 Domain Value、Migration、严格 Replay、Runtime Invariant、Host Authorization/Audit、bounded Projection、独立 Layout Persistence、Typert Mutation/History API 与单一 Host façade。
+Web 表层现在把 `@deepseek-ai/dsh-client-ui-canvas` 作为一个 `conversation.view` consumer 挂载在上述 Projection 之上。Minimal 与 Editor 是同一 authoritative state 上的 Browser-local presentation mode；切换 mode 不产生 Session Event，常驻 Conversation Composer 继续位于 view ring 之外。N07 shell 实现八状态 Product State 与 stale-result 行为，但在 Host execution 存在前保持 Run/Retry/Cancel disabled。UI 专属 rationale 由 [Canvas Web Shell Agent Note](2026-08-20-canvas-web-shell.zh.md) 负责。
+
+实施工作拆分为 [Canvas V2.1 workplan](../../../workplans/canvas-v2.1/README.md) 中可独立评审的节点。Canvas package 负责 Domain Value、Migration、严格 Replay、Runtime Invariant、Host Authorization/Audit、bounded Projection、独立 Layout Persistence、Typert Mutation/History API 与单一 Host façade。Web Presentation 是独立 Consumer；Provider 执行、Agent Tool 与 Media Asset 仍属于后续层。
 
 ## Alternatives considered
 
@@ -84,8 +86,9 @@ Remote namespace 只发布 Host 上已经存在的行为。当前 active endpoin
 - 发出 cursor 后再 append 更新的 run，Run History 分页仍保持 bounded 且稳定。
 - 生成的 Canvas Remote contribution 通过 `api-remotes` 挂载，built HTTP chain 可以实际修改 Host Canvas state。
 - 所有 shipped profile 都通过 `dsh-base` 挂载同一个 Host `ctx.canvas` Service。
+- Web Canvas View 消费 Session Projection，不替换 Conversation Composer，也不创建第二套 durable Canvas state。
 - Provider 执行、Agent Tool、Asset Route 与 UI 继续作为同一 Session/Canvas authority 的 consumer，而不是独立状态源。
 
 ## Risks
 
-Whole Canvas Event 比 delta 更大，因此 `CanvasSnapshot` 与 Projection value 必须保持 UI-scale。Layout 与 semantic graph 故意独立演进；未来 Editor 必须把坐标视为可选 presentation hint，并忽略与当前 graph 不相关的 entry。Projection 与 History 都是 derived view，不是 durability；Session replay 与严格 package invariant 仍是 authority。稳定 cursor 语义依赖 append-only Session sequence。当前 Browser human id 在单用户部署中只是 session-level surrogate；未来 Identity layer 必须替换该 attribution，同时仍把 Authorization 留在 Host。当前 Authorization Policy 只区分 Actor Kind，未来多用户 ownership 需要在同一 Host seam 后增强 policy，而不是把权限逻辑分叉到各 consumer。
+Whole Canvas Event 比 delta 更大，因此 `CanvasSnapshot` 与 Projection value 必须保持 UI-scale。Layout 与 semantic graph 故意独立演进；未来 Editor 必须把坐标视为可选 presentation hint，并忽略与当前 graph 不相关的 entry。Projection 与 History 都是 derived view，不是 durability；Session replay 与严格 package invariant 仍是 authority。稳定 cursor 语义依赖 append-only Session sequence。当前 Browser human id 在单用户部署中只是 session-level surrogate；未来 Identity layer 必须替换该 attribution，同时仍把 Authorization 留在 Host。Browser Product State helper 有意与 Host 规则保持同构，而不是 runtime Host import，因此 State Machine 改动必须同步更新两侧并由测试固定。当前 Authorization Policy 只区分 Actor Kind，未来多用户 ownership 需要在同一 Host seam 后增强 policy，而不是把权限逻辑分叉到各 consumer。
