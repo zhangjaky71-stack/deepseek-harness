@@ -23,6 +23,11 @@ const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/
 
 /** Stable registry rejection. */
 export class MediaNodeRegistryError extends Error {
+  /**
+   * Create a registry failure.
+   * @param message - human-readable failure reason.
+   * @param code - stable machine-readable registry code.
+   */
   constructor(message: string, readonly code: MediaNodeRegistryErrorCode) {
     super(message)
     this.name = 'MediaNodeRegistryError'
@@ -46,7 +51,11 @@ function assertPortNames(definition: MediaNodeDefinition, direction: 'inputs' | 
   }
 }
 
-/** Validate one definition independently from registry state. */
+/**
+ * Validate one definition independently from registry state.
+ * @param definition - candidate definition supplied by a node plugin.
+ * @throws MediaNodeRegistryError when version, ports, lifecycle, UI metadata, or defaults are invalid.
+ */
 export function assertMediaNodeDefinition(definition: MediaNodeDefinition): void {
   if (!Number.isSafeInteger(definition.version) || definition.version < 1) {
     throw new MediaNodeRegistryError(`${definition.type} node version must be a positive safe integer`, 'MEDIA_NODE_INVALID_DEFINITION')
@@ -84,11 +93,20 @@ export class MediaNodeRegistry extends Service {
   private readonly definitions = new Map<string, MediaNodeDefinition>()
   private readonly listeners = new Set<(change: MediaNodeRegistryChange) => void>()
 
+  /**
+   * Create the process-local definition registry.
+   * @param ctx - owning Cordis context.
+   */
   constructor(ctx: Context) {
     super(ctx, 'mediaNodes')
   }
 
-  /** Register one versioned definition on the caller plugin's effect lifetime. */
+  /**
+   * Register one versioned definition on the caller plugin's effect lifetime.
+   * @param definition - immutable semantic metadata supplied by a node plugin.
+   * @returns idempotent disposer for the registration.
+   * @throws MediaNodeRegistryError for invalid or duplicate definitions.
+   */
   register(definition: MediaNodeDefinition): () => void {
     assertMediaNodeDefinition(definition)
     const key = keyOf(definition.type, definition.version)
@@ -108,27 +126,51 @@ export class MediaNodeRegistry extends Service {
     return () => { void disposeEffect() }
   }
 
-  /** Resolve one exact definition. Omitted version means V1. */
+  /**
+   * Resolve one exact definition; an omitted version addresses V1.
+   * @param type - semantic node kind.
+   * @param version - positive node definition version.
+   * @returns active definition or `undefined` when absent.
+   */
   get(type: MediaWorkflowNodeType, version = DEFAULT_NODE_VERSION): MediaNodeDefinition | undefined {
     return this.definitions.get(keyOf(type, version))
   }
 
+  /**
+   * Resolve one required definition.
+   * @param ref - exact type/version reference.
+   * @returns active definition.
+   * @throws MediaNodeRegistryError when the definition is unknown.
+   */
   require(ref: MediaNodeDefinitionRef): MediaNodeDefinition {
     const definition = this.get(ref.type, ref.version)
     if (definition !== undefined) return definition
     throw new MediaNodeRegistryError(`media node definition ${keyOf(ref.type, ref.version)} is not registered`, 'MEDIA_NODE_UNKNOWN_DEFINITION')
   }
 
+  /**
+   * Resolve the exact definition referenced by one semantic workflow node.
+   * @param node - semantic node-like value.
+   * @returns active definition or `undefined` when absent.
+   */
   resolveNode(node: MediaNodeLike): MediaNodeDefinition | undefined {
     return this.get(node.type, node.nodeVersion ?? DEFAULT_NODE_VERSION)
   }
 
-  /** Stable ordered snapshot of all active definitions. */
+  /**
+   * Return a stable ordered snapshot of all active definitions.
+   * @returns definitions ordered by type then version.
+   */
   list(): readonly MediaNodeDefinition[] {
     return [...this.definitions.values()].sort((left, right) => left.type.localeCompare(right.type) || left.version - right.version)
   }
 
-  /** Parse and normalize one node config through its registered schema. */
+  /**
+   * Parse and normalize one node config through its exact registered schema.
+   * @param node - semantic node-like value.
+   * @returns parsed JSON-safe config including schema defaults.
+   * @throws MediaNodeRegistryError for unknown definitions or invalid config.
+   */
   parseConfig(node: MediaNodeLike): MediaNodeConfig {
     const definition = this.resolveNode(node)
     if (definition === undefined) {
@@ -142,13 +184,24 @@ export class MediaNodeRegistry extends Service {
     }
   }
 
+  /**
+   * Require a definition to be available for new authoring.
+   * @param ref - exact definition reference.
+   * @returns creatable definition.
+   * @throws MediaNodeRegistryError when unknown or non-creatable.
+   */
   assertCreatable(ref: MediaNodeDefinitionRef): MediaNodeDefinition {
     const definition = this.require(ref)
     if (definition.lifecycle.creatable) return definition
     throw new MediaNodeRegistryError(`media node definition ${keyOf(ref.type, ref.version)} is not creatable`, 'MEDIA_NODE_NOT_CREATABLE')
   }
 
-  /** Reject a node before execution when its intrinsic lifecycle forbids execution. */
+  /**
+   * Require a node's intrinsic lifecycle to permit execution.
+   * @param node - semantic node-like value.
+   * @returns executable definition.
+   * @throws MediaNodeRegistryError when unknown or intrinsically non-executable.
+   */
   assertExecutable(node: MediaNodeLike): MediaNodeDefinition {
     const definition = this.resolveNode(node)
     if (definition === undefined) {
@@ -160,7 +213,11 @@ export class MediaNodeRegistry extends Service {
     return definition
   }
 
-  /** Subscribe on the caller plugin's effect lifetime. */
+  /**
+   * Subscribe on the caller plugin's effect lifetime.
+   * @param listener - synchronous registration/unregistration observer.
+   * @returns idempotent disposer.
+   */
   onChange(listener: (change: MediaNodeRegistryChange) => void): () => void {
     const disposeEffect = this.ctx.effect(() => {
       this.listeners.add(listener)
