@@ -3,7 +3,12 @@
 import type { CanvasAssetRef, CanvasLayoutSnapshot, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CanvasMode, CanvasSaveStatus, CanvasViewInjected } from '../types.ts'
+import type {
+  CanvasInteractionSelection,
+  CanvasMode,
+  CanvasSaveStatus,
+  CanvasViewInjected,
+} from '../types.ts'
 import { deriveCanvasPresentation } from './state.ts'
 import css from './CanvasView.module.css'
 
@@ -11,10 +16,21 @@ import css from './CanvasView.module.css'
 export type CanvasViewProps = ConvViewProps & InjectFace<CanvasViewInjected> & PropsLocale<'canvas'>
 
 /** Canvas tab root. Current business state comes only from Session Projection. */
-export function CanvasView({ useProjection, useMode, setMode, t }: CanvasViewProps) {
+export function CanvasView({
+  useProjection,
+  useMode,
+  useInteraction,
+  setMode,
+  selectNode,
+  selectEdge,
+  selectOutput,
+  clearSelection,
+  t,
+}: CanvasViewProps) {
   const projectedCanvas = useProjection('canvas')
   const layout = useProjection('canvasLayout')
   const mode = useMode(value => value)
+  const interaction = useInteraction(value => value)
 
   return (
     <section className={css.root} aria-label={t('view.canvas')}>
@@ -43,19 +59,39 @@ export function CanvasView({ useProjection, useMode, setMode, t }: CanvasViewPro
       {projectedCanvas === undefined
         ? <div className={css.loading} role="status">{t('projection.loading')}</div>
         : mode === 'minimal'
-          ? <MinimalCanvas canvas={projectedCanvas} t={t} />
-          : <WorkflowEditorShell canvas={projectedCanvas} layout={layout ?? null} t={t} />}
+          ? (
+            <MinimalCanvas
+              canvas={projectedCanvas}
+              interaction={interaction}
+              onSelectOutput={selectOutput}
+              t={t}
+            />
+          )
+          : (
+            <WorkflowEditorShell
+              canvas={projectedCanvas}
+              layout={layout ?? null}
+              interaction={interaction}
+              onSelectNode={selectNode}
+              onSelectEdge={selectEdge}
+              onSelectOutput={selectOutput}
+              onClearSelection={clearSelection}
+              t={t}
+            />
+          )}
     </section>
   )
 }
 
 interface BodyProps {
   readonly canvas: CanvasSnapshot | null
+  readonly interaction?: CanvasInteractionSelection
+  readonly onSelectOutput?: (canvas: CanvasSnapshot, assetIndex: number) => void
   readonly t: CanvasViewProps['t']
 }
 
 /** Minimal mode: product state plus generated result only; no DAG detail. */
-export function MinimalCanvas({ canvas, t }: BodyProps) {
+export function MinimalCanvas({ canvas, interaction, onSelectOutput, t }: BodyProps) {
   const presentation = deriveCanvasPresentation(canvas)
   return (
     <div className={css.minimal} data-canvas-state={presentation.state}>
@@ -65,7 +101,7 @@ export function MinimalCanvas({ canvas, t }: BodyProps) {
       <section className={css.outputSection} aria-label={t('minimal.output')}>
         <h3>{t('minimal.output')}</h3>
         {presentation.showOutput && canvas?.output !== null
-          ? <OutputGrid canvas={canvas} t={t} />
+          ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} />
           : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}
       </section>
     </div>
@@ -74,12 +110,26 @@ export function MinimalCanvas({ canvas, t }: BodyProps) {
 
 interface EditorProps extends BodyProps {
   readonly layout: CanvasLayoutSnapshot | null
+  readonly onSelectNode?: CanvasViewInjected['selectNode']
+  readonly onSelectEdge?: CanvasViewInjected['selectEdge']
+  readonly onClearSelection?: CanvasViewInjected['clearSelection']
 }
 
-/** Editor mode shell. It intentionally does not implement DAG editing in N07. */
-export function WorkflowEditorShell({ canvas, layout, t }: EditorProps) {
+/** Editor mode shell. N08 adds selection semantics but still does not implement DAG mutation. */
+export function WorkflowEditorShell({
+  canvas,
+  layout,
+  interaction,
+  onSelectNode,
+  onSelectEdge,
+  onSelectOutput,
+  onClearSelection,
+  t,
+}: EditorProps) {
   const presentation = deriveCanvasPresentation(canvas)
   const workflow = canvas?.workflow ?? null
+  const selectedNodes = new Set(interaction?.selectedNodeIds ?? [])
+  const selectedEdges = new Set(interaction?.selectedEdgeIds ?? [])
   return (
     <div className={css.editor} data-canvas-state={presentation.state}>
       <aside className={css.editorSide}>
@@ -98,24 +148,58 @@ export function WorkflowEditorShell({ canvas, layout, t }: EditorProps) {
             <h3>{workflow?.name ?? t('editor.noWorkflow')}</h3>
             <p>{t('editor.placeholder')}</p>
           </div>
+          {onClearSelection !== undefined && (
+            <button type="button" className={css.clearSelection} onClick={onClearSelection}>
+              ×
+            </button>
+          )}
         </div>
         {workflow !== null && (
-          <div className={css.nodeList}>
-            {workflow.nodes.map(node => (
-              <article className={css.nodeCard} key={node.id}>
-                <strong>{node.name ?? node.type}</strong>
-                <span>{node.type}</span>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className={css.nodeList}>
+              {workflow.nodes.map(node => (
+                <button
+                  type="button"
+                  className={css.nodeCard}
+                  key={node.id}
+                  aria-pressed={selectedNodes.has(node.id)}
+                  data-selected={selectedNodes.has(node.id) ? 'true' : 'false'}
+                  onClick={() => { if (canvas !== null) onSelectNode?.(canvas, node.id) }}
+                >
+                  <strong>{node.name ?? node.type}</strong>
+                  <span>{node.type}</span>
+                </button>
+              ))}
+            </div>
+            {workflow.edges.length > 0 && (
+              <div className={css.edgeList} aria-label={t('editor.edges')}>
+                {workflow.edges.map(edge => (
+                  <button
+                    type="button"
+                    className={css.edgeCard}
+                    key={edge.id}
+                    aria-pressed={selectedEdges.has(edge.id)}
+                    data-selected={selectedEdges.has(edge.id) ? 'true' : 'false'}
+                    onClick={() => { if (canvas !== null) onSelectEdge?.(canvas, edge.id) }}
+                  >
+                    <span>{edge.sourceNodeId}</span>
+                    <strong>→</strong>
+                    <span>{edge.targetNodeId}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
-        {presentation.showOutput && canvas !== null && <OutputGrid canvas={canvas} t={t} />}
+        {presentation.showOutput && canvas !== null && (
+          <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} />
+        )}
       </section>
     </div>
   )
 }
 
-function StateCard({ canvas, t }: BodyProps) {
+function StateCard({ canvas, t }: Pick<BodyProps, 'canvas' | 't'>) {
   const { state } = deriveCanvasPresentation(canvas)
   const runError = canvas?.run?.error
   return (
@@ -152,7 +236,12 @@ function PrimaryAction({
   )
 }
 
-function OutputGrid({ canvas, t }: { readonly canvas: CanvasSnapshot; readonly t: CanvasViewProps['t'] }) {
+function OutputGrid({ canvas, interaction, onSelectOutput, t }: {
+  readonly canvas: CanvasSnapshot
+  readonly interaction?: CanvasInteractionSelection
+  readonly onSelectOutput?: (canvas: CanvasSnapshot, assetIndex: number) => void
+  readonly t: CanvasViewProps['t']
+}) {
   const output = canvas.output
   if (output === null) return null
   return (
@@ -162,6 +251,8 @@ function OutputGrid({ canvas, t }: { readonly canvas: CanvasSnapshot; readonly t
           key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId}
           asset={asset}
           primary={index === output.primaryAssetIndex}
+          selected={interaction?.focusedOutput?.runId === output.runId && interaction.focusedOutput.assetIndex === index}
+          onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }}
           t={t}
         />
       ))}
@@ -169,9 +260,11 @@ function OutputGrid({ canvas, t }: { readonly canvas: CanvasSnapshot; readonly t
   )
 }
 
-function AssetCard({ asset, primary, t }: {
+function AssetCard({ asset, primary, selected, onSelect, t }: {
   readonly asset: CanvasAssetRef
   readonly primary: boolean
+  readonly selected: boolean
+  readonly onSelect?: () => void
   readonly t: CanvasViewProps['t']
 }) {
   const media = asset.kind === 'image' ? asset.image : asset.video
@@ -179,14 +272,21 @@ function AssetCard({ asset, primary, t }: {
     ? `${media.width} × ${media.height}`
     : media.mediaType
   return (
-    <article className={css.assetCard}>
+    <button
+      type="button"
+      className={css.assetCard}
+      aria-pressed={selected}
+      data-selected={selected ? 'true' : 'false'}
+      disabled={onSelect === undefined}
+      onClick={onSelect}
+    >
       <div className={css.assetGlyph} aria-hidden="true">{asset.kind === 'image' ? '▧' : '▶'}</div>
       <div>
         <strong>{t(asset.kind === 'image' ? 'asset.image' : 'asset.video')}</strong>
         <span>{dimensions}</span>
       </div>
       {primary && <em>{t('asset.primary')}</em>}
-    </article>
+    </button>
   )
 }
 
