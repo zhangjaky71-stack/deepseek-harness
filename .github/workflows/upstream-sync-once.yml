@@ -1,0 +1,44 @@
+name: one-shot upstream sync
+
+on:
+  push:
+    branches:
+      - sync/upstream-rc8
+
+permissions:
+  contents: write
+
+jobs:
+  merge-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sync trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge official master onto private main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
+          git fetch upstream master --no-tags
+
+          trigger_sha="${GITHUB_SHA}"
+          git fetch origin main
+          git reset --hard origin/main
+
+          if ! git merge --no-ff --no-edit upstream/master; then
+            echo "::error::Upstream merge has conflicts; no branch update was pushed."
+            echo "Conflict files:"
+            git diff --name-only --diff-filter=U
+            echo "Status:"
+            git status --short
+            exit 1
+          fi
+
+          echo "Merged tree: $(git rev-parse HEAD)"
+          echo "Official upstream: $(git rev-parse upstream/master)"
+          git push --force-with-lease="refs/heads/sync/upstream-rc8:${trigger_sha}" origin HEAD:refs/heads/sync/upstream-rc8
