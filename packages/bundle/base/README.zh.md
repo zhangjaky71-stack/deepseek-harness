@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-以 profile 组合包形式交付的共享 dsh 核心：[`cordis.patch.yml`](cordis.patch.yml) 在空的 profile 根之上插入全部基础插件行——模型适配器、共享的 [`agent-default-model`](../../core/agent-default-model/README.md) 选择、工具、持久化、策略、settings／credentials、遥测、Session-native Canvas Host authority，以及宿主级 subagent provider——作为每个 profile 的 `dsh.profile.bundles` 列表中的第一层。Canvas 在这里挂载，因此 Browser Remote 与后续 Agent 工具会在所有 profile 中解析到同一个 `ctx.canvas` 服务和 Session Projection 状态源。这个 bundle 既不依赖也不挂载可选的 Codex 与 Claude Code provider；选择产品集成的 Profile 会安装目标 provider 并在 host plane（宿主平面）挂载一次，Agent Preset 则决定自己的 agent 是否获得对应的面向模型委派工具。后续的组合包层（例如 [`dsh-web-app`](../web-app/README.md)）和用户 profile 的 `cordis.patch.yml` 按 id 覆盖这些行；patch 会替换目标行的整个 `config`，因此模式专属的值放在各模式组合包中，而不是这里。该包没有运行时 API；profile 组合器通过 manifest（元数据清单）的 `dsh.bundle.patch` 字段解析 patch，绝不通过代码。
+以 profile 组合包形式交付的共享 dsh 核心：[`cordis.patch.yml`](cordis.patch.yml) 在空的 profile 根之上插入全部基础插件行——模型适配器、共享的 [`agent-default-model`](../../core/agent-default-model/README.md) 选择、工具、持久化、策略、settings／credentials、遥测、Session-native Canvas Host authority 及其部署 Feature Policy，以及宿主级 subagent provider——作为每个 profile 的 `dsh.profile.bundles` 列表中的第一层。Canvas 与 `@deepseek-ai/dsh-canvas/feature-service` 会在这里一起挂载，因此 Browser Remote 与后续 Agent Tool 会在所有 shipped profile 中解析到同一个 `ctx.canvas` authority、Session Projection source 和 `ctx.canvasFeatures` deployment truth。Feature row 统一拥有经过校验的默认值，后续 profile patch 可以覆盖这些配置，但 Feature State 不会写入 Session History。这个 bundle 既不依赖也不挂载可选的 Codex 与 Claude Code provider；选择产品集成的 Profile 会安装目标 provider 并在 host plane（宿主平面）挂载一次，Agent Preset 则决定自己的 agent 是否获得对应的面向模型委派工具。后续的组合包层（例如 [`dsh-web-app`](../web-app/README.md)）和用户 profile 的 `cordis.patch.yml` 按 id 覆盖这些行；patch 会替换目标行的整个 `config`，因此模式专属的值放在各模式组合包中，而不是这里。该包没有运行时 API；profile 组合器通过 manifest（元数据清单）的 `dsh.bundle.patch` 字段解析 patch，绝不通过代码。
 
 patch 在自身上按平台门控两个 shell 栈：`bash-sandbox`/`tool-bash` 携带 `disabled: !!js process.platform === 'win32'`（bash 没有 Windows runner），它们的孪生行 `pwsh-sandbox`/`tool-pwsh` 以取反的表达式仅在 win32 挂载——同一份 patch 文件，每个宿主恰好挂载一个 shell 栈。权限面与 POSIX 完全一致：`sandbox`/`sandbox-policy` 通过 Windows ACL 受限令牌 runner（`dsh-sandbox-local` 的 win32 链 → `@deepseek-ai/dsh-sandbox-windows-acl`）执行文件效果策略，权限切换器与 approval 服务原样运行，`fs-sandbox` 继续围栏 `ctx.fs` 写入——在其旁再挂载 `dsh-fs-local` 会重复注册 `ctx.fs` 并在加载时失败。偏好不受沙盒约束的本地 pwsh 执行器或完整访问的 Windows 主机通过其 profile 或 home 的 `cordis.patch.yml` 覆盖这些行（bash 恢复配方必须完整：禁用 `pwsh-sandbox`/`tool-pwsh` 并重新启用 `bash-sandbox`/`tool-bash`——两个执行器家族注册同一个 `bash` 服务，配方不完整会在加载时直接报错）。POSIX 主机看到的是被禁用的 pwsh 行。
 
@@ -10,7 +10,7 @@ patch 在自身上按平台门控两个 shell 栈：`bash-sandbox`/`tool-bash` �
 
 ## 模型体验
 
-通过插入的行间接产生影响：该组合包选定了随发行版交付的无 persona 提示词基座、工具集合与 DeepSeek 适配器，供各模式组合包进一步特化；它自身不贡献任何模型可见文本。
+通过插入的行间接产生影响：该组合包选定了随发行版交付的无 persona 提示词基座、工具集合与 DeepSeek 适配器，供各模式组合包进一步特化；它自身不贡献任何模型可见文本。Canvas Feature Policy 同样只改变部署能力，不贡献 Prompt Text。
 
 #### KV Cache 影响
 
