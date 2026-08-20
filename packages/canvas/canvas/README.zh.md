@@ -36,13 +36,15 @@ Golden fixture 固定 V1 workflow、snapshot、layout、run-history compatibilit
 
 ## Event Sourcing 与 Replay
 
-每个被接受的语义 Canvas mutation 都对应一个 `canvas/change` Session Event，并携带完整 post-change `CanvasSnapshot`；`clear` 携带 `canvas: null`。`decodeCanvasChange()`、`applyCanvasChange()`、`applyCanvasEvent()` 与 `foldCanvas()` 构成严格 Replay 链路。
+每个被接受的语义 Canvas mutation 都对应一个 `canvas/change` Session Event，并携带完整 post-change `CanvasSnapshot`；`clear` 携带 `canvas: null`。`decodeCanvasChange()`、`applyCanvasChange()`、`applyCanvasEvent()` 与 `foldCanvas()` 构成严格 Replay 链路。当前 Run writer 使用 `run-start` 后接 `run-update`；`run-update` 覆盖 queued/running milestone，以及 `completed`、`failed`、`cancelled`、`interrupted` 四种 terminal 状态。早期 N03 的 `run-complete` 仅为历史 Session replay compatibility 保留。
+
+严格 Fold 会在整个 Session 范围跟踪 CanvasId 与 RunId。`CanvasRunId` 在完成后不能复用，即使清空 Canvas 后又在同一 Session 创建新 Canvas 也不能复用。Run lifecycle update 必须保持 Run/Workflow identity 与 `startedAt` 不变，只推进 `runRevision`；禁止 `running → queued`，terminal 后也绝不允许回到 non-terminal。`completed` 必须同时发布属于该 Run 的 durable output。
+
+CanvasService 自己拥有独立 preflight boundary：调用 `Session.append()` 前先 clone 当前 Fold state，并在 detached state 上完整 `applyCanvasChange()`。随后 Session 提供第二道仓库级边界：同步 `internal/dispatch` invariant 可在 log push 前 veto；log push 是 logical commit point；`session/event` 是 post-commit observe-only publication。Cache 只在 append 成功后同步，因此 append/invariant 失败时 Session Log 与 live Canvas cache 都保持不变。
 
 Editor Layout 使用独立 `canvas/layout-change` Event，每次携带完整 `CanvasLayoutSnapshot` 与当前 audit metadata。`foldCanvasLayout()` 重建最新 durable layout history。Package invariant 在 Session 发布前联合 fold Canvas 与 Layout stream，因此 Layout Event 不能指向另一个 Workflow，也不能引用当前 Workflow 中不存在的 Node。
 
-Invariant companion 会独立 stage 每个候选 `session/event`。格式错误或不可能的 transition 会在进入 Log 之前被拒绝。CanvasService cache 只是增量优化；cold replay 始终是恢复 authority。
-
-`canvas/change.meta` 与 event envelope 独立版本化。历史 metadata schema version 1 保持可读，不会事后虚构 actor。当前 Canvas/Layout writer 使用 metadata schema version 2，记录规范 actor/source 与可选 request/correlation id。
+Invariant companion 还保护其它 Host 代码直接调用 `Session.append('canvas/change', ...)` 的路径。历史 metadata schema version 1 和 legacy `run-complete` 在 replay 时保持可读，但新的 live Canvas writer 必须使用带规范 actor/source 的 metadata schema v2，Run lifecycle 必须写 `run-update`，并再次通过与 CanvasService 相同的 credential/header/binary Workflow audit-safe 检查。也就是说“旧数据可读”不等于“旧 writer protocol 仍可继续写”。
 
 Deployment Feature Flag 有意完全不进入 durable Canvas Event。能力开关只改变“当前部署现在允许做什么”，绝不会重写历史 Session 所记录的事实。
 
@@ -60,9 +62,9 @@ Projection fold 故意 fail-soft：无关 Event 和格式错误的 Canvas-shaped
 
 `CanvasPermission` 定义 CanvasService 与 Remote、Agent Tool、History、Asset、Restore、Variant、Layout consumer 共用的 Host action 集，包括 Canvas read/edit/run/cancel、History read、Asset read/export/delete、Workflow restore、Variant create 与 Layout write。
 
-`CanvasAuthorizationService` 是可选 Cordis Service，暴露为 `ctx.canvasAuthorization`。默认 `CanvasAuthorizationPolicy` 适合当前单用户部署，允许 human、agent、system actor；部署可以按 permission 覆盖允许的 actor kind。CanvasService 始终在 Host 做 Authorization，包括 Browser Remote 与 Layout write。
+`CanvasAuthorizationService` 是可选 Cordis Service，暴露为 `ctx.canvasAuthorization`。默认 `CanvasAuthorizationPolicy` 适合当前单用户部署，允许 human、agent、system actor；部署可以按 permission 覆盖允许的 actor kind。CanvasService 始终在 Host 做 Authorization，包括 Browser Remote 与 Layout write。创建带 `currentVariantId` 的初始 Canvas 时，除普通 `canvas.edit` 外还必须通过专门的 `canvas.variant.create` permission。
 
-`CanvasAccessContext` 只携带 durable-safe actor/source id 和可选 request/correlation id。Audit metadata 通过 allow-list materialize。语义 Workflow config 在 commit 前扫描受禁 credential/header/binary 类字段；拒绝诊断只说明字段位置，不回显字段值。
+`CanvasAccessContext` 只携带 durable-safe actor/source id 和可选 request/correlation id。Audit metadata 通过 allow-list materialize。语义 Workflow config 在 commit 前扫描受禁 credential/header/binary 类字段；拒绝诊断只说明字段位置，不回显字段值。Package invariant 会在 live Session pre-commit 再执行一次 audit-safe 检查，因此 direct Host append 不能变成 credential bypass。
 
 Authorization 与 Feature Policy 是独立检查。Authorization 回答“这个 actor 是否有权执行”；Deployment Capability 回答“这个安装当前是否提供这项能力”。Canvas mutation/query entry 会先做 Authorization，再在 domain commit 前做 Feature Policy；Feature Flag 不会替代 ACL，也不能通过直接调用 Host Service 绕过已关闭能力。
 
@@ -80,15 +82,17 @@ Feature Policy 控制“新的使用”，不抹掉“历史可读性”。即�
 
 ## CanvasService
 
-Package 默认导出 `CanvasService`，挂载为 `ctx.canvas` 并发布到 Typert namespace `canvas`。它是当前 Canvas read、已接受 Canvas/Layout write 和 bounded Session-derived History 的单一 Host façade。它在 append Session Event 前校验 exact live Agent、Authorization、适用的 Deployment Capability、Semantic/Layout invariant 和完整候选 state；只有 append 成功后才同步 derived cache。
+Package 默认导出 `CanvasService`，挂载为 `ctx.canvas` 并发布到 Typert namespace `canvas`。它是当前 Canvas read、已接受 Canvas/Layout write 和 bounded Session-derived History 的单一 Host façade。它要求 Agent 必须是 `ctx.agents` 中的 exact live object，同时 `agent.session` 也必须是当前 `ctx.sessions` 中注册的 exact live Session；仅把一个 detached `Session.create()` 包进已注册 Agent 不构成合法 durable write path。之后才会执行 Authorization、适用的 Deployment Capability、Semantic/Layout invariant、Audit Safety，以及完整 detached Fold transition；只有 append 成功后才同步 derived cache。
 
-`create()` 安装初始 Workflow；`replaceWorkflow()` 与 `editWorkflow()` 使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` 做 compare-and-set。该 fence 故意不包含 `runRevision`，因此运行生命周期变化不会让无关语义编辑 stale。`editWorkflow()` 把完整 `WorkflowEditOperation[]` 应用到 detached draft，最终校验后只 commit 一次。`selectOutput()` 只改变 primary result selection，`saveLayout()` 写独立 Layout Stream，`clear()` 记录 Canvas tombstone，同时 current layout projection 独立重置。
+`create()` 安装初始 Workflow；`replaceWorkflow()` 与 `editWorkflow()` 使用 `WorkflowRef { canvasId, workflowId, workflowRevision }` 做 compare-and-set。Canvas identity、Workflow identity 与 revision mismatch 分别返回不同稳定错误；`runRevision` 仍故意不进入 semantic fence。若 edit/replace 得到的最终 Workflow 与当前 Workflow 语义完全相同，则直接返回 current state，不 append、也不制造新 revision。否则 `editWorkflow()` 把完整 `WorkflowEditOperation[]` 应用到 detached draft，最终校验后只 commit 一次。
+
+`selectOutput()` 只改变 primary result selection，并同样具备 no-op 语义；`saveLayout()` 写独立 Layout Stream。`clear()` 是 destructive mutation，因此同样接收 `WorkflowRef` CAS，而不是只有 CanvasId；当前 Run 仍为 queued/running 时拒绝 tombstone。N16 必须先把该 Run durable 收敛成 `cancelled` 或 `interrupted`，之后才能 clear，避免长时间 Provider/Job 失去 Canvas owner。
 
 ## Browser Remote 与 Run History
 
 生成的 `./remote` contribution 现在从同一个 package 暴露 3 个 namespace：durable `canvas`（`editWorkflow`、`replaceWorkflow`、`selectOutput`、`saveLayout`、`clear`、`listRuns`、`getRun`）、deployment-global 只读 `canvasFeatures`（`get`），以及 request-local `canvasInteraction`（`stage`、`discard`）。Generated artifact 仍是 build output，绝不手工维护。
 
-Browser caller 不会为普通 Canvas mutation 传入 `CanvasAccessContext`：专用 Remote wrapper 会在 Host 创建 `human` + `browser-remote` access，再调用与其它 consumer 共用的 CanvasService 方法。Mutation 只返回小型 receipt；Browser 通过 Session Projection 读取已提交的当前 Canvas/Layout，因此刻意不存在 `getCurrent` RPC。
+Browser caller 不会为普通 Canvas mutation 传入 `CanvasAccessContext`：专用 Remote wrapper 会在 Host 创建 `human` + `browser-remote` access，再调用与其它 consumer 共用的 CanvasService 方法。Mutation 只返回小型 receipt；Browser 通过 Session Projection 读取已提交的当前 Canvas/Layout，因此刻意不存在 `getCurrent` RPC。`clear` Remote 现在携带 `WorkflowRef`，因此 stale Browser Tab 无法删除更新后的 semantic revision。
 
 `listRuns()` 与 `getRun()` 直接从 `canvas/change` Event 派生 History。分页 newest-first，默认 20 条，超过 100 会拒绝；opaque cursor 锚定 run-start Session sequence，因此分页过程中后来新增的 Run 不会重排已经开始的游标遍历。History 只返回 durable run/output DTO，不建立第二套 History Database。N09 在 Host Authorization 后再用 effective History capability gate 这两个调用。
 
@@ -135,7 +139,7 @@ Event Sourcing、Projection、Layout Persistence、Migration、Authorization、A
 ## 已知限制与后续工作
 
 - **Feature Policy 是 Capability，不等于实现本身** — Future Video/Variants/Partial Run/Provider Fallback 的 Flag 现在存在，是为了让后续节点共享同一 Deployment Truth；把 Flag 打开不会凭空生成尚未实现的 Endpoint、Provider 或 UI。
-- **没有真实 Run/Retry/Cancel 行为** — `run` 与 `cancel` 仍是预留名，不是已注册 endpoint；N15/N16 必须在 Jobs/Provider work 前调用 N09 的 execution-capability seam。
+- **没有真实 Run/Retry/Cancel 行为** — `run` 与 `cancel` 仍是预留名，不是已注册 endpoint；N15/N16 必须在 Jobs/Provider work 前调用 N09 的 execution-capability seam。N03 这里只冻结 durable `run-start` / `run-update` lifecycle vocabulary。
 - **Interaction Selection 不是 Agent Tool** — Interaction Context 已给模型 grounded referent，但真实 Canvas read/edit/run Tool 属于后续节点；stale guidance 引用规划中的 `canvas_read` contract。
 - **Region 支持只是 Seam，不是可视化 Mask Editor** — normalized region/mask DTO 已支持并受 Feature gate 控制，但绘制/编辑 Mask 与 Inpaint/Outpaint 仍属于后续 Workflow/UI。
 - **当前 Authorization Policy 只按 Actor Kind 判断** — Identity Ownership、多用户 Tenant、Workspace ACL、Approval Policy、Quota 与 Provider Cost Admission 属于同一 Host seam 后的后续治理层。

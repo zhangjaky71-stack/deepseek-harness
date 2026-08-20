@@ -3,7 +3,8 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import CanvasService, {
   CanvasId,
   CanvasRunId,
@@ -40,15 +41,14 @@ function stubAgentForSession(session: Session): StubAgent {
   return { agent, session }
 }
 
-function stubAgent(rawId: string, seed?: readonly import('@deepseek-ai/dsh-session').SessionEvent[]): StubAgent {
-  return stubAgentForSession(Session.create(SessionId(rawId), seed))
-}
-
-async function harness(seed?: readonly import('@deepseek-ai/dsh-session').SessionEvent[]) {
+async function harness(seed?: readonly SessionEvent[]) {
   const ctx = new Context()
+  await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(CanvasService)
-  const stub = stubAgent(`canvas-test-${Math.random()}`, seed)
+  const id = SessionId(`canvas-test-${Math.random()}`)
+  const session = ctx.sessions.create(id, seed === undefined ? undefined : { seed })
+  const stub = stubAgentForSession(session)
   ctx.agents.register(stub.agent)
   return { ctx, ...stub }
 }
@@ -116,7 +116,7 @@ describe('CanvasService durable authority', () => {
     expect(session.events).toHaveLength(2)
   })
 
-  it('does not publish the first three operations when the fourth operation fails', async () => {
+  it('does not publish partial operation batches when a later operation fails', async () => {
     const { ctx, agent, session } = await harness()
     const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
     const before = session.events.length
@@ -130,6 +130,22 @@ describe('CanvasService durable authority', () => {
 
     expect(session.events).toHaveLength(before)
     expect(ctx.canvas.get(agent)).toEqual(created)
+  })
+
+  it('suppresses semantic no-op workflow writes instead of manufacturing a revision', async () => {
+    const { ctx, agent, session } = await harness()
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    const before = session.seq
+
+    const renamedSame = ctx.canvas.editWorkflow(agent, workflowRef(created), [
+      { op: 'rename-workflow', name: created.workflow!.name },
+    ])
+    expect(renamedSame).toEqual(created)
+    expect(session.seq).toBe(before)
+
+    const replacedSame = ctx.canvas.replaceWorkflow(agent, workflowRef(created), created.workflow!)
+    expect(replacedSame).toEqual(created)
+    expect(session.seq).toBe(before)
   })
 
   it('rejects empty/finally-invalid edits before append', async () => {
@@ -156,6 +172,24 @@ describe('CanvasService durable authority', () => {
     expect(() => ctx.canvas.editWorkflow(agent, ref, [{ op: 'rename-workflow', name: 'stale' }])).toThrow(
       expect.objectContaining({ code: 'CANVAS_STALE_WORKFLOW_REVISION' }),
     )
+  })
+
+  it('classifies Canvas identity, workflow identity, and revision CAS failures separately', async () => {
+    const { ctx, agent } = await harness()
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    const ref = workflowRef(created)
+
+    expect(() => ctx.canvas.editWorkflow(agent, { ...ref, canvasId: CanvasId('other') }, [
+      { op: 'rename-workflow', name: 'x' },
+    ])).toThrow(expect.objectContaining({ code: 'CANVAS_NOT_FOUND' }))
+
+    expect(() => ctx.canvas.editWorkflow(agent, { ...ref, workflowId: MediaWorkflowId('other') }, [
+      { op: 'rename-workflow', name: 'x' },
+    ])).toThrow(expect.objectContaining({ code: 'CANVAS_WORKFLOW_ID_MISMATCH' }))
+
+    expect(() => ctx.canvas.editWorkflow(agent, { ...ref, workflowRevision: ref.workflowRevision + 1 }, [
+      { op: 'rename-workflow', name: 'x' },
+    ])).toThrow(expect.objectContaining({ code: 'CANVAS_STALE_WORKFLOW_REVISION' }))
   })
 
   it('replaces a workflow atomically while preserving identity and rejects another workflow id', async () => {
@@ -204,38 +238,68 @@ describe('CanvasService durable authority', () => {
     )
   })
 
-  it('clears to a null replay state and repeated reads never append', async () => {
+  it('uses WorkflowRef CAS for clear and refuses to orphan a non-terminal run', async () => {
     const { ctx, agent, session } = await harness()
     const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
-    const beforeReads = session.events.length
-    expect(ctx.canvas.get(agent)).toEqual(created)
-    expect(ctx.canvas.get(agent)).toEqual(created)
-    expect(session.events).toHaveLength(beforeReads)
+    const stale = workflowRef(created)
+    const edited = ctx.canvas.editWorkflow(agent, stale, [{ op: 'rename-workflow', name: 'new revision' }])
 
-    ctx.canvas.clear(agent, created.id)
+    expect(() => ctx.canvas.clear(agent, stale)).toThrow(
+      expect.objectContaining({ code: 'CANVAS_STALE_WORKFLOW_REVISION' }),
+    )
+
+    session.append('canvas/change', runStartChange(edited))
+    const running = ctx.canvas.get(agent)
+    if (running === null) throw new Error('expected running Canvas')
+    expect(() => ctx.canvas.clear(agent, workflowRef(running))).toThrow(
+      expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }),
+    )
+
+    session.append('canvas/change', runCompleteChange(running))
+    const completed = ctx.canvas.get(agent)
+    if (completed === null) throw new Error('expected completed Canvas')
+    ctx.canvas.clear(agent, workflowRef(completed))
     expect(ctx.canvas.get(agent)).toBeNull()
     expect(foldCanvas(session.events)).toBeNull()
-    const clearEvent = session.events.at(-1)
-    expect(clearEvent?.type).toBe('canvas/change')
-    if (clearEvent?.type === 'canvas/change') expect(clearEvent.data.canvas).toBeNull()
-
-    expect(() => ctx.canvas.clear(agent, created.id)).toThrow(expect.objectContaining({ code: 'CANVAS_NOT_FOUND' }))
   })
 
-  it('rejects duplicate create, wrong clear identity, and a non-live Agent through stable Harness errors', async () => {
+  it('keeps cache unchanged when Session pre-commit dispatch vetoes the append', async () => {
     const { ctx, agent, session } = await harness()
     const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
-    expect(() => ctx.canvas.create(agent, { workflow: baseWorkflow() })).toThrow(
-      expect.objectContaining({ code: 'CANVAS_ALREADY_EXISTS' }),
-    )
-    expect(() => ctx.canvas.clear(agent, CanvasId('other-canvas'))).toThrow(
-      expect.objectContaining({ code: 'CANVAS_NOT_FOUND' }),
-    )
+    const before = session.seq
+    const dispose = ctx.on('internal/dispatch', (_mode, eventName, args) => {
+      if (eventName !== 'session/event') return
+      const [, event] = args as [Session, SessionEvent]
+      if (event.type === 'canvas/change' && event.data.operation === 'workflow-edit') {
+        throw new Error('test precommit veto')
+      }
+    })
 
-    const impostor = stubAgentForSession(session).agent
+    expect(() => ctx.canvas.editWorkflow(agent, workflowRef(created), [
+      { op: 'rename-workflow', name: 'must not commit' },
+    ])).toThrow('test precommit veto')
+    dispose()
+
+    expect(session.seq).toBe(before)
+    expect(ctx.canvas.get(agent)).toEqual(created)
+    expect(foldCanvas(session.events)).toEqual(created)
+  })
+
+  it('requires both the exact live Agent and its exact live SessionStore entry', async () => {
+    const { ctx, agent } = await harness()
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
+
+    const impostor = stubAgentForSession(agent.session).agent
     expect(() => ctx.canvas.get(impostor)).toThrow(CanvasServiceError)
     expect(() => ctx.canvas.get(impostor)).toThrow(HarnessError)
     expect(() => ctx.canvas.get(impostor)).toThrow(expect.objectContaining({ code: 'CANVAS_AGENT_NOT_LIVE' }))
+
+    const detachedSession = Session.create(SessionId(`detached-${Math.random()}`))
+    const detached = stubAgentForSession(detachedSession).agent
+    ctx.agents.register(detached)
+    expect(() => ctx.canvas.get(detached)).toThrow(
+      expect.objectContaining({ code: 'CANVAS_AGENT_NOT_LIVE' }),
+    )
     expect(ctx.canvas.get(agent)).toEqual(created)
   })
 })

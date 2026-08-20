@@ -5,8 +5,8 @@
 | N00 | 工程实施总图与节点契约 | 节点编号、upstream baseline、跨节点不变量唯一可追溯。 |
 | N01 | Canvas Domain、类型系统与状态不变量 | `types.ts` 无运行时实现；Domain 不依赖 Browser；node type structural admission 是 open-world，不含 built-in whitelist；八种 Product State 有 Domain tests。 |
 | N02 | Schema Migration、Node Version 与 Golden Fixtures | 历史 fixture 可迁移；unknown plugin `type@version/config` 可在插件缺失时 reload；Core-only node version ownership；current schema unknown field fail loud。 |
-| N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | Agent/Browser 业务写入都经 CanvasService；相邻 workflow/run revision transition 严格按 operation 推进。 |
-| N04 | Authorization、Actor、Audit 与敏感数据边界 | UI 隐藏不是唯一权限控制。 |
+| N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | CanvasService 要求 exact-live Agent + Session；Service 自己 detached-fold preflight 后才 append；live writer meta v2 且 direct append 不能绕过 audit-safe invariant；WorkflowRef CAS 错误分类稳定；semantic no-op 不增长 revision；RunId Session-wide 唯一；`run-update` 覆盖 queued/running/completed/failed/cancelled/interrupted 且 terminal 单调；active run 不可 clear，clear 使用 WorkflowRef CAS。 |
+| N04 | Authorization、Actor、Audit 与敏感数据边界 | UI 隐藏不是唯一权限控制；所有 live mutation 有 actor/source；dedicated permission（含 `canvas.variant.create`）在 Host enforce。 |
 | N05 | Session Projection、Canvas Layout Projection | Browser 刷新/reconnect 得到 authoritative Workflow/Run/Output。 |
 | N06 | Remote、Mutation、History API | Browser 人工 mutation 不走私有 Session hack。 |
 | N07 | Canvas UI Shell、Minimal/Editor | `render-service` 持 root；ui-canvas 经 plugin/slot；UI 无第二份 authority。 |
@@ -14,12 +14,12 @@
 | N09 | Feature Flags / Settings | Harness settings authority + Host enforcement；secret 不入 Browser。 |
 | N10 | Media Node Registry | open-world custom node 不需改巨型 switch/whitelist；Browser 不复制 Host catalog。 |
 | N11 | Workflow Editor | 人工 DAG 编辑、port connect/disconnect、Host catalog、Draft/CAS 可用。 |
-| N11.5 | Harness rc.8 Compatibility | 官方 rc.8 完整 tree 已同步；dynamic client REAL composition 通过；三栏 Canvas 保留。 |
+| N11.5 | Harness rc.8 Compatibility | 官方 rc.8 完整 tree 已同步；dynamic client REAL composition 通过；三栏 Canvas 保留；Typert/lock/module-graph 等 generated artifacts 与最终源码一致。 |
 | N12 | Media Workflow Engine v2.2 | Browser-independent；Mock DAG/Partial Run/Fingerprint/Executor Registry 全部通过。 |
 | N13 | Model Registry / Resolver | Agent/Executor 不猜模型 capability；resolved model identity 可进入 fingerprint。 |
 | N14 | Executor / Provider Adapter | 不接真实云也能完整执行；换 Provider 不改 Canvas Domain/Scheduler。 |
 | N15 | Run Admission | 任何收费/长任务 Provider task 前有 Host admission 证据。 |
-| N16 | Run Lifecycle / Jobs | Run durable、可取消、可重试、可解释、可恢复判断。 |
+| N16 | Run Lifecycle / Jobs | Run durable、可取消、可重试、可解释、可恢复判断；复用 N03 `run-start/run-update`，不另造 lifecycle authority。 |
 | N17 | Image Asset / Attachment | 与 Harness attachment store 共用 binary authority；Minimal 可显示 Mock 输出。 |
 | N18 | Agent Tools / Command Bus | Agent/UI 共用同一 Domain command semantics；Tool 不直连 Provider。 |
 | N19 | History / Variant | 连续生成不丢上一版，可 restore/branch。 |

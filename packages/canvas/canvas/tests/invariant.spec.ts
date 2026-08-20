@@ -3,11 +3,17 @@ import { Context } from '@deepseek-ai/cordis'
 import {
   CANVAS_LAYOUT_CHANGE_VERSION,
   MediaWorkflowId,
+  WorkflowNodeId,
 } from '@deepseek-ai/dsh-canvas'
 import * as CanvasInvariantCompanion from '@deepseek-ai/dsh-canvas/invariant'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import { createChange } from './canvas-fixtures.ts'
+import {
+  createChange,
+  currentWriterChange,
+  runCompleteChange,
+  runStartChange,
+} from './canvas-fixtures.ts'
 
 async function setup(): Promise<Context> {
   const ctx = new Context()
@@ -18,17 +24,42 @@ async function setup(): Promise<Context> {
 }
 
 describe('Canvas stream invariants', () => {
-  it('accepts a canonical full-snapshot Canvas change', async () => {
+  it('accepts a canonical current-writer full-snapshot Canvas change', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('canvas-invariant-valid'))
-    expect(() => session.append('canvas/change', createChange())).not.toThrow()
+    expect(() => session.append('canvas/change', currentWriterChange(createChange()))).not.toThrow()
     expect(session.seq).toBe(1)
+  })
+
+  it('rejects historical metadata v1 on live writes while preserving it during late-load replay', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('canvas-invariant-meta-v1-live'))
+    expect(() => session.append('canvas/change', createChange())).toThrow(
+      expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT', packageName: '@deepseek-ai/dsh-canvas' }),
+    )
+    expect(session.seq).toBe(0)
+
+    const replayCtx = new Context()
+    await replayCtx.plugin(SessionStore)
+    const replay = replayCtx.sessions.create(SessionId('canvas-invariant-meta-v1-replay'))
+    replay.append('canvas/change', createChange())
+    await replayCtx.plugin(InvariantRegistry, { enabled: true })
+    await replayCtx.plugin(CanvasInvariantCompanion)
+    expect(replay.seq).toBe(1)
+    expect(() => replay.append('canvas/change', currentWriterChange({
+      kind: 'canvas/change',
+      version: 1,
+      operation: 'clear',
+      canvas: null,
+      meta: { schemaVersion: 1 },
+    }))).not.toThrow()
+    expect(replay.seq).toBe(2)
   })
 
   it('rejects a malformed Canvas change before commit and keeps the fold reusable', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('canvas-invariant-invalid'))
-    const change = createChange()
+    const change = currentWriterChange(createChange())
     expect(() => session.append('canvas/change', { ...change, extra: true } as never)).toThrow(
       expect.objectContaining<Partial<InvariantError>>({
         code: 'INVARIANT',
@@ -43,7 +74,7 @@ describe('Canvas stream invariants', () => {
   it('rejects secret-bearing actor extensions before Session commit', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('canvas-invariant-secret-meta'))
-    session.append('canvas/change', createChange())
+    session.append('canvas/change', currentWriterChange(createChange()))
     expect(() => session.append('canvas/change', {
       kind: 'canvas/change',
       version: 1,
@@ -62,10 +93,46 @@ describe('Canvas stream invariants', () => {
     expect(JSON.stringify(session.events)).not.toContain('sk-never-persist')
   })
 
+  it('rejects sensitive workflow config even when a Host plugin appends canvas/change directly', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('canvas-invariant-secret-workflow'))
+    const change = createChange()
+    if (change.canvas === null || change.canvas.workflow === null) throw new Error('expected workflow')
+    const workflow = change.canvas.workflow
+    const nodes = workflow.nodes.map(node => node.id === WorkflowNodeId('prompt')
+      ? { ...node, config: { ...node.config, apiKey: 'sk-never-persist-direct' } }
+      : node)
+    const unsafe = currentWriterChange({
+      ...change,
+      canvas: { ...change.canvas, workflow: { ...workflow, nodes } },
+    })
+
+    expect(() => session.append('canvas/change', unsafe)).toThrow(
+      expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT', packageName: '@deepseek-ai/dsh-canvas' }),
+    )
+    expect(session.seq).toBe(0)
+    expect(JSON.stringify(session.events)).not.toContain('sk-never-persist-direct')
+  })
+
+  it('rejects live run-complete compatibility vocabulary and requires current writers to use run-update', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('canvas-invariant-run-update'))
+    const created = currentWriterChange(createChange())
+    session.append('canvas/change', created)
+    if (created.canvas === null) throw new Error('expected Canvas')
+    const started = currentWriterChange(runStartChange(created.canvas))
+    session.append('canvas/change', started)
+    if (started.canvas === null) throw new Error('expected started Canvas')
+    expect(() => session.append('canvas/change', currentWriterChange(runCompleteChange(started.canvas)))).toThrow(
+      expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }),
+    )
+    expect(session.seq).toBe(2)
+  })
+
   it('accepts a current-workflow layout and rejects mismatched or unknown-node layout before commit', async () => {
     const ctx = await setup()
     const session = ctx.sessions.create(SessionId('canvas-layout-invariant'))
-    const change = createChange()
+    const change = currentWriterChange(createChange())
     session.append('canvas/change', change)
     if (change.canvas === null || change.canvas.workflow === null) throw new Error('test Canvas lacks workflow')
 
@@ -112,25 +179,6 @@ describe('Canvas stream invariants', () => {
       },
       meta,
     } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
-    expect(session.seq).toBe(2)
-  })
-
-  it('reconstructs existing Canvas history before validating later changes', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SessionStore)
-    const session = ctx.sessions.create(SessionId('canvas-invariant-late-load'))
-    const change = createChange()
-    session.append('canvas/change', change)
-
-    await ctx.plugin(InvariantRegistry, { enabled: true })
-    await ctx.plugin(CanvasInvariantCompanion)
-    expect(() => session.append('canvas/change', {
-      kind: 'canvas/change',
-      version: 1,
-      operation: 'clear',
-      canvas: null,
-      meta: { schemaVersion: 1 },
-    })).not.toThrow()
     expect(session.seq).toBe(2)
   })
 })

@@ -11,6 +11,7 @@ import {
 } from '@deepseek-ai/dsh-canvas'
 import type {
   CanvasChange,
+  CanvasRunStatus,
   CanvasSnapshot,
   MediaWorkflow,
   WorkflowRef,
@@ -60,6 +61,17 @@ export function createChange(
   }
 }
 
+export function currentWriterChange(change: CanvasChange): CanvasChange {
+  return {
+    ...change,
+    meta: {
+      schemaVersion: 2,
+      actor: { kind: 'system', id: 'canvas-test' },
+      source: 'host',
+    },
+  }
+}
+
 export function runStartChange(canvas: CanvasSnapshot, runId = CanvasRunId('run-main')): CanvasChange {
   if (canvas.workflow === null) throw new Error('test Canvas lacks workflow')
   return {
@@ -82,8 +94,7 @@ export function runStartChange(canvas: CanvasSnapshot, runId = CanvasRunId('run-
   }
 }
 
-export function runCompleteChange(canvas: CanvasSnapshot): CanvasChange {
-  if (canvas.workflow === null || canvas.run === null) throw new Error('test Canvas lacks workflow/run')
+function completedAssets() {
   const first = {
     kind: 'video' as const,
     video: {
@@ -106,24 +117,50 @@ export function runCompleteChange(canvas: CanvasSnapshot): CanvasChange {
       durationMs: 4000,
     },
   }
+  return [first, second] as const
+}
+
+export function runUpdateChange(canvas: CanvasSnapshot, status: CanvasRunStatus): CanvasChange {
+  if (canvas.workflow === null || canvas.run === null) throw new Error('test Canvas lacks workflow/run')
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted'
   const finishedAt = canvas.updatedAt + 1
+  const run = {
+    ...canvas.run,
+    status,
+    ...(terminal ? { finishedAt } : {}),
+    ...(status === 'failed'
+      ? { error: { category: 'provider' as const, code: 'TEST_PROVIDER_FAILURE', message: 'provider failed' } }
+      : status === 'interrupted'
+        ? { error: { category: 'interrupted' as const, code: 'TEST_INTERRUPTED', message: 'run interrupted' } }
+        : {}),
+  }
   return {
     kind: 'canvas/change',
     version: CANVAS_CHANGE_VERSION,
-    operation: 'run-complete',
+    operation: 'run-update',
     meta: { schemaVersion: 1 },
     canvas: {
       ...canvas,
       runRevision: canvas.runRevision + 1,
-      run: { ...canvas.run, status: 'completed', finishedAt },
-      output: {
-        runId: canvas.run.id,
-        workflowId: canvas.workflow.id,
-        workflowRevision: canvas.run.workflowRevision,
-        assets: [first, second],
-        primaryAssetIndex: 0,
-      },
+      run,
+      ...(status === 'completed'
+        ? {
+            output: {
+              runId: canvas.run.id,
+              workflowId: canvas.workflow.id,
+              workflowRevision: canvas.run.workflowRevision,
+              assets: completedAssets(),
+              primaryAssetIndex: 0,
+            },
+          }
+        : {}),
       updatedAt: finishedAt,
     },
   }
+}
+
+/** Historical N03 compatibility fixture. Current writers use `run-update`. */
+export function runCompleteChange(canvas: CanvasSnapshot): CanvasChange {
+  const update = runUpdateChange(canvas, 'completed')
+  return { ...update, operation: 'run-complete' }
 }

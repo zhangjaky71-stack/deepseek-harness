@@ -3,7 +3,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { applyCanvasEvent, cloneCanvasFoldState, emptyCanvasFoldState } from './fold.ts'
+import { assertCanvasWorkflowAuditSafe } from './audit.ts'
+import {
+  applyCanvasEvent,
+  cloneCanvasFoldState,
+  decodeCanvasChange,
+  emptyCanvasFoldState,
+} from './fold.ts'
 import type { CanvasFoldState } from './fold.ts'
 import {
   applyCanvasLayoutEvent,
@@ -56,6 +62,33 @@ function applyChecked(state: CombinedState, event: SessionEvent, fail: Invariant
   }
 }
 
+/**
+ * Apply current-writer-only checks at the Session pre-commit boundary.
+ * Historical seed replay remains compatible with metadata v1 and the legacy
+ * `run-complete` operation; new writes must carry audit metadata v2, must not
+ * persist credential/binary-shaped workflow fields, and use `run-update` for
+ * lifecycle transitions.
+ */
+function assertCurrentWriter(event: SessionEvent, fail: InvariantFailure): void {
+  if (event.type !== 'canvas/change') return
+  try {
+    const change = decodeCanvasChange(event.data)
+    if (change === undefined) throw new Error('Canvas event data does not decode as canvas/change')
+    if (change.meta.schemaVersion !== 2) {
+      throw new Error('new Canvas changes must use audit metadata schemaVersion 2')
+    }
+    if (change.operation === 'run-complete') {
+      throw new Error('run-complete is historical replay vocabulary; current writers must use run-update')
+    }
+    if (change.canvas?.workflow !== null && change.canvas?.workflow !== undefined) {
+      assertCanvasWorkflowAuditSafe(change.canvas.workflow)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    fail(`session event ${event.seq} violates the current Canvas writer contract: ${message}`)
+  }
+}
+
 /** Install independent incremental Canvas/layout folds over every attached Session. */
 const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
   const states = new WeakMap<Session, CombinedState>()
@@ -75,6 +108,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return
     const [session, event] = args as [Session, SessionEvent]
+    assertCurrentWriter(event, fail)
     const state = cloneState(stateFor(session))
     applyChecked(state, event, fail)
     staged.set(event, { session, state })
@@ -90,10 +124,6 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   }, { global: true })
 }, { inject: ['sessions'] })
 
-/**
- * Register this package's Canvas-stream invariant companion.
- * @param ctx - Cordis context carrying the invariant service.
- * @returns the installed registration's disposer after setup succeeds.
- */
+/** Register this package's Canvas-stream invariant companion. */
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))

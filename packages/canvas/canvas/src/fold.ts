@@ -2,6 +2,7 @@
 
 import { isDeepStrictEqual } from 'node:util'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { isCanvasRunTerminal } from './domain.ts'
 import { decodeCanvasChangeVersion, decodeCanvasSnapshot, CanvasMigrationError } from './migration.ts'
 import { canonicalCanvasAccessContext } from './audit.ts'
 import type {
@@ -9,6 +10,7 @@ import type {
   CanvasActor,
   CanvasId,
   CanvasRequestSource,
+  CanvasRunId,
   CanvasSnapshot,
 } from './types.ts'
 import type { CanvasChange, CanvasChangeMeta, CanvasOperation } from './events.ts'
@@ -18,6 +20,7 @@ const OPERATIONS: ReadonlySet<CanvasOperation> = new Set([
   'workflow-edit',
   'workflow-replace',
   'run-start',
+  'run-update',
   'run-complete',
   'output-select',
   'clear',
@@ -27,23 +30,22 @@ const OPERATIONS: ReadonlySet<CanvasOperation> = new Set([
 export interface CanvasFoldState {
   canvas: CanvasSnapshot | null
   seenCanvasIds: Set<CanvasId>
+  /** Run ids are unique across the complete Session, including across clear/re-create boundaries. */
+  seenRunIds: Set<CanvasRunId>
 }
 
-/**
- * Build an empty Canvas replay accumulator.
- * @returns mutable state before the first Canvas mutation.
- */
+/** Build an empty Canvas replay accumulator. */
 export function emptyCanvasFoldState(): CanvasFoldState {
-  return { canvas: null, seenCanvasIds: new Set() }
+  return { canvas: null, seenCanvasIds: new Set(), seenRunIds: new Set() }
 }
 
-/**
- * Clone replay state without aliasing its mutable id set.
- * @param state - current fold accumulator.
- * @returns independent accumulator suitable for pre-commit validation.
- */
+/** Clone replay state without aliasing its mutable identity sets. */
 export function cloneCanvasFoldState(state: CanvasFoldState): CanvasFoldState {
-  return { canvas: state.canvas, seenCanvasIds: new Set(state.seenCanvasIds) }
+  return {
+    canvas: state.canvas,
+    seenCanvasIds: new Set(state.seenCanvasIds),
+    seenRunIds: new Set(state.seenRunIds),
+  }
 }
 
 function invalid(subject: string, message: string): never {
@@ -90,11 +92,7 @@ function decodeMeta(value: unknown): CanvasChangeMeta {
   }
 }
 
-/**
- * Decode one value that declares itself as a Canvas change.
- * @param value - candidate durable event payload.
- * @returns current Canvas change, or `undefined` for another value kind.
- */
+/** Decode one value that declares itself as a Canvas change. */
 export function decodeCanvasChange(value: unknown): CanvasChange | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const source = value as Record<string, unknown>
@@ -168,8 +166,7 @@ function requireRunStart(current: CanvasSnapshot, next: CanvasSnapshot): void {
     || !isDeepStrictEqual(next.output, current.output)) {
     throw new Error('Canvas run-start must advance only runRevision while preserving workflow/output state')
   }
-  if (current.run !== null && current.run.status !== 'completed' && current.run.status !== 'failed'
-    && current.run.status !== 'cancelled' && current.run.status !== 'interrupted') {
+  if (current.run !== null && !isCanvasRunTerminal(current.run.status)) {
     throw new Error('Canvas run-start requires no current non-terminal run')
   }
   const run = next.run
@@ -179,8 +176,8 @@ function requireRunStart(current: CanvasSnapshot, next: CanvasSnapshot): void {
   }
 }
 
-function requireRunComplete(current: CanvasSnapshot, next: CanvasSnapshot): void {
-  requireSameIdentity(current, next, 'run-complete')
+function requireRunUpdate(current: CanvasSnapshot, next: CanvasSnapshot, operation: 'run-update' | 'run-complete'): void {
+  requireSameIdentity(current, next, operation)
   const previousRun = current.run
   const run = next.run
   if (current.workflow === null || next.workflow === null
@@ -189,13 +186,31 @@ function requireRunComplete(current: CanvasSnapshot, next: CanvasSnapshot): void
     || next.runRevision !== current.runRevision + 1
     || !sameVariant(current, next)
     || previousRun === null || run === null
-    || (previousRun.status !== 'queued' && previousRun.status !== 'running')
-    || run.status !== 'completed'
+    || isCanvasRunTerminal(previousRun.status)
     || run.id !== previousRun.id
     || run.workflowId !== previousRun.workflowId
     || run.workflowRevision !== previousRun.workflowRevision
     || run.startedAt !== previousRun.startedAt) {
-    throw new Error('Canvas run-complete must finish the current non-terminal run without changing workflow state')
+    throw new Error(`Canvas ${operation} must advance only the current non-terminal run lifecycle`)
+  }
+  if (previousRun.status === 'running' && run.status === 'queued') {
+    throw new Error(`Canvas ${operation} cannot move a running run back to queued`)
+  }
+  if (run.status !== 'queued' && run.status !== 'running' && !isCanvasRunTerminal(run.status)) {
+    throw new Error(`Canvas ${operation} contains an unsupported run status ${String(run.status)}`)
+  }
+  if (operation === 'run-complete' && run.status !== 'completed') {
+    throw new Error('Historical Canvas run-complete must finish the run as completed')
+  }
+  if (run.status === 'completed') {
+    if (next.output === null
+      || next.output.runId !== run.id
+      || next.output.workflowId !== run.workflowId
+      || next.output.workflowRevision !== run.workflowRevision) {
+      throw new Error(`Canvas ${operation} completed run must publish its durable output`)
+    }
+  } else if (!isDeepStrictEqual(next.output, current.output)) {
+    throw new Error(`Canvas ${operation} may change output only when the run completes`)
   }
 }
 
@@ -215,11 +230,7 @@ function requireOutputSelect(current: CanvasSnapshot, next: CanvasSnapshot): voi
   }
 }
 
-/**
- * Validate and apply one decoded change to mutable replay state.
- * @param state - preceding Canvas projection.
- * @param change - decoded full-snapshot mutation.
- */
+/** Validate and apply one decoded change to mutable replay state. */
 export function applyCanvasChange(state: CanvasFoldState, change: CanvasChange): void {
   if (change.operation === 'create') {
     if (state.canvas !== null) throw new Error('Canvas create requires no current Canvas')
@@ -233,7 +244,10 @@ export function applyCanvasChange(state: CanvasFoldState, change: CanvasChange):
     return
   }
   if (change.operation === 'clear') {
-    requireCurrent(state, change.operation)
+    const current = requireCurrent(state, change.operation)
+    if (current.run !== null && !isCanvasRunTerminal(current.run.status)) {
+      throw new Error('Canvas clear requires the current run to be terminal before publishing a tombstone')
+    }
     if (change.canvas !== null) throw new Error('Canvas clear must publish a null tombstone')
     state.canvas = null
     return
@@ -245,11 +259,19 @@ export function applyCanvasChange(state: CanvasFoldState, change: CanvasChange):
     case 'workflow-replace':
       requireWorkflowMutation(current, next, change.operation)
       break
-    case 'run-start':
+    case 'run-start': {
       requireRunStart(current, next)
+      const run = next.run
+      if (run === null) throw new Error('Canvas run-start must install a run')
+      if (state.seenRunIds.has(run.id)) throw new Error(`Canvas run id "${run.id}" cannot be reused in one Session`)
+      state.seenRunIds.add(run.id)
+      break
+    }
+    case 'run-update':
+      requireRunUpdate(current, next, 'run-update')
       break
     case 'run-complete':
-      requireRunComplete(current, next)
+      requireRunUpdate(current, next, 'run-complete')
       break
     case 'output-select':
       requireOutputSelect(current, next)
@@ -260,11 +282,7 @@ export function applyCanvasChange(state: CanvasFoldState, change: CanvasChange):
   state.canvas = next
 }
 
-/**
- * Apply one Session event to the strict Canvas fold.
- * @param state - mutable Canvas fold accumulator.
- * @param event - next Session event in sequence order.
- */
+/** Apply one Session event to the strict Canvas fold. */
 export function applyCanvasEvent(state: CanvasFoldState, event: SessionEvent): void {
   if (event.type !== 'canvas/change') return
   const change = decodeCanvasChange(event.data)
@@ -272,11 +290,7 @@ export function applyCanvasEvent(state: CanvasFoldState, event: SessionEvent): v
   applyCanvasChange(state, change)
 }
 
-/**
- * Reconstruct current Canvas state from the Session log.
- * @param events - contiguous Session events in sequence order.
- * @returns detached current Canvas snapshot, or `null` before create/after clear.
- */
+/** Reconstruct current Canvas state from the Session log. */
 export function foldCanvas(events: readonly SessionEvent[]): CanvasSnapshot | null {
   const state = emptyCanvasFoldState()
   for (const event of events) applyCanvasEvent(state, event)

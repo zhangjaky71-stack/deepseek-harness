@@ -2,12 +2,17 @@
 
 import type { CanvasAccessContext, CanvasSnapshot } from './types.ts'
 
-/** Canvas mutations currently committed as full post-change snapshots. */
+/**
+ * Canvas mutations currently committed as full post-change snapshots.
+ * `run-complete` is retained for historical N03 replay; current writers use
+ * `run-update` for queued/running/terminal lifecycle changes.
+ */
 export type CanvasOperation =
   | 'create'
   | 'workflow-edit'
   | 'workflow-replace'
   | 'run-start'
+  | 'run-update'
   | 'run-complete'
   | 'output-select'
   | 'clear'
@@ -22,7 +27,7 @@ export interface CanvasChangeMetaV2 extends CanvasAccessContext {
   readonly schemaVersion: 2
 }
 
-/** Versioned Canvas mutation audit metadata. */
+/** Versioned Canvas mutation audit metadata. Historical replay accepts v1; current Host writes use v2. */
 export type CanvasChangeMeta = CanvasChangeMetaV1 | CanvasChangeMetaV2
 
 /** Full post-mutation Canvas snapshot, or a null tombstone after clear. */
