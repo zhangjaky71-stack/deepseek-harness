@@ -22,8 +22,10 @@ import type { InputSubmitMode } from './contract/composer-submission.ts'
 
 /** One side effect prepared from a synchronous send-time Browser snapshot. */
 export interface ConversationPromptPreparation {
-  /** Run immediately before the ordinary Session prompt admission. */
-  prepare(): Promise<void> | void
+  /** Stage the detached snapshot against the exact ordinary prompt rpc id. */
+  prepare(rpcId: string): Promise<void> | void
+  /** Best-effort rollback when preparation or ordinary prompt admission fails. */
+  discard?(rpcId: string): Promise<void> | void
 }
 
 /**
@@ -164,9 +166,15 @@ export class ConversationController extends Service implements IConversation {
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
     const preparations = this.snapshotPromptPreparations(session.sessionId)
-    await this.runPromptPreparations(preparations)
-    const result = await session.prompt([{ type: 'text', text }], 'queue')
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const result = await session.prompt(
+      [{ type: 'text', text }],
+      'queue',
+      preparations.length === 0 ? undefined : rpcId => this.preparePrompt(preparations, rpcId),
+    )
+    if (!result.ok) {
+      await this.discardPromptPreparations(preparations)
+      throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    }
   }
 
   /**
@@ -190,9 +198,15 @@ export class ConversationController extends Service implements IConversation {
     }
     const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
     const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
-    await this.runPromptPreparations(preparations)
-    const result = await session.prompt(content, mode)
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const result = await session.prompt(
+      content,
+      mode,
+      preparations.length === 0 ? undefined : rpcId => this.preparePrompt(preparations, rpcId),
+    )
+    if (!result.ok) {
+      await this.discardPromptPreparations(preparations)
+      throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    }
     this.releaseDraftImages(attachments)
   }
 
@@ -310,7 +324,7 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /** Snapshot all registered preparation providers synchronously at the send boundary. */
-  private snapshotPromptPreparations(sessionId: SessionId): readonly ConversationPromptPreparation[] {
+  private snapshotPromptPreparations(sessionId: SessionId): ConversationPromptPreparation[] {
     const preparations: ConversationPromptPreparation[] = []
     for (const provider of this.promptPreparations.values()) {
       const preparation = provider(sessionId)
@@ -319,9 +333,55 @@ export class ConversationController extends Service implements IConversation {
     return preparations
   }
 
-  /** Execute detached preparations in deterministic registration order. */
-  private async runPromptPreparations(preparations: readonly ConversationPromptPreparation[]): Promise<void> {
-    for (const preparation of preparations) await preparation.prepare()
+  /**
+   * Prepare detached snapshots in deterministic registration order against one
+   * rpc id. If one provider rejects, roll back every provider that already
+   * staged before rethrowing so no later prompt can inherit partial context.
+   */
+  private async preparePrompt(
+    preparations: ConversationPromptPreparation[],
+    rpcId: string,
+  ): Promise<void> {
+    const prepared: ConversationPromptPreparation[] = []
+    try {
+      for (const preparation of preparations) {
+        await preparation.prepare(rpcId)
+        prepared.push(preparation)
+        ;(preparation as ConversationPromptPreparation & { __rpcId?: string }).__rpcId = rpcId
+      }
+    } catch (error) {
+      await this.discardPrepared(prepared, rpcId)
+      throw error
+    }
+  }
+
+  /** Best-effort rollback of preparations that reached the Host for a failed prompt. */
+  private async discardPromptPreparations(preparations: ConversationPromptPreparation[]): Promise<void> {
+    for (const preparation of preparations) {
+      const prepared = preparation as ConversationPromptPreparation & { __rpcId?: string }
+      const rpcId = prepared.__rpcId
+      if (rpcId === undefined) continue
+      delete prepared.__rpcId
+      try {
+        await preparation.discard?.(rpcId)
+      } catch (error) {
+        console.error('[ui-conversation] prompt preparation rollback failed:', error)
+      }
+    }
+  }
+
+  /** Reverse-order rollback for a preparation batch that failed before prompt transport. */
+  private async discardPrepared(
+    preparations: readonly ConversationPromptPreparation[],
+    rpcId: string,
+  ): Promise<void> {
+    for (let index = preparations.length - 1; index >= 0; index -= 1) {
+      try {
+        await preparations[index]?.discard?.(rpcId)
+      } catch (error) {
+        console.error('[ui-conversation] prompt preparation rollback failed:', error)
+      }
+    }
   }
 
   /** Resolve the caller scope's session face or throw on root contexts. */
