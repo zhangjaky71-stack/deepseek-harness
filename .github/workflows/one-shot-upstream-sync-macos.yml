@@ -1,0 +1,33 @@
+name: one-shot upstream sync macos
+
+on:
+  pull_request:
+    branches:
+      - sync/upstream-rc8-macos
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sync/upstream-rc8-macos
+          fetch-depth: 0
+      - name: Merge official upstream rc.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
+          git fetch upstream master --tags
+          if ! git merge --no-edit upstream/master; then
+            echo "::group::conflicted paths"
+            git diff --name-only --diff-filter=U
+            echo "::endgroup::"
+            exit 2
+          fi
+          git push origin HEAD:sync/upstream-rc8-macos
