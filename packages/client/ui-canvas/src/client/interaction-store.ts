@@ -34,17 +34,20 @@ export class CanvasInteractionStore {
   private readonly rows = new Map<SessionId, SnapshotStore<CanvasInteractionSelection>>()
 
   /** Stable observable face for one Session's transient Canvas selection. */
-  faceOf(sessionId: SessionId): SnapshotStore<CanvasInteractionSelection> {
-    return this.row(sessionId)
+  faceOf(sessionId: SessionId): SnapshotStore<CanvasInteractionSelection> { return this.row(sessionId) }
+
+  /** Select exactly one semantic node. */
+  selectNode(sessionId: SessionId, canvas: CanvasSnapshot, nodeId: WorkflowNodeId): void {
+    this.selectNodes(sessionId, canvas, [nodeId])
   }
 
-  /** Select exactly one semantic node and anchor it to the observed workflow revision. */
-  selectNode(sessionId: SessionId, canvas: CanvasSnapshot, nodeId: WorkflowNodeId): void {
+  /** Select an explicit semantic node set, used by Editor Select All and paste follow-up. */
+  selectNodes(sessionId: SessionId, canvas: CanvasSnapshot, nodeIds: readonly WorkflowNodeId[]): void {
     const anchor = anchorOf(canvas)
     if (anchor === undefined) return this.clear(sessionId)
     this.row(sessionId).set({
       anchor,
-      selectedNodeIds: [nodeId],
+      selectedNodeIds: [...nodeIds],
       selectedEdgeIds: [],
       selectedAssetRefs: [],
     })
@@ -52,20 +55,22 @@ export class CanvasInteractionStore {
 
   /** Select exactly one semantic edge. */
   selectEdge(sessionId: SessionId, canvas: CanvasSnapshot, edgeId: WorkflowEdgeId): void {
+    this.selectEdges(sessionId, canvas, [edgeId])
+  }
+
+  /** Select an explicit semantic edge set. */
+  selectEdges(sessionId: SessionId, canvas: CanvasSnapshot, edgeIds: readonly WorkflowEdgeId[]): void {
     const anchor = anchorOf(canvas)
     if (anchor === undefined) return this.clear(sessionId)
     this.row(sessionId).set({
       anchor,
       selectedNodeIds: [],
-      selectedEdgeIds: [edgeId],
+      selectedEdgeIds: [...edgeIds],
       selectedAssetRefs: [],
     })
   }
 
-  /**
-   * Focus one output candidate. The durable asset ref is copied into the
-   * selection too, so it remains meaningful after a later run changes current output.
-   */
+  /** Focus one output candidate and retain its durable asset ref. */
   selectOutput(sessionId: SessionId, canvas: CanvasSnapshot, assetIndex: number): void {
     const anchor = anchorOf(canvas)
     const output = canvas.output
@@ -94,14 +99,10 @@ export class CanvasInteractionStore {
   }
 
   /** Clear one Session's transient selection without affecting other Sessions. */
-  clear(sessionId: SessionId): void {
-    this.row(sessionId).set(EMPTY_SELECTION)
-  }
+  clear(sessionId: SessionId): void { this.row(sessionId).set(EMPTY_SELECTION) }
 
   /** Drop one Session row when an owning integration explicitly prunes it. */
-  delete(sessionId: SessionId): void {
-    this.rows.delete(sessionId)
-  }
+  delete(sessionId: SessionId): void { this.rows.delete(sessionId) }
 
   private row(sessionId: SessionId): SnapshotStore<CanvasInteractionSelection> {
     let row = this.rows.get(sessionId)

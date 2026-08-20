@@ -1,12 +1,17 @@
-/** Browser Canvas plugin: Host-capability-gated conversation view plus request-local interaction context. */
+/** Browser Canvas plugin: capability/catalog-gated view, N11 Remote mutations, and request-local interaction context. */
 
 import type {
   CanvasCapabilities,
   CanvasInteractionDiscardReceipt,
   CanvasInteractionStageReceipt,
+  CanvasLayoutMutationReceipt,
+  CanvasNodeCatalogEntry,
   CanvasSnapshot,
+  CanvasWorkflowMutationReceipt,
   DiscardCanvasInteractionRequest,
+  SaveCanvasLayoutRequest,
   StageCanvasInteractionRequest,
+  WorkflowEditOperation,
 } from '@deepseek-ai/dsh-canvas/client'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-canvas/client'
@@ -16,145 +21,140 @@ import { CanvasView } from './CanvasView.tsx'
 import { CanvasInteractionStore } from './interaction-store.ts'
 import { buildCanvasInteractionContext } from './interaction.ts'
 import { CanvasModeStore } from './mode-store.ts'
+import { createCanvasEditorStore } from './store.ts'
 import { en, NS, zh, type CanvasKey } from './locales.ts'
-import type { CanvasViewInjected } from '../types.ts'
+import type { CanvasLayoutWriteResult, CanvasViewInjected, CanvasWorkflowWriteResult } from '../types.ts'
 
-// rc.8 client export discipline: the dynamic /client entry exposes only what
-// Cordis loading and declaration-merging need. Components, stores, and pure
-// helpers remain package internals and same-package tests import them directly.
 export type * from '../types.ts'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
-    /** Canvas view shell and product-state copy. */
-    canvas: CanvasKey
-  }
-}
+declare module '@deepseek-ai/dsh-client-ui-slots' { interface LocaleNamespaceMap { canvas: CanvasKey } }
 
 type RemoteResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-/** Structural slice of the generated Canvas interaction Remote. */
 interface CanvasInteractionRemote {
-  stage(
-    sessionId: SessionId,
-    request: StageCanvasInteractionRequest,
-  ): Promise<RemoteResult<CanvasInteractionStageReceipt>>
-  discard(
-    sessionId: SessionId,
-    request: DiscardCanvasInteractionRequest,
-  ): Promise<RemoteResult<CanvasInteractionDiscardReceipt>>
+  stage(sessionId: SessionId, request: StageCanvasInteractionRequest): Promise<RemoteResult<CanvasInteractionStageReceipt>>
+  discard(sessionId: SessionId, request: DiscardCanvasInteractionRequest): Promise<RemoteResult<CanvasInteractionDiscardReceipt>>
 }
-
-/** Deployment-global read-only Canvas capability Remote. */
 interface CanvasFeatureRemote {
   get(): Promise<RemoteResult<CanvasCapabilities>>
+  listNodes(): Promise<RemoteResult<readonly CanvasNodeCatalogEntry[]>>
 }
-
+interface CanvasMutationRemote {
+  editWorkflow(sessionId: SessionId, ref: NonNullable<ReturnType<typeof workflowRef>>, operations: readonly WorkflowEditOperation[]): Promise<RemoteResult<CanvasWorkflowMutationReceipt>>
+  saveLayout(sessionId: SessionId, request: SaveCanvasLayoutRequest): Promise<RemoteResult<CanvasLayoutMutationReceipt>>
+}
 interface RemoteRoot {
   readonly canvasFeatures: CanvasFeatureRemote
   readonly canvasInteraction: CanvasInteractionRemote
+  readonly canvas: CanvasMutationRemote
 }
 
-/** Required services before the plugin can await Host capability discovery. */
 export const inject = ['slots', 'sessions', 'locale', 'conversation']
 
-/** Register the Canvas conversation tab only after Host feature discovery succeeds. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-canvas: dictionaries')
   const t = ctx.locale.bind(NS)
-  // These sources are request-context inputs as well as view interaction state:
-  // prompt preparation reads them from this apply closure before the next RPC.
-  // The renderer-facing side therefore uses the reserved injected hooks
-  // compartment rather than duplicating them into a renderer-private store.
   const modes = new CanvasModeStore()
   const interactions = new CanvasInteractionStore()
 
-  // The Browser never guesses deployment capability. If the generated feature
-  // Remote is missing, rejected, or disabled, no Canvas tab is registered.
   ctx.inject(['remote.canvasFeatures'], (featureCtx) => {
-    const remote = featureCtx.get('remote') as RemoteRoot | undefined
-    if (remote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvasFeatures injection')
+    const root = featureCtx.get('remote') as RemoteRoot | undefined
+    if (root === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvasFeatures injection')
     let active = true
     featureCtx.effect(() => () => { active = false }, 'ui-canvas: capability request lifetime')
-    void remote.canvasFeatures.get().then((result) => {
-      if (!active) return
-      if (!result.ok) {
-        console.error(`[ui-canvas] capability discovery failed: ${result.error.code}: ${result.error.message}`)
-        return
-      }
-      const capabilities = result.value
-      if (!capabilities.canvas.enabled) return
-
-      featureCtx.slots.inject('conversation.view', () => featureCtx.slots.register({
-        name: 'conversation.view',
-        id: 'canvas',
-        order: 20,
-        locale: NS,
-        label: () => t('view.canvas'),
-        inject: (sessionId: SessionId): CanvasViewInjected => {
-          if (featureCtx.sessions.binding(sessionId)?.session === undefined) {
-            throw new Error(`ui-canvas: session "${sessionId}" is unavailable`)
-          }
-          return {
-            capabilities,
-            hooks: {
-              mode: modes.faceOf(sessionId),
-              interaction: interactions.faceOf(sessionId),
-            },
-            setMode: mode => { modes.set(sessionId, mode) },
-            selectNode: (canvas, nodeId) => { interactions.selectNode(sessionId, canvas, nodeId) },
-            selectEdge: (canvas, edgeId) => { interactions.selectEdge(sessionId, canvas, edgeId) },
-            selectOutput: (canvas, assetIndex) => { interactions.selectOutput(sessionId, canvas, assetIndex) },
-            setRegion: (canvas, region) => { interactions.setRegion(sessionId, canvas, region) },
-            clearSelection: () => { interactions.clear(sessionId) },
-          }
-        },
-      }, CanvasView))
-
-      // Interaction staging is subordinate to Canvas enablement but its Remote
-      // readiness stays independent from Projection/view registration.
-      featureCtx.inject(['remote.canvasInteraction'], (interactionCtx) => {
-        const interactionRemote = interactionCtx.get('remote') as RemoteRoot | undefined
-        if (interactionRemote === undefined) {
-          throw new Error('ui-canvas: remote service unavailable after remote.canvasInteraction injection')
+    void (async () => {
+      try {
+        const result = await root.canvasFeatures.get()
+        if (!active) return
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+        const capabilities = result.value
+        if (!capabilities.canvas.enabled) return
+        let nodeCatalog: readonly CanvasNodeCatalogEntry[] = []
+        if (capabilities.editor.enabled) {
+          const catalog = await root.canvasFeatures.listNodes()
+          if (!catalog.ok) throw new Error(`${catalog.error.code}: ${catalog.error.message}`)
+          nodeCatalog = catalog.value
         }
-        interactionCtx.effect(() => interactionCtx.conversation.registerPromptPreparation('canvas-interaction', (sessionId) => {
-          const binding = interactionCtx.sessions.binding(sessionId)
-          if (binding === undefined) return undefined
-          const canvas = binding.session.projections.faceOf('canvas').getSnapshot() as CanvasSnapshot | null | undefined
-          const context = buildCanvasInteractionContext(
-            interactions.faceOf(sessionId).getSnapshot(),
-            canvas,
-            modes.faceOf(sessionId).getSnapshot(),
-          )
-          if (context === undefined) return undefined
-          const effectiveContext = capabilities.regionEdit.enabled || context.region === undefined
-            ? context
-            : (() => {
-                const { region: _region, ...withoutRegion } = context
-                return withoutRegion
-              })()
-          return {
-            prepare: async (rpcId) => {
-              const staged = await interactionRemote.canvasInteraction.stage(sessionId, { rpcId, context: effectiveContext })
-              if (!staged.ok) {
-                throw new Error(`canvas interaction stage failed: ${staged.error.code}: ${staged.error.message}`)
+        if (!active) return
+
+        featureCtx.inject(['remote.canvas'], (canvasCtx) => {
+          const remote = canvasCtx.get('remote') as RemoteRoot | undefined
+          if (remote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvas injection')
+          canvasCtx.slots.inject('conversation.view', () => canvasCtx.slots.register({
+            name: 'conversation.view', id: 'canvas', order: 20, locale: NS, label: () => t('view.canvas'), store: createCanvasEditorStore,
+            inject: (sessionId: SessionId): CanvasViewInjected => {
+              if (canvasCtx.sessions.binding(sessionId)?.session === undefined) throw new Error(`ui-canvas: session "${sessionId}" is unavailable`)
+              return {
+                capabilities, nodeCatalog,
+                hooks: { mode: modes.faceOf(sessionId), interaction: interactions.faceOf(sessionId) },
+                setMode: mode => { modes.set(sessionId, mode) },
+                selectNode: (canvas, nodeId) => { interactions.selectNode(sessionId, canvas, nodeId) },
+                selectNodes: (canvas, nodeIds) => { interactions.selectNodes(sessionId, canvas, nodeIds) },
+                selectEdge: (canvas, edgeId) => { interactions.selectEdge(sessionId, canvas, edgeId) },
+                selectEdges: (canvas, edgeIds) => { interactions.selectEdges(sessionId, canvas, edgeIds) },
+                selectOutput: (canvas, assetIndex) => { interactions.selectOutput(sessionId, canvas, assetIndex) },
+                setRegion: (canvas, region) => { interactions.setRegion(sessionId, canvas, region) },
+                clearSelection: () => { interactions.clear(sessionId) },
+                commitOperations: async (operations, expectedWorkflowRevision) => commitOperations(canvasCtx, remote.canvas, sessionId, operations, expectedWorkflowRevision),
+                saveLayout: async request => saveLayout(remote.canvas, sessionId, request),
               }
             },
-            discard: async (rpcId) => {
-              const discarded = await interactionRemote.canvasInteraction.discard(sessionId, { rpcId })
-              if (!discarded.ok) {
-                throw new Error(`canvas interaction discard failed: ${discarded.error.code}: ${discarded.error.message}`)
-              }
-            },
-          }
-        }), 'ui-canvas: prompt interaction context')
-      })
-    }, (error: unknown) => {
-      if (!active) return
-      console.error('[ui-canvas] capability discovery failed:', error)
-    })
+          }, CanvasView))
+        })
+
+        featureCtx.inject(['remote.canvasInteraction'], (interactionCtx) => {
+          const interactionRemote = interactionCtx.get('remote') as RemoteRoot | undefined
+          if (interactionRemote === undefined) throw new Error('ui-canvas: remote service unavailable after remote.canvasInteraction injection')
+          interactionCtx.effect(() => interactionCtx.conversation.registerPromptPreparation('canvas-interaction', (sessionId) => {
+            const binding = interactionCtx.sessions.binding(sessionId)
+            if (binding === undefined) return undefined
+            const canvas = binding.session.projections.faceOf('canvas').getSnapshot() as CanvasSnapshot | null | undefined
+            const context = buildCanvasInteractionContext(interactions.faceOf(sessionId).getSnapshot(), canvas, modes.faceOf(sessionId).getSnapshot())
+            if (context === undefined) return undefined
+            const effectiveContext = capabilities.regionEdit.enabled || context.region === undefined ? context : (() => { const { region: _region, ...withoutRegion } = context; return withoutRegion })()
+            return {
+              prepare: async (rpcId) => {
+                const staged = await interactionRemote.canvasInteraction.stage(sessionId, { rpcId, context: effectiveContext })
+                if (!staged.ok) throw new Error(`canvas interaction stage failed: ${staged.error.code}: ${staged.error.message}`)
+              },
+              discard: async (rpcId) => {
+                const discarded = await interactionRemote.canvasInteraction.discard(sessionId, { rpcId })
+                if (!discarded.ok) throw new Error(`canvas interaction discard failed: ${discarded.error.code}: ${discarded.error.message}`)
+              },
+            }
+          }), 'ui-canvas: prompt interaction context')
+        })
+      } catch (error) {
+        if (active) console.error('[ui-canvas] capability/catalog discovery failed:', error)
+      }
+    })()
   })
+}
+
+function currentCanvas(ctx: ClientContext, sessionId: SessionId): CanvasSnapshot | null | undefined {
+  return ctx.sessions.binding(sessionId)?.session.projections.faceOf('canvas').getSnapshot() as CanvasSnapshot | null | undefined
+}
+function workflowRef(canvas: CanvasSnapshot | null | undefined) {
+  if (canvas?.workflow === null || canvas?.workflow === undefined) return undefined
+  return { canvasId: canvas.id, workflowId: canvas.workflow.id, workflowRevision: canvas.workflowRevision }
+}
+async function commitOperations(ctx: ClientContext, remote: CanvasMutationRemote, sessionId: SessionId, operations: readonly WorkflowEditOperation[], expectedWorkflowRevision: number): Promise<CanvasWorkflowWriteResult> {
+  const ref = workflowRef(currentCanvas(ctx, sessionId))
+  if (ref === undefined) return { ok: false, status: 'save-failed', message: '当前没有可编辑的工作流' }
+  if (ref.workflowRevision !== expectedWorkflowRevision) return { ok: false, status: 'conflict', message: '工作流已被其他修改更新' }
+  try {
+    const result = await remote.editWorkflow(sessionId, ref, operations)
+    if (!result.ok) return result.error.code === 'CANVAS_STALE_WORKFLOW_REVISION'
+      ? { ok: false, status: 'conflict', message: result.error.message }
+      : { ok: false, status: 'save-failed', message: result.error.message }
+    return { ok: true, workflowRevision: result.value.ref.workflowRevision }
+  } catch (error) { return { ok: false, status: 'offline', message: error instanceof Error ? error.message : String(error) } }
+}
+async function saveLayout(remote: CanvasMutationRemote, sessionId: SessionId, request: SaveCanvasLayoutRequest): Promise<CanvasLayoutWriteResult> {
+  try {
+    const result = await remote.saveLayout(sessionId, request)
+    return result.ok ? { ok: true } : { ok: false, status: 'save-failed', message: result.error.message }
+  } catch (error) { return { ok: false, status: 'offline', message: error instanceof Error ? error.message : String(error) } }
 }
