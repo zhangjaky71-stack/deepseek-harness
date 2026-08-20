@@ -1,7 +1,7 @@
 /** Types-only media workflow node-definition vocabulary. */
 
+import type { CanvasFeatureName } from '@deepseek-ai/dsh-canvas/client'
 import type {
-  CanvasFeatureName,
   CanvasJsonValue,
   MediaPortType,
   MediaWorkflowNode,
