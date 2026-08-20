@@ -15,36 +15,42 @@ concurrency:
 jobs:
   merge-upstream:
     if: github.head_ref == 'sync/upstream-rc8'
-    runs-on: [self-hosted, dsh-win-ci, windows]
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout sync trigger
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Merge official master onto private main
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git remote remove upstream 2>$null
+          set -euo pipefail
+          work="$RUNNER_TEMP/upstream-sync"
+          rm -rf "$work"
+          mkdir -p "$work"
+          cd "$work"
+
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch origin main --no-tags
+          git checkout -b sync-base FETCH_HEAD
+
           git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
           git fetch upstream master --no-tags
 
-          $triggerSha = '${{ github.event.pull_request.head.sha }}'
-          git fetch origin main
-          git reset --hard origin/main
-
-          git merge --no-ff --no-edit upstream/master
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error 'Upstream merge has conflicts; no branch update was pushed.'
+          if ! git merge --no-ff --no-edit upstream/master; then
+            echo "::error::Upstream merge has conflicts; no branch update was pushed."
+            echo "Conflict files:"
             git diff --name-only --diff-filter=U
+            echo "Status:"
             git status --short
             exit 1
-          }
+          fi
 
-          Write-Host "Merged tree: $(git rev-parse HEAD)"
-          Write-Host "Official upstream: $(git rev-parse upstream/master)"
-          git push --force-with-lease="refs/heads/sync/upstream-rc8:$triggerSha" origin HEAD:refs/heads/sync/upstream-rc8
+          trigger_sha='${{ github.event.pull_request.head.sha }}'
+          echo "Merged tree: $(git rev-parse HEAD)"
+          echo "Official upstream: $(git rev-parse upstream/master)"
+          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" push \
+            --force-with-lease="refs/heads/sync/upstream-rc8:${trigger_sha}" \
+            origin HEAD:refs/heads/sync/upstream-rc8
