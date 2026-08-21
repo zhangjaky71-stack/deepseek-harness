@@ -1,7 +1,7 @@
 /** Bounded Canvas run-history queries derived exclusively from Session events. */
 
+import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { TypertBusinessFailure } from '@deepseek-ai/dsh-typert-protocol'
 import {
   applyCanvasEvent,
   decodeCanvasChange,
@@ -24,8 +24,8 @@ export const DEFAULT_CANVAS_HISTORY_PAGE_SIZE = 20
 /** Hard Host item-count cap for one Canvas history page. This is not a byte-size limit. */
 export const MAX_CANVAS_HISTORY_PAGE_SIZE = 100
 
-/** Stable malformed cursor/page-size failure safe for the Remote boundary. */
-export class CanvasHistoryQueryError extends TypertBusinessFailure {
+/** Stable malformed cursor/page-size failure raised inside the Host. */
+export class CanvasHistoryQueryError extends HarnessError {
   /**
    * Create one rejected bounded-history query.
    * @param message - direct rejection reason.
@@ -42,6 +42,66 @@ interface IndexedRunHistoryEntry {
 
 function cursorFor(startSeq: number): CanvasHistoryCursor {
   return `run:${startSeq}` as CanvasHistoryCursor
+}
+
+function historyRecord(value: unknown, subject: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CanvasHistoryQueryError(`${subject} must be an object`)
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== null && prototype !== Object.prototype) {
+    throw new CanvasHistoryQueryError(`${subject} must be a plain object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function historyKeys(
+  source: Record<string, unknown>,
+  allowed: readonly string[],
+  required: readonly string[],
+  subject: string,
+): void {
+  const accepted = new Set(allowed)
+  for (const key of Object.keys(source)) {
+    if (!accepted.has(key)) throw new CanvasHistoryQueryError(`${subject} contains an unsupported field`)
+  }
+  for (const key of required) {
+    if (!Object.hasOwn(source, key)) throw new CanvasHistoryQueryError(`${subject} is missing a required field`)
+  }
+}
+
+function historyId(value: unknown, subject: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new CanvasHistoryQueryError(`${subject} must be a non-empty string`)
+  }
+  return value
+}
+
+/** Validate the weak SRC boundary before a history resource is authorized. */
+export function validateListCanvasRunsRequest(value: unknown): ListCanvasRunsRequest {
+  const source = historyRecord(value, 'Canvas run-history request')
+  historyKeys(source, ['canvasId', 'cursor', 'limit'], ['canvasId'], 'Canvas run-history request')
+  if (source.cursor !== undefined && typeof source.cursor !== 'string') {
+    throw new CanvasHistoryQueryError('Canvas run-history cursor must be a string')
+  }
+  if (source.limit !== undefined && typeof source.limit !== 'number') {
+    throw new CanvasHistoryQueryError('Canvas run-history limit must be a number')
+  }
+  return {
+    canvasId: historyId(source.canvasId, 'Canvas run-history canvasId') as ListCanvasRunsRequest['canvasId'],
+    ...(source.cursor === undefined ? {} : { cursor: source.cursor as CanvasHistoryCursor }),
+    ...(source.limit === undefined ? {} : { limit: source.limit }),
+  }
+}
+
+/** Validate the weak SRC boundary before an exact Run resource is authorized. */
+export function validateGetCanvasRunRequest(value: unknown): GetCanvasRunRequest {
+  const source = historyRecord(value, 'Canvas run-history lookup')
+  historyKeys(source, ['canvasId', 'runId'], ['canvasId', 'runId'], 'Canvas run-history lookup')
+  return {
+    canvasId: historyId(source.canvasId, 'Canvas run-history canvasId') as GetCanvasRunRequest['canvasId'],
+    runId: historyId(source.runId, 'Canvas run-history runId') as GetCanvasRunRequest['runId'],
+  }
 }
 
 function decodeCursor(cursor: CanvasHistoryCursor): number {
