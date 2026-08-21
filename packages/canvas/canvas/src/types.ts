@@ -145,6 +145,7 @@ export type CanvasServiceErrorCode =
   | 'CANVAS_OUTPUT_NOT_FOUND'
   | 'CANVAS_INVALID_OUTPUT_SELECTION'
   | 'CANVAS_PERMISSION_DENIED'
+  | 'CANVAS_AUTHORIZATION_FAILED'
   | 'CANVAS_INVALID_ACCESS_CONTEXT'
   | 'CANVAS_SENSITIVE_DATA'
 
@@ -266,17 +267,31 @@ export interface CanvasAccessContext {
   readonly correlationId?: string
 }
 
+/** Resource identity supplied to external Host authorization policy. */
+export type CanvasAuthorizationResource =
+  | { readonly kind: 'session' }
+  | { readonly kind: 'canvas'; readonly canvasId: CanvasId }
+  | { readonly kind: 'workflow'; readonly canvasId: CanvasId; readonly workflowId: MediaWorkflowId }
+  | { readonly kind: 'run'; readonly canvasId: CanvasId; readonly runId: CanvasRunId }
+  | { readonly kind: 'asset'; readonly canvasId: CanvasId; readonly assetId: string }
+  | { readonly kind: 'variant'; readonly canvasId: CanvasId; readonly variantId: CanvasVariantId }
+  | { readonly kind: 'layout'; readonly canvasId: CanvasId; readonly workflowId: MediaWorkflowId }
+
 /** Complete authorization request evaluated only on the Host. */
 export interface CanvasAuthorizationRequest extends CanvasAccessContext {
   readonly permission: CanvasPermission
   readonly sessionId: string
-  readonly canvasId?: CanvasId
+  readonly resource: CanvasAuthorizationResource
 }
 
-/** Stable authorization result; deny reasons never contain credentials or arbitrary caller payloads. */
+/** Stable authorization result. Detailed policy diagnostics stay Host-internal and never contain credentials. */
 export type CanvasAuthorizationDecision =
   | { readonly allowed: true }
-  | { readonly allowed: false; readonly reason: 'actor-kind-not-allowed' }
+  | {
+    readonly allowed: false
+    readonly reason: 'denied' | 'policy-unavailable'
+    readonly policyCode?: string
+  }
 
 /** Single-user default policy with optional permission-specific actor-kind overrides. */
 export interface CanvasAuthorizationConfig {
@@ -284,9 +299,13 @@ export interface CanvasAuthorizationConfig {
   readonly permissions?: Partial<Record<CanvasPermission, readonly CanvasActorKind[]>>
 }
 
-/** CanvasService configuration used when no external `canvasAuthorization` Cordis service is mounted. */
+/** Whether Canvas may use its single-user fallback when no external authorization service is mounted. */
+export type CanvasAuthorizationMode = 'single-user-fallback' | 'required-external'
+
+/** CanvasService authorization configuration. */
 export interface CanvasServiceConfig {
   readonly authorization?: CanvasAuthorizationConfig
+  readonly authorizationMode?: CanvasAuthorizationMode
 }
 
 /** Compare-and-set identity for one current semantic workflow revision. */
