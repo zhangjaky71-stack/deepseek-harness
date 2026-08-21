@@ -17,6 +17,8 @@ const permits = new WeakMap<Session, PendingWritePermit>()
  * Execute exactly one synchronous Session append under a package-owned write permit.
  * The permit is process-local and never enters Session JSON; it protects against
  * accidental alternate Host write paths, not against malicious code in the same process.
+ * The invariant companion is optional in lightweight compositions, so a successful
+ * append does not require the permit to have been consumed.
  */
 export function withCanvasWritePermit<T>(
   session: Session,
@@ -25,20 +27,13 @@ export function withCanvasWritePermit<T>(
   append: () => T,
 ): T {
   if (permits.has(session)) throw new Error('Canvas durable write permit is already active for this Session')
-  const permit: PendingWritePermit = {
+  permits.set(session, {
     eventType,
     data: structuredClone(data),
     consumed: false,
-  }
-  permits.set(session, permit)
+  })
   try {
-    const result = append()
-    if (!permit.consumed) {
-      // The invariant companion is optional in lightweight compositions, so a
-      // successful append without a consumer is valid. When mounted, it flips
-      // this flag synchronously from Session precommit.
-    }
-    return result
+    return append()
   } finally {
     permits.delete(session)
   }
