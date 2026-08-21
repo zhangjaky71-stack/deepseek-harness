@@ -24,7 +24,7 @@ The strict fold tracks Canvas and Run identities across the entire Session. A Ru
 
 Current `canvas/change` and `canvas/layout-change` writes are package-owned. `CanvasService` executes the append under a process-local one-shot write permit; the Canvas invariant consumes the exact matching permit during Session precommit. A structurally valid current event appended by an alternate Host path is therefore rejected before publication.
 
-This fence prevents accidental authorization bypasses and architecture drift inside trusted Host code. It is not a sandbox against malicious code already executing in the same process. Historical events loaded before the invariant is mounted remain replayable without a current-write permit.
+This fence prevents accidental authorization bypasses and architecture drift inside trusted Host code. It is not a sandbox against malicious code already executing in the same process. Historical events loaded before the invariant is mounted remain replayable without a current-write permit. Production compositions that rely on mechanical direct-append rejection must mount the Canvas invariant companion; lightweight compositions without it still rely on CanvasService as the current writer.
 
 ## Host authorization
 
@@ -41,31 +41,31 @@ Exceptions from an external authorization service are normalized to policy-unava
 
 ## Actor/source provenance
 
-`CanvasAccessContext` is durable audit attribution, not caller-asserted identity. Current Host provenance binding requires:
+`CanvasAccessContext` is durable audit attribution, not caller-asserted identity. Browser and asset requests use a Host-minted single-user Browser principal (`human:host-browser`); the target Session remains a separate authorization input (`sessionId` and resource scope) rather than being reused as a human identity. Agent and system paths retain their own stronger provenance rules:
 
-- `browser-remote` → `human`, with the current single-user Host Session/Agent surrogate id.
+- `browser-remote` → the Host-minted `human:host-browser` principal.
 - `agent-tool` → `agent`, whose id exactly matches the target Agent.
 - `system-reconciler` → `system`.
-- `asset-route` → the current Host-bound human Session surrogate until a real identity layer exists.
+- `asset-route` → the same Host-minted Browser principal until a real authenticated human identity layer exists.
 - `host` → the exact target Agent identity or an explicit system actor.
 
-The package exports Host-owned constructors (`canvasHostAgentAccess`, `canvasBrowserAccess`, `canvasAgentToolAccess`, `canvasSystemAccess`) so transports/tools need not assemble provenance ad hoc. Actor ids are bounded; durable request/correlation ids are bounded to 128 characters, reject control characters/outer whitespace, and use a log-safe character set.
+The package exports Host-owned constructors (`canvasHostAgentAccess`, `canvasBrowserAccess`, `canvasAgentToolAccess`, `canvasSystemAccess`) so transports/tools need not assemble provenance ad hoc. `canvasBrowserAccess()` requires the Host caller to have resolved a target Session, but it does not turn that Session id into a user id. Actor ids are bounded; durable request/correlation ids are bounded to 128 characters, reject control characters/outer whitespace, and use a log-safe character set.
 
-The current human id is deliberately only a single-user surrogate. Multi-user identity/tenancy must replace that principal source later without moving authorization out of the Host.
+The Browser principal is deliberately only a single-user Host surrogate. A future authenticated human/tenant identity source replaces that principal behind the same Host authorization seam; the Session/resource model and permission vocabulary do not need to change.
 
 ## Sensitive durable-data boundary
 
 Canvas protects durable state structurally rather than trusting UI conventions. Workflow configuration recursively rejects known credential/header/binary carrier keys, including normalized/suffixed API-key, access/auth/session/id token, client/callback secret, private/secret key, authorization/cookie/header, base64/data-URL/blob, and raw media-byte shapes. It also rejects explicit data-URL base64 payloads, PEM private-key blocks, obvious Bearer credential strings, and common long `sk-`/`rk-` credential signatures.
 
-`assertCanvasDurableAuditSafe()` extends the current-writer boundary beyond workflow config. Durable Run diagnostics are bounded and scanned before commit, so a Provider SDK error containing Authorization headers/API credentials cannot be copied verbatim into `CanvasRunError.message`. Host/provider code must classify/redact raw failures into stable safe code + safe summary; N23 may retain additional redacted diagnostics in structured logs/traces, not Session JSON. Durable image display names are likewise bounded/scanned; binary payloads and provider raw responses remain outside Canvas state.
+`assertCanvasDurableAuditSafe()` extends the current-writer boundary beyond workflow config. Durable Run diagnostics are bounded and scanned before commit, so a Provider SDK error containing Authorization headers/API credentials cannot be copied verbatim into `CanvasRunError.message`. Host/provider code must classify/redact raw failures into stable safe code + safe summary; N23 may retain additional redacted diagnostics in structured logs/traces, not Session JSON. Durable image/video object identifiers and image display names are likewise bounded/scanned; binary payloads and provider raw responses remain outside Canvas state.
 
 These rules guarantee that Harness/Provider/Host structural credential carriers and raw provider diagnostics do not intentionally become Canvas durable state. They do **not** claim perfect secret detection for arbitrary user-authored prompt text; a user can intentionally paste secret-looking text into semantic content, and heuristic scanning cannot be a complete DLP system.
 
 ## Session Projection read authorization
 
-When `ctx.sessionProjections` is present, Canvas registers `canvas → CanvasSnapshot | null` and `canvasLayout → CanvasLayoutSnapshot | null`. Projection folds remain pure and identity-free. Canvas additionally registers browser read guards through the Session Projection registry so the same Host `canvas.read` policy controls whether those keys may leave through snapshot/history baseline/change-frame delivery.
+When `ctx.sessionProjections` is present, Canvas registers `canvas → CanvasSnapshot | null` and `canvasLayout → CanvasLayoutSnapshot | null`. Projection folds remain pure and identity-free. Canvas additionally registers Browser read guards through the Session Projection registry so the same Host `canvas.read` policy controls whether those keys may leave through snapshot/history baseline/change-frame delivery.
 
-This closes the earlier gap where `ctx.canvas.get()` could be denied while Browser Projection still exposed the value. Live projection reads evaluate `canvas.read` using the exact Session id. Detached cached/history projection views carry no invented identity: with an external/required identity-dependent policy Canvas fails closed and omits the guarded keys until a live authorized Session view is available. Internal projection cells/checkpoints remain complete derived state; read denial does not rewrite Session history.
+This closes the earlier gap where `ctx.canvas.get()` could be denied while Browser Projection still exposed the value. Live projection reads carry the exact target Session id and the same Host-minted Browser principal used by Canvas Remote and Interaction. Detached cached/history projection views currently carry no invented Session identity: with an external/required identity-dependent policy Canvas fails closed and omits guarded keys until a live authorized Session view is available. Internal projection cells/checkpoints remain complete derived state; read denial does not rewrite Session history.
 
 ## Editor layout
 
@@ -73,11 +73,11 @@ Layout state remains a separate durable stream. `CanvasService.saveLayout()` req
 
 ## Browser Remote and interaction
 
-Browser mutation wrappers create trusted `human + browser-remote` access on the Host; Browser payloads do not supply their own actor/source. Mutations return small receipts. Current Canvas/layout values arrive through Session Projection, so there is deliberately no second `getCurrent` RPC.
+Browser mutation wrappers create trusted `human:host-browser + browser-remote` access on the Host; Browser payloads do not supply their own actor/source. The resolved Session id remains the authorization target and is not promoted into a user principal. Mutations return small receipts. Current Canvas/layout values arrive through Session Projection, so there is deliberately no second `getCurrent` RPC.
 
 Run history remains bounded and derived from `canvas/change`, never a second durable database. `listRuns()` and `getRun()` require `canvas.history.read` and return durable references/metadata only.
 
-`CanvasInteractionContext` is request-local rather than Canvas durable state. `CanvasInteractionService` stages a Browser selection against the exact ordinary prompt RPC id; `CanvasInteractionBridge` validates Canvas identity/revision/assets, binds it to the admitted user message, and injects the precise context through the normal logged Agent message path. Selection/focus itself is ephemeral.
+`CanvasInteractionContext` is request-local rather than Canvas durable state. `CanvasInteractionService` stages a Browser selection against the exact ordinary prompt RPC id; `CanvasInteractionBridge` uses the same Host-minted Browser principal, validates Canvas identity/revision/assets, binds the selection to the admitted user message, and injects the precise context through the normal logged Agent message path. Selection/focus itself is ephemeral.
 
 ## Deployment feature policy
 
@@ -98,8 +98,8 @@ None from this package's persistence, authorization, or projection machinery.
 ## Known Limitations and Deferred Work
 
 - The built-in policy is actor-kind based and intended for the current single-user deployment. Workspace ownership, tenant ACLs, and authenticated human identity are future Host policy concerns behind `ctx.canvasAuthorization`.
-- Browser projection authorization currently has exact Session identity but no independent user/tenant principal. Identity-dependent detached reads therefore fail closed under an external/required policy.
-- The package-local write permit prevents accidental alternate current writers, not malicious same-process code.
+- The current Browser principal is Host-minted but not authenticated per-user identity. Live authorization still carries the exact target Session separately; identity-dependent detached reads fail closed because the generic detached projection read context does not currently carry that Session target.
+- The package-local write permit prevents accidental alternate current writers only when the Canvas invariant companion is mounted; it is not a malicious same-process-code sandbox.
 - Sensitive-value signatures are defense in depth, not a general-purpose DLP engine for arbitrary user text.
 - Provider execution, retry/cancel reconciliation, physical asset stores, and authorized binary routes remain owned by later workplan nodes.
 - Repository-pinned lockfile/module-graph/generated Typert artifacts must be regenerated and validated on the final rc.8-compatible workspace before release acceptance.
