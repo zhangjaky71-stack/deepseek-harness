@@ -2,47 +2,58 @@
 
 [English](README.md) | 中文
 
-会话投影 Service Definition 与驱动注册表。它拥有 `ctx.sessionProjections`：该注册表在已提交的会话事件上驱动每个已注册的投影单元，并向载体提供完整的最终值，目前包括 api-proxy 历史尾页和 `session/projection` 推送帧。领域注册的只是纯数学；驱动权归框架。[session-projection RFC](../../../.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md) 记录了设计理由。
+Session Projection 的 Service Definition 与驱动注册表。它拥有 `ctx.sessionProjections`，在已提交的 Session 事件上驱动已注册的投影单元，并向浏览器载体提供完整最终值，例如 api-proxy 的历史基线和 `session/projection` 推送帧。领域只拥有纯投影数学；框架拥有驱动、缓存、浏览器读取过滤和变更分发。[session-projection RFC](../../../.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md) 记录了原始设计理由。
 
-## 服务：`SessionProjectionRegistry`（ctx 键：`sessionProjections`）
+## 服务：`SessionProjectionRegistry`（`ctx.sessionProjections`）
 
 ### 公开 API
 
-- `ctx.sessionProjections.register(definition): () => void` 注册一个领域的单元。key 重复或 `stateVersion` 非法都会 throw；注册是挂在调用方 fiber 上的 effect，领域插件卸载后其 key（连同缓存的 cell）从后续驱动与快照中消失——客户端将其读作能力缺失。
-- `ctx.sessionProjections.onChanged(listener): () => void` 订阅变更流：每个已提交事件、每个状态引用发生变化的单元各回调一次，携带经 schema 校验的 view 与致因 seq。与 `register` 一样绑定 effect。
-- `ctx.sessionProjections.snapshot(session): ProjectionSnapshot` 对全部已注册单元做一次一致的同步切面——`{ asOfSeq, values }`，其中 `asOfSeq` = 所有值共同反映到的最后一个事件的 seq（空日志为 `-1`）。
+- `register(definition): () => void` 注册一个领域投影单元。状态与 fold 语义保持纯同步，并由 `stateVersion` 版本化。
+- `registerReadGuard(key, guard): () => void` 为某个 projection key 注册浏览器出站可见性守卫。多个守卫按 AND 组合；守卫抛错按 deny 处理；注册绑定调用方 fiber，确保 disposal/HMR 安全。
+- `onChanged(listener): () => void` 订阅面向浏览器的 projection 变更。被读取守卫拒绝的值不会发出。
+- `snapshot(session): ProjectionSnapshot` 返回一次同步且一致的浏览器读取切面，只包含允许读取的 key。live 守卫会收到精确 Session id。
+- `checkpoint(session): ProjectionCheckpoint` 返回用于持久缓存的 detached 内部 projection state。读取守卫不会删除或修改 checkpoint 状态。
+- `viewCheckpoint(checkpoint)` 与 `restore(checkpoint, events, baseSeq)` 服务 detached 浏览器读取。detached 守卫不会获得虚构的 Session identity，因此可以 fail closed。
 
 ### 关键类型
 
-- `SessionProjectionMap`——整条链路唯一的 merge-extensible 类型表（host 侧单元、协议块、React 钩子）。值是协议层 JSON 全量值；渲染归 slot 体系管，永远不归本层。
-- `ProjectionDefinition<K, S>`——`{ key, schema, init(), apply(state, event), view(state), stateVersion }`：由三个纯同步函数外加若干声明构成的状态驱动计算单元（state-driven computation unit），绝不是一个不透明的 getter。
+- `SessionProjectionMap` 是领域 provider、协议块、client cell 与 UI hook 共享的 merge-extensible 类型表。
+- `ProjectionDefinition<K, S>` 是 `{ key, schema, init(), apply(state,event), view(state), stateVersion }`。
+- `ProjectionReadContext` 当前标记 `browser` surface，并可带精确 live `sessionId`。
+- `ProjectionReadGuard` 只判断一个已经计算完成的值能否通过浏览器 projection surface 离开 Host。它不参与 fold 数学，也不参与 durable state。
 
 ## 约定
 
-- **框架负责驱动，领域负责计算。** 注册表只订阅一次 `session/event`；每个已提交事件都会主动经过每个单元的 `apply`。领域不持有任何订阅。cell（每会话每单元一份 `{state, observedSeq}`，以 WeakMap 为键）惰性构建——在事件流过之后才注册的单元，或读取一个早于该注册的会话，都在首次触达时从 `init` 出发在内存日志上折叠。
-- **同引用即无工作。** 对与单元无关的事件，`apply` 必须返回同一个状态引用；驱动以 `Object.is` 把守变更流，因此不匹配的事件只花一次调用，不产生任何下游工作。
-- **全量值事件规则（承重）。** 携带状态的日志事件必须携带变更后的完整状态，绝不携带裸增量——这让每次状态转移始终足够廉价，也让每个被供给的值自描述（对消费方即 last-wins）。
-- **单元的同步纪律。**`init`/`apply`/`view` 必须是同步的；载体在切出页面切片的同一 tick 内读取 `snapshot()`，`asOfSeq` 之所以是一个一致切面正系于此。误写成异步的 `view` 会返回 Promise，让边界的 `schema.parse` 当场大声失败。
-- **状态是纯 JSON，`stateVersion` 是其失效锚点。** 持久投影缓存（persisted projection cache）存储 `(sessionId, key, ver, seq, val)` 行；状态形状或折叠语义一旦变化就递增 `stateVersion`，使陈旧行被丢弃，而不是被正向 apply 成垃圾。
-- **本层没有协议词汇。** 注册表只暴露变更流与快照读取面；载体（api-proxy）据此自铸各自的帧（`session/projection`）与块。
-- **可选能力。** 领域插件在 `ctx.inject(['sessionProjections'], …)` 下注册，因此不带注册表的 headless 组装完全不受影响；载体使用 `ctx.get('sessionProjections')`，注册表缺席时完全省略自己的块与帧。
+- **框架负责驱动，领域负责计算。** 注册表只订阅一次 `session/event`。每个已提交事件都会通过所有已注册单元的同步 `apply`；领域自身不拥有驱动订阅。
+- **同引用即无下游工作。** 对无关事件，`apply` 返回同一个状态引用；变更流由 `Object.is` 把关。
+- **全量值事件规则。** 携带状态的 Session event 保存变更后的完整状态，而不是裸 delta，因此 projection transition 足够廉价、replay 也自包含。
+- **Projection state 是纯 JSON。** 持久缓存 `(sessionId,key,ver,seq,val)` 只是加速捷径，不是 authority；`stateVersion` 用于失效不兼容缓存。
+- **读取授权与计算分离。** Read guard 只在值完成计算并通过 schema 校验之后运行。被拒绝的值仍保留在内部 cell/checkpoint 中，但不会出现在浏览器 snapshot/change frame 中。
+- **Read guard fail closed。** 守卫抛错等同 deny。依赖 identity 的守卫还必须处理 detached 读取没有 `sessionId` 的情况；安全敏感领域通常应拒绝。
+- **不虚构 principal。** 本注册表不负责认证 user、tenant 或 transport。领域/载体可以把精确 live Session id 作为 Host authorization seam 的输入；未来 identity 层可以扩展 carrier contract，而不污染 projection fold。
+- **Effect 拥有生命周期。** Projection unit、listener 和 read guard 都随注册 fiber dispose，HMR/卸载不能留下陈旧 projection 或安全策略。
+- **本层没有 wire vocabulary。** Block/frame 由载体定义；注册表仍然只是计算和读取控制 seam。
 
-## 职责
+## 安全职责
 
-本包承担能力 seam 的 Service Definition 与驱动角色：领域 host 插件（如 `dsh-tool-todo`）贡献单元，载体（`dsh-host-apiproxy`）消费快照与变更流，两侧互不相识。
+引入 projection read guard 的原因很简单：如果某个值还能通过 Session Projection 无条件离开 Host，那么 Host Service 上的 read permission 就不是完整的权限边界。Canvas 使用该 seam，把 `canvas.read` 同时作用于 `canvas` 和 `canvasLayout` 两个浏览器 projection key，同时仍保持两个 fold 完全不含 identity。
+
+读取守卫只是可见性过滤，不是 durable 删除。Checkpoint 和 projection cell 始终保留完整派生状态，因此策略变化不会改写 Session 历史，也不会破坏 replayability。
 
 ## 模型体验
 
-无——注册表只对已入日志的会话状态计算面向客户端的读模型，不触碰任何提示词、消息、schema、流或工具结果。
+无。Projection 只从已经写入日志的 Session state 派生客户端读模型，不影响 prompt、模型消息、tool schema、provider request 或 KV cache。
 
 #### KV Cache 影响
 
-无；投影从不组装或发送提供方请求。
+无。
 
 ## 已知限制与暂缓事项
 
-- **每个尾页携带每个已注册的 key**——尚无逐 key 的 opt-out 或惰性 key 请求形状；在值都是 UI 量级的全量状态（一张 todo 清单、一份 goal 快照）时可以接受，若某领域的值变大再重议。
-- **单元表是进程级的，因此 key 是否存在不能当作逐会话的能力信号**——只要**任何**一个 agent preset 注册了某个 key，它就出现在每个会话的快照里，包括自身组装完全不产出该值的会话。客户端必须读**值**（`plan.active`、空的 todo 列表），不能把 key 缺席当作功能缺席；如果某个单元的空值与真实值无法区分，它就该待在宿主平面——`dsh-token-meter` 正因如此留在那里。
-- **主动驱动（eager drive）逐事件触达每个单元**——按构造开销很低（全量值规则、同引用闸门），但若出现热点路径，可加按单元的事件类型预过滤，约定不变。
-- **注册表 cell 只活在内存里**——重启后首次触达时靠折叠日志重建；挂载了 `dsh-session-projection-cache` 的组合改由持久行播种该折叠。
-- **单元同步纪律只有部分可机械把关**——边界 `schema.parse` 能拒绝返回 Promise 的 `view`，但阻塞的 `apply`、或读取撕裂的非会话状态的 `apply`，只能靠评审把关；invariant 配套项记载了为何不存在运行时检查。
+- 浏览器读取上下文当前只携带精确 live Session id，不携带已认证 user/tenant principal。多用户 identity/tenancy 必须由 Host carrier/authorization 层提供，不能在本注册表中猜测。
+- Detached checkpoint/history 读取没有 live Session identity。依赖 identity 的守卫因此默认 fail closed，除非领域明确提供安全的 identity-free policy；未来 carrier 可以提供经过验证的 detached-session principal，而无需修改 projection 数学。
+- 每个浏览器 baseline 在过滤前仍会考虑所有已注册 key；当前没有客户端请求的 lazy-key 集合。
+- 单元表是进程级的，因此未加守卫的 key 是否注册不能当作逐 Session 的能力信号；消费方应解释 value，而不是仅根据 key presence 推断 feature ownership。
+- Eager drive 每个事件都会触达每个单元；当前依靠廉价的 same-reference transition 控制成本，未来可加 event-type prefilter 而不改变领域 contract。
+- Registry cell 只活在内存中；`dsh-session-projection-cache` 仍然是可选持久加速层。
+- 同步纪律仍有一部分依赖 review：schema validation 能抓住 async `view`，但 `apply` 内的阻塞或读取撕裂的非 Session state 仍属于实现错误。
