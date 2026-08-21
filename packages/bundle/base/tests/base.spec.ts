@@ -32,6 +32,8 @@ describe('dsh-base bundle', () => {
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
 
+    expect(rows.filter(row => row.id === 'invariants')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'invariants')?.name).toBe('@deepseek-ai/dsh-invariants')
     expect(rows.filter(row => row.id === 'canvas-features')).toHaveLength(1)
     expect(rows.find(row => row.id === 'canvas-features')?.name).toBe('@deepseek-ai/dsh-canvas/feature-service')
     expect(rows.filter(row => row.id === 'media-workflow')).toHaveLength(1)
@@ -39,18 +41,25 @@ describe('dsh-base bundle', () => {
     expect(rows.filter(row => row.id === 'media-workflow-builtins')).toHaveLength(1)
     expect(rows.find(row => row.id === 'media-workflow-builtins')?.name).toBe('@deepseek-ai/dsh-media-workflow/builtins')
     expect(rows.filter(row => row.id === 'canvas')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'canvas-invariant')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'canvas-invariant')?.name).toBe('@deepseek-ai/dsh-canvas/invariant')
     expect(rows.filter(row => row.id === 'canvas-interaction')).toHaveLength(1)
     expect(rows.find(row => row.id === 'canvas-interaction')?.name).toBe('@deepseek-ai/dsh-canvas/interaction-service')
 
     const featureIndex = rows.findIndex(row => row.id === 'canvas-features')
     const registryIndex = rows.findIndex(row => row.id === 'media-workflow')
     const builtinsIndex = rows.findIndex(row => row.id === 'media-workflow-builtins')
+    const canvasIndex = rows.findIndex(row => row.id === 'canvas')
+    const invariantIndex = rows.findIndex(row => row.id === 'canvas-invariant')
     const interactionIndex = rows.findIndex(row => row.id === 'canvas-interaction')
     expect(featureIndex).toBeLessThan(registryIndex)
     expect(registryIndex).toBeLessThan(builtinsIndex)
     expect(builtinsIndex).toBeLessThan(interactionIndex)
+    expect(canvasIndex).toBeLessThan(invariantIndex)
+    expect(invariantIndex).toBeLessThan(interactionIndex)
 
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-canvas', 'workspace:^')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-invariants', 'workspace:^')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-media-workflow', 'workspace:^')
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
       __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",
