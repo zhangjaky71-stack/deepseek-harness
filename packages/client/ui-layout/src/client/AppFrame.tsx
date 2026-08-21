@@ -12,6 +12,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
+import {
+  createCanvasHostInitMessage,
+  INFINITE_CANVAS_ORIGIN,
+  INFINITE_CANVAS_URL,
+  isCanvasBridgeMessage,
+  isTrustedCanvasMessage,
+} from './canvas-bridge.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
@@ -21,14 +28,65 @@ export type AppFrameProps =
   & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
 
-/** Fixed-width, local-only Infinite Canvas service URL. */
-const INFINITE_CANVAS_URL = 'http://127.0.0.1:3000/'
+type CanvasConnectionStatus = 'loading' | 'handshaking' | 'ready' | 'error'
 
 /** Center column hosting the separately-run Infinite Canvas application. */
 function CanvasColumn() {
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
+  const handshakeTimer = useRef<number | null>(null)
+  const [status, setStatus] = useState<CanvasConnectionStatus>('loading')
+
+  const clearHandshakeTimer = useCallback(() => {
+    if (handshakeTimer.current === null) return
+    window.clearTimeout(handshakeTimer.current)
+    handshakeTimer.current = null
+  }, [])
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<unknown>) => {
+      const frameWindow = frameRef.current?.contentWindow ?? null
+      if (!isCanvasBridgeMessage(event.data) || !isTrustedCanvasMessage(event, frameWindow)) return
+      clearHandshakeTimer()
+      setStatus(event.data.type === 'canvas:ready' ? 'ready' : 'error')
+    }
+
+    window.addEventListener('message', onMessage)
+    return () => {
+      clearHandshakeTimer()
+      window.removeEventListener('message', onMessage)
+    }
+  }, [clearHandshakeTimer])
+
+  const onLoad = useCallback(() => {
+    clearHandshakeTimer()
+    setStatus('handshaking')
+    const frameWindow = frameRef.current?.contentWindow
+    if (frameWindow === undefined || frameWindow === null) {
+      setStatus('error')
+      return
+    }
+
+    frameWindow.postMessage(createCanvasHostInitMessage(), INFINITE_CANVAS_ORIGIN)
+    handshakeTimer.current = window.setTimeout(() => {
+      handshakeTimer.current = null
+      setStatus(current => current === 'ready' ? current : 'error')
+    }, 8000)
+  }, [clearHandshakeTimer])
+
   return (
-    <section className={css.canvasCol} aria-label="Infinite Canvas">
-      <iframe className={css.canvasFrame} src={INFINITE_CANVAS_URL} title="Infinite Canvas" />
+    <section
+      className={css.canvasCol}
+      aria-label="Infinite Canvas"
+      aria-busy={status !== 'ready'}
+      data-canvas-status={status}
+    >
+      <iframe
+        ref={frameRef}
+        className={css.canvasFrame}
+        src={INFINITE_CANVAS_URL}
+        title="Infinite Canvas"
+        onLoad={onLoad}
+      />
     </section>
   )
 }
