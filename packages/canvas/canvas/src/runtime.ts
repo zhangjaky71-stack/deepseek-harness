@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { Remote, TypertBusinessFailure, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { CANVAS_CHANGE_VERSION } from './migration.ts'
@@ -42,7 +43,11 @@ import {
 } from './layout.ts'
 import type { CanvasLayoutChange } from './layout.ts'
 import { registerCanvasProjections } from './projection.ts'
-import { CanvasRunHistoryIndex } from './history.ts'
+import {
+  CanvasRunHistoryIndex,
+  validateGetCanvasRunRequest,
+  validateListCanvasRunsRequest,
+} from './history.ts'
 import type { CanvasFeatureService } from './feature-service.ts'
 import type { CanvasFeatureName } from './feature-types.ts'
 import { withCanvasWritePermit } from './write-authority.ts'
@@ -84,15 +89,15 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** Error returned by CanvasService before a mutation reaches the Session commit point. */
-export class CanvasServiceError extends TypertBusinessFailure {
+export class CanvasServiceError extends HarnessError {
   constructor(message: string, code: CanvasServiceErrorCode) {
     super(message, code)
   }
 }
 
 interface CanvasCache {
-  readonly state: CanvasFoldState
-  readonly history: CanvasRunHistoryIndex
+  state: CanvasFoldState
+  history: CanvasRunHistoryIndex
   observedSeq: number
 }
 
@@ -119,6 +124,40 @@ function invalidEdit(message: string): never {
   throw new CanvasServiceError(message, 'CANVAS_INVALID_EDIT')
 }
 
+const CANVAS_REMOTE_SAFE_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  CANVAS_AGENT_NOT_LIVE: 'Canvas session is no longer active',
+  CANVAS_NOT_FOUND: 'Canvas was not found',
+  CANVAS_ALREADY_EXISTS: 'Canvas already exists',
+  CANVAS_STALE_WORKFLOW_REVISION: 'Canvas workflow changed; refresh and retry',
+  CANVAS_WORKFLOW_ID_MISMATCH: 'Canvas workflow does not match the current workflow',
+  CANVAS_INVALID_EDIT: 'Canvas edit request is invalid',
+  CANVAS_OUTPUT_NOT_FOUND: 'Canvas output is not current',
+  CANVAS_INVALID_OUTPUT_SELECTION: 'Canvas output selection is invalid',
+  CANVAS_PERMISSION_DENIED: 'Canvas permission denied',
+  CANVAS_AUTHORIZATION_FAILED: 'Canvas authorization is unavailable',
+  CANVAS_INVALID_ACCESS_CONTEXT: 'Canvas access context is invalid',
+  CANVAS_SENSITIVE_DATA: 'Canvas request contains data that cannot be persisted',
+  CANVAS_INVALID_LAYOUT: 'Canvas layout request is invalid',
+  CANVAS_LAYOUT_CANVAS_MISMATCH: 'Canvas layout belongs to another Canvas generation',
+  CANVAS_LAYOUT_WORKFLOW_MISMATCH: 'Canvas layout belongs to another workflow',
+  CANVAS_STALE_LAYOUT_REVISION: 'Canvas layout changed; refresh and retry',
+  CANVAS_FEATURE_DISABLED: 'Canvas feature is disabled',
+  CANVAS_INVALID_HISTORY_QUERY: 'Canvas history request is invalid',
+})
+
+function remoteCanvasCall<T>(call: () => T): T {
+  try {
+    return call()
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      const code = String(error.code)
+      const message = CANVAS_REMOTE_SAFE_MESSAGES[code]
+      if (message !== undefined) throw new TypertBusinessFailure(message, code)
+    }
+    throw error
+  }
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const prototype = Object.getPrototypeOf(value)
@@ -135,6 +174,92 @@ function editRecord(value: unknown, subject: string): Record<string, unknown> {
   return value
 }
 
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], subject: string): void {
+  const actual = Object.keys(value).sort()
+  const expected = [...allowed].sort()
+  if (actual.join(',') !== expected.join(',')) invalidEdit(`${subject} has unsupported or missing fields`)
+}
+
+function nonEmptyId(value: unknown, subject: string): string {
+  if (typeof value !== 'string' || value.length === 0) invalidEdit(`${subject} must be a non-empty string`)
+  return value
+}
+
+function workflowRefInput(value: unknown): WorkflowRef {
+  const source = editRecord(value, 'Canvas workflow ref')
+  exactKeys(source, ['canvasId', 'workflowId', 'workflowRevision'], 'Canvas workflow ref')
+  const revision = source.workflowRevision
+  if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
+    invalidEdit('Canvas workflow ref workflowRevision must be a positive safe integer')
+  }
+  return {
+    canvasId: nonEmptyId(source.canvasId, 'Canvas workflow ref canvasId') as WorkflowRef['canvasId'],
+    workflowId: nonEmptyId(source.workflowId, 'Canvas workflow ref workflowId') as WorkflowRef['workflowId'],
+    workflowRevision: revision as number,
+  }
+}
+
+function selectOutputInput(value: unknown): SelectCanvasOutputRequest {
+  const source = editRecord(value, 'Canvas output-selection request')
+  exactKeys(source, ['assetIndex', 'runId'], 'Canvas output-selection request')
+  if (!Number.isSafeInteger(source.assetIndex) || (source.assetIndex as number) < 0) {
+    invalidEdit('Canvas output-selection assetIndex must be a non-negative safe integer')
+  }
+  return {
+    runId: nonEmptyId(source.runId, 'Canvas output-selection runId') as SelectCanvasOutputRequest['runId'],
+    assetIndex: source.assetIndex as number,
+  }
+}
+
+function finiteNumber(value: unknown, subject: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) invalidEdit(`${subject} must be finite`)
+  return value
+}
+
+function saveLayoutInput(value: unknown): SaveCanvasLayoutRequest {
+  const source = editRecord(value, 'Canvas layout request')
+  const allowed = new Set(['canvasId', 'workflowId', 'expectedLayoutRevision', 'nodePositions', 'viewport'])
+  for (const key of Object.keys(source)) {
+    if (!allowed.has(key)) invalidEdit(`Canvas layout request contains unsupported field "${key}"`)
+  }
+  for (const key of ['canvasId', 'workflowId', 'expectedLayoutRevision', 'nodePositions'] as const) {
+    if (!Object.hasOwn(source, key)) invalidEdit(`Canvas layout request is missing ${key}`)
+  }
+  if (!Number.isSafeInteger(source.expectedLayoutRevision) || (source.expectedLayoutRevision as number) < 0) {
+    invalidEdit('Canvas layout expectedLayoutRevision must be a non-negative safe integer')
+  }
+  const positions = editRecord(source.nodePositions, 'Canvas layout nodePositions')
+  const nodePositions: Record<string, { x: number; y: number }> = {}
+  for (const [nodeId, candidate] of Object.entries(positions)) {
+    if (nodeId.length === 0) invalidEdit('Canvas layout node id must be non-empty')
+    const point = editRecord(candidate, `Canvas layout node "${nodeId}" position`)
+    exactKeys(point, ['x', 'y'], `Canvas layout node "${nodeId}" position`)
+    nodePositions[nodeId] = {
+      x: finiteNumber(point.x, `Canvas layout node "${nodeId}" x`),
+      y: finiteNumber(point.y, `Canvas layout node "${nodeId}" y`),
+    }
+  }
+  let viewport: SaveCanvasLayoutRequest['viewport']
+  if (source.viewport !== undefined) {
+    const raw = editRecord(source.viewport, 'Canvas layout viewport')
+    exactKeys(raw, ['x', 'y', 'zoom'], 'Canvas layout viewport')
+    const zoom = finiteNumber(raw.zoom, 'Canvas layout viewport zoom')
+    if (zoom <= 0) invalidEdit('Canvas layout viewport zoom must be positive')
+    viewport = {
+      x: finiteNumber(raw.x, 'Canvas layout viewport x'),
+      y: finiteNumber(raw.y, 'Canvas layout viewport y'),
+      zoom,
+    }
+  }
+  return {
+    canvasId: nonEmptyId(source.canvasId, 'Canvas layout canvasId') as SaveCanvasLayoutRequest['canvasId'],
+    workflowId: nonEmptyId(source.workflowId, 'Canvas layout workflowId') as SaveCanvasLayoutRequest['workflowId'],
+    expectedLayoutRevision: source.expectedLayoutRevision as number,
+    nodePositions: nodePositions as SaveCanvasLayoutRequest['nodePositions'],
+    ...(viewport === undefined ? {} : { viewport }),
+  }
+}
+
 /**
  * Validate the SRC-mode Host boundary before any feature/plugin can inspect a
  * workflow edit. Generated Typert schemas remain an earlier, stricter boundary
@@ -149,6 +274,7 @@ function workflowEditOperations(value: unknown): readonly WorkflowEditOperation[
     const op = editString(operation.op, `Canvas workflow edit operation ${index}.op`)
     switch (op) {
       case 'add-node': {
+        exactKeys(operation, ['op', 'node'], `Canvas workflow edit operation ${index}`)
         const node = editRecord(operation.node, `Canvas workflow edit operation ${index}.node`)
         editString(node.id, `Canvas workflow edit operation ${index}.node.id`)
         editString(node.type, `Canvas workflow edit operation ${index}.node.type`)
@@ -156,27 +282,34 @@ function workflowEditOperations(value: unknown): readonly WorkflowEditOperation[
         break
       }
       case 'remove-node':
+        exactKeys(operation, ['op', 'nodeId'], `Canvas workflow edit operation ${index}`)
         editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
         break
       case 'replace-node-config':
+        exactKeys(operation, ['op', 'nodeId', 'config'], `Canvas workflow edit operation ${index}`)
         editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
         editRecord(operation.config, `Canvas workflow edit operation ${index}.config`)
         break
       case 'rename-node':
+        exactKeys(operation, ['op', 'nodeId', 'name'], `Canvas workflow edit operation ${index}`)
         editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
         editString(operation.name, `Canvas workflow edit operation ${index}.name`)
         break
       case 'connect': {
+        exactKeys(operation, ['op', 'edge'], `Canvas workflow edit operation ${index}`)
         const edge = editRecord(operation.edge, `Canvas workflow edit operation ${index}.edge`)
+        exactKeys(edge, ['id', 'sourceNodeId', 'sourcePort', 'targetNodeId', 'targetPort'], `Canvas workflow edit operation ${index}.edge`)
         for (const field of ['id', 'sourceNodeId', 'sourcePort', 'targetNodeId', 'targetPort'] as const) {
           editString(edge[field], `Canvas workflow edit operation ${index}.edge.${field}`)
         }
         break
       }
       case 'disconnect':
+        exactKeys(operation, ['op', 'edgeId'], `Canvas workflow edit operation ${index}`)
         editString(operation.edgeId, `Canvas workflow edit operation ${index}.edgeId`)
         break
       case 'set-output-nodes':
+        exactKeys(operation, ['op', 'nodeIds'], `Canvas workflow edit operation ${index}`)
         if (!Array.isArray(operation.nodeIds)) {
           invalidEdit(`Canvas workflow edit operation ${index}.nodeIds must be an array`)
         }
@@ -185,6 +318,7 @@ function workflowEditOperations(value: unknown): readonly WorkflowEditOperation[
         }
         break
       case 'rename-workflow':
+        exactKeys(operation, ['op', 'name'], `Canvas workflow edit operation ${index}`)
         editString(operation.name, `Canvas workflow edit operation ${index}.name`)
         break
       default:
@@ -387,10 +521,15 @@ export class CanvasService extends TypertRemoteService {
     features?.assertEnabled('canvas')
     this.assertBrowserEditorEnabled(prepared.access, features)
     const replacement = cloneWorkflow(workflow)
-    assertMediaWorkflow(replacement)
+    try {
+      assertMediaWorkflow(replacement)
+    } catch (error) {
+      if (error instanceof CanvasDomainError) invalidEdit('Canvas replacement workflow is invalid')
+      throw error
+    }
     features?.assertWorkflowCreatable(replacement)
     this.assertWorkflowAuditSafe(replacement)
-    const current = this.expectCurrentWorkflow(prepared.cache, ref)
+    const current = this.expectCurrentWorkflow(prepared.cache, workflowRefInput(ref))
     if (replacement.id !== current.workflow.id) {
       throw new CanvasServiceError(
         `replacement workflow "${replacement.id}" does not match current workflow "${current.workflow.id}"`,
@@ -410,7 +549,7 @@ export class CanvasService extends TypertRemoteService {
     const features = this.featurePolicy()
     features?.assertEnabled('canvas')
     this.assertBrowserEditorEnabled(prepared.access, features)
-    const current = this.expectCurrentWorkflow(prepared.cache, ref)
+    const current = this.expectCurrentWorkflow(prepared.cache, workflowRefInput(ref))
     const validatedOperations = workflowEditOperations(operations)
     features?.assertWorkflowEditable(current.workflow, validatedOperations)
     const workflow = applyWorkflowOperations(current.workflow, validatedOperations)
@@ -419,21 +558,27 @@ export class CanvasService extends TypertRemoteService {
   }
 
   selectOutput(agent: Agent, request: SelectCanvasOutputRequest, access?: CanvasAccessContext): CanvasSnapshot {
+    const validatedRequest = selectOutputInput(request)
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
     const current = prepared.cache.state.canvas
     if (current === null) throw new CanvasServiceError('no current Canvas', 'CANVAS_NOT_FOUND')
     const output = current.output
-    if (output === null || output.runId !== request.runId) {
-      throw new CanvasServiceError(`Canvas output for run "${request.runId}" is not current`, 'CANVAS_OUTPUT_NOT_FOUND')
+    if (output === null || output.runId !== validatedRequest.runId) {
+      throw new CanvasServiceError(`Canvas output for run "${validatedRequest.runId}" is not current`, 'CANVAS_OUTPUT_NOT_FOUND')
     }
-    if (!Number.isSafeInteger(request.assetIndex) || request.assetIndex < 0 || request.assetIndex >= output.assets.length) {
-      throw new CanvasServiceError(`Canvas output index ${request.assetIndex} is out of range`, 'CANVAS_INVALID_OUTPUT_SELECTION')
+    if (!Number.isSafeInteger(validatedRequest.assetIndex)
+      || validatedRequest.assetIndex < 0
+      || validatedRequest.assetIndex >= output.assets.length) {
+      throw new CanvasServiceError(
+        `Canvas output index ${validatedRequest.assetIndex} is out of range`,
+        'CANVAS_INVALID_OUTPUT_SELECTION',
+      )
     }
-    if (output.primaryAssetIndex === request.assetIndex) return this.viewRequired(prepared.cache)
+    if (output.primaryAssetIndex === validatedRequest.assetIndex) return this.viewRequired(prepared.cache)
     const canvas: CanvasSnapshot = {
       ...current,
-      output: { ...output, primaryAssetIndex: request.assetIndex },
+      output: { ...output, primaryAssetIndex: validatedRequest.assetIndex },
       updatedAt: this.nextMutationTime(current),
     }
     assertCanvasSnapshot(canvas)
@@ -443,21 +588,22 @@ export class CanvasService extends TypertRemoteService {
   }
 
   saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CurrentCanvasLayoutSnapshot {
+    const validatedRequest = saveLayoutInput(request)
     const prepared = this.prepare(agent, 'canvas.layout.write', access)
     this.assertFeature('editor')
     const current = prepared.cache.state.canvas
     if (current === null || current.workflow === null) {
       throw new CanvasServiceError('no current Canvas workflow', 'CANVAS_NOT_FOUND')
     }
-    if (request.canvasId !== current.id) {
+    if (validatedRequest.canvasId !== current.id) {
       throw new CanvasLayoutError(
-        `Canvas layout canvas "${request.canvasId}" does not match current Canvas "${current.id}"`,
+        `Canvas layout canvas "${validatedRequest.canvasId}" does not match current Canvas "${current.id}"`,
         'CANVAS_LAYOUT_CANVAS_MISMATCH',
       )
     }
-    if (request.workflowId !== current.workflow.id) {
+    if (validatedRequest.workflowId !== current.workflow.id) {
       throw new CanvasLayoutError(
-        `Canvas layout workflow "${request.workflowId}" does not match current workflow "${current.workflow.id}"`,
+        `Canvas layout workflow "${validatedRequest.workflowId}" does not match current workflow "${current.workflow.id}"`,
         'CANVAS_LAYOUT_WORKFLOW_MISMATCH',
       )
     }
@@ -465,20 +611,20 @@ export class CanvasService extends TypertRemoteService {
     const currentLayoutRevision = previous?.canvasId === current.id && previous.workflowId === current.workflow.id
       ? previous.layoutRevision
       : 0
-    if (request.expectedLayoutRevision !== currentLayoutRevision) {
+    if (validatedRequest.expectedLayoutRevision !== currentLayoutRevision) {
       throw new CanvasLayoutError(
-        `stale Canvas layout revision ${request.expectedLayoutRevision}; current revision is ${currentLayoutRevision}`,
+        `stale Canvas layout revision ${validatedRequest.expectedLayoutRevision}; current revision is ${currentLayoutRevision}`,
         'CANVAS_STALE_LAYOUT_REVISION',
       )
     }
     const nodeIds = new Set(current.workflow.nodes.map(node => String(node.id)))
-    for (const nodeId of Object.keys(request.nodePositions)) {
+    for (const nodeId of Object.keys(validatedRequest.nodePositions)) {
       if (!nodeIds.has(nodeId)) {
         throw new CanvasLayoutError(`Canvas layout references unknown node "${nodeId}"`, 'CANVAS_INVALID_LAYOUT')
       }
     }
     const layout = createCanvasLayoutSnapshot(
-      request,
+      validatedRequest,
       Math.max(Date.now(), previous?.updatedAt ?? 0),
     )
     const change: CanvasLayoutChange = {
@@ -495,31 +641,34 @@ export class CanvasService extends TypertRemoteService {
   }
 
   listRuns(agent: Agent, request: ListCanvasRunsRequest, access?: CanvasAccessContext): CanvasRunHistoryPage {
+    const validatedRequest = validateListCanvasRunsRequest(request)
     const prepared = this.prepare(
       agent,
       'canvas.history.read',
       access,
-      { kind: 'canvas', canvasId: request.canvasId },
+      { kind: 'canvas', canvasId: validatedRequest.canvasId },
     )
     this.assertFeature('history')
-    return prepared.cache.history.list(request)
+    return prepared.cache.history.list(validatedRequest)
   }
 
   getRun(agent: Agent, request: GetCanvasRunRequest, access?: CanvasAccessContext): CanvasRunHistoryEntry | null {
+    const validatedRequest = validateGetCanvasRunRequest(request)
     const prepared = this.prepare(
       agent,
       'canvas.history.read',
       access,
-      { kind: 'run', canvasId: request.canvasId, runId: request.runId },
+      { kind: 'run', canvasId: validatedRequest.canvasId, runId: validatedRequest.runId },
     )
     this.assertFeature('history')
-    return prepared.cache.history.get(request)
+    return prepared.cache.history.get(validatedRequest)
   }
 
   clear(agent: Agent, ref: WorkflowRef, access?: CanvasAccessContext): void {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
-    const current = this.expectCurrentWorkflow(prepared.cache, ref)
+    const validatedRef = workflowRefInput(ref)
+    const current = this.expectCurrentWorkflow(prepared.cache, validatedRef)
     if (current.run !== null && !isCanvasRunTerminal(current.run.status)) {
       throw new CanvasServiceError('Canvas cannot be cleared while its current run is non-terminal', 'CANVAS_INVALID_EDIT')
     }
@@ -541,47 +690,58 @@ export class CanvasService extends TypertRemoteService {
     ref: WorkflowRef,
     operations: readonly WorkflowEditOperation[],
   ): CanvasWorkflowMutationReceipt {
-    return { ref: this.workflowRef(this.editWorkflow(agent, ref, operations, this.browserAccess(agent))) }
+    return remoteCanvasCall(() => ({
+      ref: this.workflowRef(this.editWorkflow(agent, ref, operations, this.browserAccess(agent))),
+    }))
   }
 
   @Remote('replaceWorkflow')
   remoteExportReplaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow): CanvasWorkflowMutationReceipt {
-    return { ref: this.workflowRef(this.replaceWorkflow(agent, ref, workflow, this.browserAccess(agent))) }
+    return remoteCanvasCall(() => ({
+      ref: this.workflowRef(this.replaceWorkflow(agent, ref, workflow, this.browserAccess(agent))),
+    }))
   }
 
   @Remote('selectOutput')
   remoteExportSelectOutput(agent: Agent, request: SelectCanvasOutputRequest): CanvasOutputSelectionReceipt {
-    const canvas = this.selectOutput(agent, request, this.browserAccess(agent))
-    const output = canvas.output
-    if (output === null) throw new Error('Canvas output selection committed without an output')
-    return { runId: output.runId, primaryAssetIndex: output.primaryAssetIndex }
+    return remoteCanvasCall(() => {
+      const canvas = this.selectOutput(agent, request, this.browserAccess(agent))
+      const output = canvas.output
+      if (output === null) throw new Error('Canvas output selection committed without an output')
+      return { runId: output.runId, primaryAssetIndex: output.primaryAssetIndex }
+    })
   }
 
   @Remote('saveLayout')
   remoteExportSaveLayout(agent: Agent, request: SaveCanvasLayoutRequest): CanvasLayoutMutationReceipt {
-    const layout = this.saveLayout(agent, request, this.browserAccess(agent))
-    return {
-      canvasId: layout.canvasId,
-      workflowId: layout.workflowId,
-      layoutRevision: layout.layoutRevision,
-      updatedAt: layout.updatedAt,
-    }
+    return remoteCanvasCall(() => {
+      const layout = this.saveLayout(agent, request, this.browserAccess(agent))
+      return {
+        canvasId: layout.canvasId,
+        workflowId: layout.workflowId,
+        layoutRevision: layout.layoutRevision,
+        updatedAt: layout.updatedAt,
+      }
+    })
   }
 
   @Remote('clear')
   remoteExportClear(agent: Agent, ref: WorkflowRef): CanvasClearReceipt {
-    this.clear(agent, ref, this.browserAccess(agent))
-    return { canvasId: ref.canvasId }
+    return remoteCanvasCall(() => {
+      const validatedRef = workflowRefInput(ref)
+      this.clear(agent, validatedRef, this.browserAccess(agent))
+      return { canvasId: validatedRef.canvasId }
+    })
   }
 
   @Remote('listRuns')
   remoteExportListRuns(agent: Agent, request: ListCanvasRunsRequest): CanvasRunHistoryPage {
-    return this.listRuns(agent, request, this.browserAccess(agent))
+    return remoteCanvasCall(() => this.listRuns(agent, request, this.browserAccess(agent)))
   }
 
   @Remote('getRun')
   remoteExportGetRun(agent: Agent, request: GetCanvasRunRequest): CanvasRunHistoryEntry | null {
-    return this.getRun(agent, request, this.browserAccess(agent))
+    return remoteCanvasCall(() => this.getRun(agent, request, this.browserAccess(agent)))
   }
 
   private prepare(
@@ -796,11 +956,17 @@ export class CanvasService extends TypertRemoteService {
   }
 
   private sync(session: Session, cache: CanvasCache): void {
-    for (const event of session.events.slice(cache.observedSeq)) {
-      applyCanvasEvent(cache.state, event)
-      cache.history.apply(event)
-      cache.observedSeq += 1
+    const events = session.events.slice(cache.observedSeq)
+    if (events.length === 0) return
+    const stagedState = cloneCanvasFoldState(cache.state)
+    const stagedHistory = cache.history.clone()
+    for (const event of events) {
+      applyCanvasEvent(stagedState, event)
+      stagedHistory.apply(event)
     }
+    cache.state = stagedState
+    cache.history = stagedHistory
+    cache.observedSeq += events.length
   }
 
   private commitWorkflow(
