@@ -85,17 +85,26 @@ Actor identity 与 target Session/resource 是两个不同概念。尤其 Browse
 
 resource scope 的目的不是让 Domain 持有 ACL，而是给外部 Host policy 足够资源 identity，避免 N17/N19/N21 再破坏 N04 API。
 
+同一个 logical read/write action 经不同 transport 到达 Host 时，必须使用相同的 current resource scope。Transport 不能把 `canvas`、`workflow`、`asset` 等具体资源降级成更宽的 `session` scope 来获得更弱的授权判断。
+
 ## 5. Authorization Mode 与 Fail-closed
 
 `CanvasServiceConfig.authorizationMode`：
 
 - `single-user-fallback`：当前默认。外部 `ctx.canvasAuthorization` 缺失时使用内建 actor-kind policy。
 - `required-external`：外部 authorization service 缺失时 fail closed，mutation/read 返回 `CANVAS_AUTHORIZATION_FAILED`。
+- 任何未知 runtime mode 值都必须在插件构造/启动阶段拒绝，不能静默解释为 `single-user-fallback`。
 
-外部 authorization service 抛异常时：
+外部 authorization service 的返回值同样属于不可信边界：
+
+- allow 只接受 exact `{ allowed: true }`。
+- deny 只接受声明过的 `allowed:false + reason + policyCode?` 字段。
+- `reason` 只能是 `denied | policy-unavailable`。
+- `policyCode` 若存在，必须 bounded、无 control character、无首尾空白并使用 log-safe 字符集。
+- 矛盾、额外字段、畸形值或 service exception 一律 fail closed 为 `policy-unavailable`。
 
 ```text
-raw policy/identity backend error
+raw policy/identity backend error or invalid response
 → Host internal diagnostic only
 → public decision = policy-unavailable
 → CanvasService = CANVAS_AUTHORIZATION_FAILED
@@ -170,7 +179,7 @@ Bearer credential-shaped value
 
 不能使用粗暴 `key.includes('token')`，正常 `maxTokens/tokenLimit` 必须可用。
 
-### 8.2 Run / Provider Diagnostics
+### 8.2 Run / Provider Diagnostics 与 Asset References
 
 `CanvasRunError` 是 durable wire-safe summary，不允许直接复制 Provider SDK/raw HTTP exception。
 
@@ -182,7 +191,11 @@ raw provider failure
 → CanvasRunError durable
 ```
 
-`assertCanvasDurableAuditSafe()` 至少检查当前 Workflow、Run error code/message、image/video durable object id 与安全 display metadata。N23 structured logging 可以拥有更多诊断，但仍必须 redacted，且 raw provider payload/credential 不进入 Session。
+`assertCanvasDurableAuditSafe()` 至少检查当前 Workflow、Run error code/message、image/video durable object id、video mediaType 与安全 display metadata。Image `attachmentId` / video `assetId` 必须是 opaque storage reference；`scheme://...` URL-shaped reference 必须拒绝，避免 provider signed/bearer URL 进入 Session authority。
+
+URL 拦截不能粗暴写成“禁止任意 `scheme:`”：现有本地 Attachment Store 的合法 content-addressed id 是 `sha256:<64hex>`，必须继续允许。
+
+N23 structured logging 可以拥有更多诊断，但仍必须 redacted，且 raw provider payload/credential 不进入 Session。
 
 ### 8.3 Threat-model Boundary
 
@@ -231,6 +244,9 @@ Canvas Host policy                 canvas.read
 Canvas 为 `canvas` 与 `canvasLayout` 注册 read guard：
 
 - live snapshot/change frame 带 exact target Session id，并使用同一个 Host-minted `human:host-browser` principal 做 Host read decision；
+- live guard 必须解析 exact live Session，折叠/同步与 `ctx.canvas` 相同的 current Canvas state，并使用与 `ctx.canvas.get()` 相同的 `canvas.read` current resource scope：无当前 Canvas 时为 `session`，已有当前 Canvas 时为具体 `{ kind:'canvas', canvasId }`；
+- **禁止**因为 Projection 是 Session carrier 就永久使用 `resource:{kind:'session'}`。外部 ACL 若允许 Session-level read 但拒绝当前 Canvas read，Projection 必须同样隐藏 `canvas` / `canvasLayout`；
+- live Session 无法解析时 fail closed；
 - deny/guard throw fail closed，key 不出站；
 - internal cell/checkpoint 不删除，read deny 不改写历史；
 - detached cache/history 当前没有可验证 target Session context 时，不虚构 Session/resource；external/required identity-dependent policy 下 fail closed。
@@ -250,6 +266,8 @@ Canvas：
 - `packages/canvas/canvas/src/projection.ts`
 - `packages/canvas/canvas/src/interaction-bridge.ts`
 - `packages/canvas/canvas/tests/authorization.spec.ts`
+- `packages/canvas/canvas/tests/authorization-hardening.spec.ts`
+- `packages/canvas/canvas/tests/audit.spec.ts`
 - `packages/canvas/canvas/tests/invariant.spec.ts`
 - `packages/canvas/canvas/tests/interaction-bridge.spec.ts`
 
@@ -264,7 +282,7 @@ Session Projection cross-package seam：
 
 - [ ] read allow / edit deny，Host commit 前拒绝。
 - [ ] agent run allow / human run deny。
-- [ ] initial variant 额外要求 `canvas.variant.create`。
+- [ ] initial variant 额外要求 `canvas.variant.create`，并使用 concrete candidate variant resource。
 - [ ] browser/system、伪造 browser human、agent-tool/human、agent-tool/other-agent、reconciler/human provenance spoof 拒绝。
 - [ ] Remote / Projection / Interaction Browser 路径使用同一 Host-minted Browser principal。
 - [ ] Agent 与 Session id 不相等时，Browser/Agent provenance 仍按各自 contract 工作。
@@ -272,12 +290,16 @@ Session Projection cross-package seam：
 - [ ] direct current `canvas/change` 无 permit 拒绝。
 - [ ] direct current `canvas/layout-change` 无 permit 拒绝。
 - [ ] historical meta v1 / historical log 仍可 late-load replay。
+- [ ] unknown authorizationMode 启动失败而不是回退。
 - [ ] required-external 缺失 fail closed，Session seq 不变。
+- [ ] external policy throw、畸形 response、矛盾 allow/deny response 均 fail closed。
 - [ ] projection `canvas.read` deny 时 `canvas` / `canvasLayout` 不出现在 browser snapshot。
+- [ ] resource-aware ACL：允许 `session` read、拒绝当前 `canvas` read 时，`ctx.canvas.get()` 与 live Projection 都必须 deny/隐藏。
 - [ ] projection guard throw fail closed。
 - [ ] detached view 不虚构 Session identity/resource。
 - [ ] projection read guard dispose 后解除影响，证明 HMR-safe。
 - [ ] `X-API-Key`、data URL base64、Bearer credential、PEM private key 拒绝。
+- [ ] URL-shaped image/video asset id 拒绝且错误消息不回显 URL；合法 opaque/content-addressed id 不误杀。
 - [ ] `maxTokens/tokenLimit` 不误杀。
 - [ ] unsafe Provider diagnostic 不能作为 durable Run error。
 - [ ] oversized request/correlation metadata 拒绝。
@@ -290,9 +312,9 @@ N04 只有同时满足以下条件才可 `ACCEPTED`：
 1. UI visibility 不是唯一权限控制。
 2. current durable writer 不能机械绕过 Host authorization path（最终生产组合必须挂载 invariant companion）。
 3. actor/source provenance 可验证，不能由 Browser/Tool 自报 stronger identity；Session resource 与 human principal 不混用。
-4. Browser Projection、Remote、Interaction 与 Host current read 使用一致的 Browser principal / `canvas.read` security semantics。
-5. 所有 current Canvas durable payload 都不允许 Host/Provider credential、binary、raw provider diagnostic。
-6. external authorization 可配置 fail-closed，并且 backend exception 不泄漏。
+4. Browser Projection、Remote、Interaction 与 Host current read 使用一致的 Browser principal / `canvas.read` security semantics；live Projection 与 `ctx.canvas.get()` 对同一 current Canvas 必须使用相同 resource scope，不能用 session-only authorization 绕过具体 Canvas ACL。
+5. 所有 current Canvas durable payload 都不允许 Host/Provider credential、binary、raw provider diagnostic 或 signed/bearer URL-shaped asset reference。
+6. external authorization 可配置 fail-closed，未知 mode / backend exception / invalid decision 不得放宽访问且不泄漏 backend diagnostic。
 7. Run/Asset/Tool/History 后续可复用 resource-aware seam，不需要另起授权体系。
 8. 测试、typecheck、lint、build、REAL composition/相关 repository gates 有真实证据。
 
