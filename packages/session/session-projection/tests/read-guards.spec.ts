@@ -81,12 +81,23 @@ describe('SessionProjectionRegistry browser read guards', () => {
     expect(restored.checkpoint['test/guarded-count']?.val).toBe(1)
   })
 
-  it('removes the visibility decision when the read-guard registration is disposed', async () => {
+  it('removes the visibility decision when the explicit read-guard disposer runs', async () => {
     const { ctx, session } = await harness()
     const dispose = ctx.sessionProjections.registerReadGuard('test/guarded-count', () => false)
     expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('test/guarded-count')
 
     dispose()
+    expect(ctx.sessionProjections.snapshot(session).values['test/guarded-count']).toBe(0)
+  })
+
+  it('removes a read guard automatically when its owning caller fiber unloads', async () => {
+    const { ctx, session } = await harness()
+    const fiber = await ctx.plugin(Object.assign((inner: Context) => {
+      inner.sessionProjections.registerReadGuard('test/guarded-count', () => false)
+    }, { inject: ['sessionProjections'] }))
+
+    expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('test/guarded-count')
+    await fiber.dispose()
     expect(ctx.sessionProjections.snapshot(session).values['test/guarded-count']).toBe(0)
   })
 
