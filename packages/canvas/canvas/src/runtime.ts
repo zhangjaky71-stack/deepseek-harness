@@ -134,16 +134,39 @@ function authorizationMode(value: unknown): CanvasAuthorizationMode {
   throw new Error(`unsupported Canvas authorizationMode ${String(value)}`)
 }
 
+function invalidExternalAuthorizationDecision(): CanvasAuthorizationDecision {
+  return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-invalid-response' }
+}
+
 function normalizeExternalAuthorizationDecision(value: unknown): CanvasAuthorizationDecision {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-invalid-response' }
+    return invalidExternalAuthorizationDecision()
   }
-  const decision = value as { allowed?: unknown; reason?: unknown }
-  if (decision.allowed === true) return { allowed: true }
-  if (decision.allowed === false && (decision.reason === 'denied' || decision.reason === 'policy-unavailable')) {
-    return { allowed: false, reason: decision.reason }
+  const decision = value as Record<string, unknown>
+  const keys = Object.keys(decision).sort()
+  if (decision.allowed === true) {
+    return keys.length === 1 && keys[0] === 'allowed'
+      ? { allowed: true }
+      : invalidExternalAuthorizationDecision()
   }
-  return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-invalid-response' }
+  if (decision.allowed !== false || (decision.reason !== 'denied' && decision.reason !== 'policy-unavailable')) {
+    return invalidExternalAuthorizationDecision()
+  }
+  const hasPolicyCode = Object.hasOwn(decision, 'policyCode')
+  const expectedKeys = hasPolicyCode ? ['allowed', 'policyCode', 'reason'] : ['allowed', 'reason']
+  if (keys.join(',') !== expectedKeys.join(',')) return invalidExternalAuthorizationDecision()
+  if (!hasPolicyCode) return { allowed: false, reason: decision.reason }
+  const policyCode = decision.policyCode
+  if (
+    typeof policyCode !== 'string'
+    || policyCode.length === 0
+    || policyCode.length > 128
+    || policyCode.trim() !== policyCode
+    || /[\u0000-\u001f\u007f]/.test(policyCode)
+  ) {
+    return invalidExternalAuthorizationDecision()
+  }
+  return { allowed: false, reason: decision.reason, policyCode }
 }
 
 function applyWorkflowOperations(current: MediaWorkflow, operations: readonly WorkflowEditOperation[]): MediaWorkflow {
