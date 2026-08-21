@@ -44,8 +44,8 @@ export type CanvasWorkflowWriteResult =
   | { readonly ok: true; readonly workflowRevision: number }
   | { readonly ok: false; readonly status: 'conflict' | 'offline' | 'save-failed'; readonly message: string }
 export type CanvasLayoutWriteResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly status: 'offline' | 'save-failed'; readonly message: string }
+  | { readonly ok: true; readonly layoutRevision: number }
+  | { readonly ok: false; readonly status: 'conflict' | 'offline' | 'save-failed'; readonly message: string }
 
 export interface CanvasInteractionActions {
   readonly selectNode: (canvas: CanvasSnapshot, nodeId: WorkflowNodeId) => void

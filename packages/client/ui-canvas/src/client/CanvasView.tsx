@@ -14,11 +14,12 @@ export type CanvasViewProps = ConvViewProps & InjectFace<CanvasViewInjected> & P
 function hasWorkflow(canvas: CanvasSnapshot | null): canvas is EditableCanvasSnapshot { return canvas !== null && canvas.workflow !== null }
 
 export function CanvasView({
-  useProjection, useMode, useInteraction, useStore, actions, capabilities, nodeCatalog, setMode,
+  useSession, useProjection, useMode, useInteraction, useStore, actions, capabilities, nodeCatalog, setMode,
   selectNode, selectNodes, selectEdge, selectOutput, clearSelection, commitOperations, saveLayout, t,
 }: CanvasViewProps) {
   const projectedCanvas = useProjection('canvas')
   const layout = useProjection('canvasLayout')
+  const openState = useSession(session => session.openState)
   const mode = useMode(value => value)
   const interaction = useInteraction(value => value)
   const saveStatus = useStore(state => state.saveStatus)
@@ -32,7 +33,7 @@ export function CanvasView({
       <SaveStatus status={saveStatus} t={t} />
     </div>
     {projectedCanvas === undefined
-      ? <div className={css.loading} role="status">{t('projection.loading')}</div>
+      ? <div className={css.loading} role="status">{t(openState === 'cold' || openState === 'loading' ? 'projection.loading' : 'projection.unavailable')}</div>
       : effectiveMode === 'minimal'
         ? <MinimalCanvas canvas={projectedCanvas} interaction={interaction} onSelectOutput={selectOutput} t={t} />
         : !hasWorkflow(projectedCanvas)

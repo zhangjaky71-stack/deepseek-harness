@@ -63,13 +63,13 @@ import type {
   CanvasAuthorizationMode,
   CanvasAuthorizationRequest,
   CanvasAuthorizationResource,
-  CanvasLayoutSnapshot,
   CanvasPermission,
   CanvasRunHistoryEntry,
   CanvasServiceConfig,
   CanvasServiceErrorCode,
   CanvasSnapshot,
   CreateCanvasRequest,
+  CurrentCanvasLayoutSnapshot,
   MediaWorkflow,
   MediaWorkflowEdge,
   MediaWorkflowNode,
@@ -252,7 +252,7 @@ export class CanvasService extends TypertRemoteService {
     this.fallbackAuthorization = new CanvasAuthorizationPolicy(config.authorization)
     this.authorizationMode = authorizationMode(config.authorizationMode)
     ctx.inject(['sessionProjections'], (projectionCtx) => {
-      registerCanvasProjections(projectionCtx, sessionId => this.canBrowserReadProjection(sessionId))
+      registerCanvasProjections(projectionCtx, (sessionId, value) => this.canBrowserReadProjection(sessionId, value))
     })
   }
 
@@ -370,17 +370,33 @@ export class CanvasService extends TypertRemoteService {
     return committed
   }
 
-  saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CanvasLayoutSnapshot {
+  saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CurrentCanvasLayoutSnapshot {
     const prepared = this.prepare(agent, 'canvas.layout.write', access)
     this.assertFeature('editor')
     const current = prepared.cache.state.canvas
     if (current === null || current.workflow === null) {
       throw new CanvasServiceError('no current Canvas workflow', 'CANVAS_NOT_FOUND')
     }
+    if (request.canvasId !== current.id) {
+      throw new CanvasLayoutError(
+        `Canvas layout canvas "${request.canvasId}" does not match current Canvas "${current.id}"`,
+        'CANVAS_LAYOUT_CANVAS_MISMATCH',
+      )
+    }
     if (request.workflowId !== current.workflow.id) {
       throw new CanvasLayoutError(
         `Canvas layout workflow "${request.workflowId}" does not match current workflow "${current.workflow.id}"`,
         'CANVAS_LAYOUT_WORKFLOW_MISMATCH',
+      )
+    }
+    const previous = foldCanvasLayout(agent.session.events)
+    const currentLayoutRevision = previous?.canvasId === current.id && previous.workflowId === current.workflow.id
+      ? previous.layoutRevision
+      : 0
+    if (request.expectedLayoutRevision !== currentLayoutRevision) {
+      throw new CanvasLayoutError(
+        `stale Canvas layout revision ${request.expectedLayoutRevision}; current revision is ${currentLayoutRevision}`,
+        'CANVAS_STALE_LAYOUT_REVISION',
       )
     }
     const nodeIds = new Set(current.workflow.nodes.map(node => String(node.id)))
@@ -389,10 +405,9 @@ export class CanvasService extends TypertRemoteService {
         throw new CanvasLayoutError(`Canvas layout references unknown node "${nodeId}"`, 'CANVAS_INVALID_LAYOUT')
       }
     }
-    const previous = foldCanvasLayout(agent.session.events)
     const layout = createCanvasLayoutSnapshot(
       request,
-      Math.max(Date.now(), previous?.workflowId === request.workflowId ? previous.updatedAt : 0),
+      Math.max(Date.now(), previous?.updatedAt ?? 0),
     )
     const change: CanvasLayoutChange = {
       kind: 'canvas/layout-change',
@@ -419,10 +434,6 @@ export class CanvasService extends TypertRemoteService {
     return getCanvasRunHistory(agent.session.events, request.runId)
   }
 
-  /**
-   * Clear the current Canvas using the same workflow CAS fence as semantic edits.
-   * A non-terminal run must be cancelled/interrupted and durably terminal before clear.
-   */
   clear(agent: Agent, ref: WorkflowRef, access?: CanvasAccessContext): void {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
@@ -431,6 +442,15 @@ export class CanvasService extends TypertRemoteService {
       throw new CanvasServiceError('Canvas cannot be cleared while its current run is non-terminal', 'CANVAS_INVALID_EDIT')
     }
     this.commit(agent, prepared.cache, prepared.access, 'clear', null)
+  }
+
+  /** Re-evaluate live Browser projection visibility after an external ACL decision changes. */
+  refreshBrowserProjectionVisibility(sessionId: string): boolean {
+    const session = this.ctx.sessions.get(sessionId as Session['id'])
+    const projections = this.ctx.get('sessionProjections')
+    if (session === undefined || projections === undefined) return false
+    projections.refreshBrowserVisibility(session, ['canvas', 'canvasLayout'])
+    return true
   }
 
   @Remote('editWorkflow')
@@ -458,7 +478,12 @@ export class CanvasService extends TypertRemoteService {
   @Remote('saveLayout')
   remoteExportSaveLayout(agent: Agent, request: SaveCanvasLayoutRequest): CanvasLayoutMutationReceipt {
     const layout = this.saveLayout(agent, request, this.browserAccess(agent))
-    return { workflowId: layout.workflowId, updatedAt: layout.updatedAt }
+    return {
+      canvasId: layout.canvasId,
+      workflowId: layout.workflowId,
+      layoutRevision: layout.layoutRevision,
+      updatedAt: layout.updatedAt,
+    }
   }
 
   @Remote('clear')
@@ -528,6 +553,19 @@ export class CanvasService extends TypertRemoteService {
     return { kind: 'canvas', canvasId: canvas.id }
   }
 
+  private projectionAuthorizationResource(value: unknown): CanvasAuthorizationResource {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const source = value as Record<string, unknown>
+      if (typeof source.canvasId === 'string' && source.canvasId.length > 0) {
+        return { kind: 'canvas', canvasId: CanvasId(source.canvasId) }
+      }
+      if (typeof source.id === 'string' && source.id.length > 0 && Object.hasOwn(source, 'workflowRevision')) {
+        return { kind: 'canvas', canvasId: CanvasId(source.id) }
+      }
+    }
+    return { kind: 'session' }
+  }
+
   private browserAccess(agent: Agent): CanvasAccessContext {
     return canvasBrowserAccess(String(agent.session.id))
   }
@@ -546,7 +584,7 @@ export class CanvasService extends TypertRemoteService {
     }
   }
 
-  private canBrowserReadProjection(sessionId: string | undefined): boolean {
+  private canBrowserReadProjection(sessionId: string | undefined, value: unknown): boolean {
     if (sessionId === undefined) {
       if (this.ctx.get('canvasAuthorization') !== undefined || this.authorizationMode === 'required-external') return false
       const access = canvasBrowserAccess('detached-session')
@@ -555,14 +593,22 @@ export class CanvasService extends TypertRemoteService {
         actor: access.actor,
         source: access.source,
         sessionId: 'detached-session',
-        resource: { kind: 'session' },
+        resource: this.projectionAuthorizationResource(value),
       }).allowed
     }
     const session = this.ctx.sessions.get(sessionId as Session['id'])
-    if (session === undefined) return false
+    const access = canvasBrowserAccess(sessionId)
+    if (session === undefined) {
+      return this.authorize({
+        permission: 'canvas.read',
+        actor: access.actor,
+        source: access.source,
+        sessionId,
+        resource: this.projectionAuthorizationResource(value),
+      }).allowed
+    }
     const cache = this.cache(session)
     this.sync(session, cache)
-    const access = canvasBrowserAccess(sessionId)
     return this.authorize({
       permission: 'canvas.read',
       actor: access.actor,
@@ -704,10 +750,6 @@ export class CanvasService extends TypertRemoteService {
       canvas,
       meta: canvasChangeMeta(access),
     }
-
-    // CanvasService owns its own transition correctness even when the optional
-    // package invariant companion is not mounted. Preflight against a detached
-    // fold state, then append; only the committed Session event advances cache.
     const staged = cloneCanvasFoldState(cache.state)
     applyCanvasChange(staged, change)
     withCanvasWritePermit(agent.session, 'canvas/change', change, () => {

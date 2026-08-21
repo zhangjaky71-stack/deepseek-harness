@@ -112,7 +112,7 @@ describe('Canvas Typert Remote contract and history API', () => {
     if (event?.type !== 'canvas/change') throw new Error('expected Canvas change')
     expect(event.data.meta).toMatchObject({
       schemaVersion: 2,
-      actor: { kind: 'human', id: String(agent.id) },
+      actor: { kind: 'human', id: 'host-browser' },
       source: 'browser-remote',
     })
   })

@@ -3,7 +3,8 @@
  * the ApiProxy contract (api/: types + zod schemas, browser-safe), the fetch
  * carrier pair (fetch/: toFetchHandler on the host side, AbstractApiClient +
  * platform subclasses on the client side), and the host-side implementation
- * (api-proxy.ts: createApiProxy + the ApiProxyService gateway plugin providing
+ * (api-proxy.ts: core gateway + projection-aware-api-proxy.ts: detached read
+ * identity decorator + the ApiProxyService gateway plugin providing
  * `ctx.apiProxy`). Transport-agnostic by design: this package registers no
  * routes — physical carriers wrap `ctx.apiProxy` themselves.
  *
@@ -16,7 +17,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { ApiProxy } from './api/index.ts'
-import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
+import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './projection-aware-api-proxy.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   type SessionLogCompressionLevel,
@@ -26,9 +27,8 @@ export type * from './api/index.ts'
 export { RpcId } from './api/rpc.ts'
 export { toFetchHandler } from './fetch/handler.ts'
 export { AbstractApiClient, InProcessApiClient } from './fetch/client.ts'
-export type { IApiClient } from './fetch/client.ts'
-export { createApiProxy } from './api-proxy.ts'
-export type { ApiProxyDefaults } from './api-proxy.ts'
+export { createApiProxy } from './projection-aware-api-proxy.ts'
+export type { ApiProxyDefaults } from './projection-aware-api-proxy.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

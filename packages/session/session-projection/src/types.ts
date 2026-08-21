@@ -15,3 +15,21 @@
  * rendered is the slot system's business, never this layer's.
  */
 export interface SessionProjectionMap {}
+
+/**
+ * Framework-owned live visibility envelope. Baseline `values` stay ordinary
+ * `SessionProjectionMap` values; only live push frames use this wrapper when a
+ * read-guard or capability lifecycle changes without advancing Session seq.
+ * The literal property is protocol-owned so this `/types` outlet remains
+ * runtime-free.
+ */
+export type SessionProjectionControlEnvelope = {
+  readonly __dshSessionProjectionV1: {
+    readonly generation: number
+    readonly present: false
+  } | {
+    readonly generation: number
+    readonly present: true
+    readonly value: unknown
+  }
+}

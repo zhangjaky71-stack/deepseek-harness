@@ -3,7 +3,7 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type {
   CanvasId,
-  CanvasLayoutSnapshot,
+  CurrentCanvasLayoutSnapshot,
   CanvasRunHistoryEntry,
   CanvasRunId,
   MediaWorkflowId,
@@ -20,7 +20,11 @@ export type CanvasHistoryCursor = Branded<'CanvasHistoryCursor'>
 
 /** Browser/editor layout payload committed on drag-end or viewport save. */
 export interface SaveCanvasLayoutRequest {
+  /** Canvas generation fence; stale tabs from a cleared/re-created Canvas cannot write through it. */
+  readonly canvasId: CanvasId
   readonly workflowId: MediaWorkflowId
+  /** Independent layout CAS token; semantic workflowRevision is intentionally not reused. */
+  readonly expectedLayoutRevision: number
   readonly nodePositions: Readonly<Record<WorkflowNodeId, { readonly x: number; readonly y: number }>>
   readonly viewport?: {
     readonly x: number
@@ -32,7 +36,9 @@ export interface SaveCanvasLayoutRequest {
 /** Stable layout-write failures. */
 export type CanvasLayoutErrorCode =
   | 'CANVAS_INVALID_LAYOUT'
+  | 'CANVAS_LAYOUT_CANVAS_MISMATCH'
   | 'CANVAS_LAYOUT_WORKFLOW_MISMATCH'
+  | 'CANVAS_STALE_LAYOUT_REVISION'
 
 /** Stable wire names reserved for the Canvas Browser mutation/query namespace. */
 export type CanvasRemoteMethodName =
@@ -48,12 +54,10 @@ export type CanvasRemoteMethodName =
   | 'listRuns'
   | 'getRun'
 
-/** Small acknowledgement for a committed semantic workflow mutation. */
 export interface CanvasWorkflowMutationReceipt {
   readonly ref: WorkflowRef
 }
 
-/** Small acknowledgement for a committed primary-output selection. */
 export interface CanvasOutputSelectionReceipt {
   readonly runId: CanvasRunId
   readonly primaryAssetIndex: number
@@ -61,28 +65,26 @@ export interface CanvasOutputSelectionReceipt {
 
 /** Small acknowledgement for a committed editor-layout save. */
 export interface CanvasLayoutMutationReceipt {
+  readonly canvasId: CanvasId
   readonly workflowId: MediaWorkflowId
+  readonly layoutRevision: number
   readonly updatedAt: number
 }
 
-/** Small acknowledgement for a committed Canvas clear tombstone. */
 export interface CanvasClearReceipt {
   readonly canvasId: CanvasId
 }
 
-/** Cursor-paged run-history query. Omitted limit resolves to the Host default. */
 export interface ListCanvasRunsRequest {
   readonly cursor?: CanvasHistoryCursor
   readonly limit?: number
 }
 
-/** Bounded run-history page derived from Session events rather than a second store. */
 export interface CanvasRunHistoryPage {
   readonly items: readonly CanvasRunHistoryEntry[]
   readonly nextCursor?: CanvasHistoryCursor
 }
 
-/** Exact run-history query. */
 export interface GetCanvasRunRequest {
   readonly runId: CanvasRunId
 }
@@ -91,7 +93,7 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
     /** Whole current Canvas state, or null before create/after clear. */
     canvas: import('./types.ts').CanvasSnapshot | null
-    /** Latest independently persisted editor layout, or null before the first save. */
-    canvasLayout: CanvasLayoutSnapshot | null
+    /** Current-generation editor layout with an independent CAS revision. */
+    canvasLayout: CurrentCanvasLayoutSnapshot | null
   }
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
-  CanvasCapabilities, CanvasLayoutSnapshot, CanvasNodeCatalogEntry, CanvasSnapshot, MediaWorkflow,
+  CanvasCapabilities, CanvasNodeCatalogEntry, CanvasSnapshot, CurrentCanvasLayoutSnapshot, MediaWorkflow,
   SaveCanvasLayoutRequest, WorkflowEdgeId, WorkflowNodeId,
 } from '@deepseek-ai/dsh-canvas/client'
 import type { PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -21,7 +21,7 @@ type EditorStoreProps = PropsStore<ReturnType<typeof createCanvasEditorStore>>
 type EditableCanvasSnapshot = CanvasSnapshot & { readonly workflow: MediaWorkflow }
 export interface WorkflowEditorProps extends EditorStoreProps {
   readonly canvas: EditableCanvasSnapshot
-  readonly layout: CanvasLayoutSnapshot | null
+  readonly layout: CurrentCanvasLayoutSnapshot | null
   readonly capabilities: CanvasCapabilities
   readonly nodeCatalog: readonly CanvasNodeCatalogEntry[]
   readonly interaction: CanvasInteractionSelection
@@ -38,9 +38,11 @@ interface DragState { readonly nodeId: WorkflowNodeId; readonly startPointerX: n
 export function WorkflowEditor(props: WorkflowEditorProps) {
   const { canvas, layout, interaction, actions, useStore, t } = props
   const workflow = canvas.workflow
+  const compatibleLayout = layout?.canvasId === canvas.id && layout.workflowId === workflow.id ? layout : null
   const saveStatus = useStore(state => state.saveStatus); const draft = useStore(state => state.draft); const undo = useStore(state => state.undo); const redo = useStore(state => state.redo); const clipboard = useStore(state => state.clipboard); const localPositions = useStore(state => state.localPositions)
   const selectedNodeId = interaction.selectedNodeIds[0]; const selectedNode = selectedNodeId === undefined ? undefined : workflow.nodes.find(node => node.id === selectedNodeId)
-  const flow = toCanvasFlow(workflow, layout, localPositions); const drag = useRef<DragState | null>(null)
+  const flow = toCanvasFlow(workflow, compatibleLayout, localPositions); const drag = useRef<DragState | null>(null)
+  const layoutRevision = useRef(compatibleLayout?.layoutRevision ?? 0)
   const setFailure = useCallback((result: Exclude<CanvasWorkflowWriteResult | CanvasLayoutWriteResult, { ok: true }>) => { actions.setSaveStatus(result.status) }, [actions])
   const commitCommand = useCallback(async (command: ReturnType<typeof commandFor>, expectedRevision: number): Promise<CanvasWorkflowWriteResult> => {
     actions.setSaveStatus('saving'); const result = await props.commitOperations(command.forward, expectedRevision)
@@ -48,6 +50,9 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
     actions.recordCommand(command, result.workflowRevision); actions.setSaveStatus('saved'); return result
   }, [actions, props.commitOperations, setFailure])
 
+  useEffect(() => {
+    layoutRevision.current = compatibleLayout?.layoutRevision ?? 0
+  }, [canvas.id, compatibleLayout?.layoutRevision, workflow.id])
   useEffect(() => {
     if (selectedNodeId === undefined) { if (draft !== null) actions.setDraft(null); return }
     const refresh = draft === null || draft.nodeId !== selectedNodeId || (!draft.dirty && draft.baseWorkflowRevision !== canvas.workflowRevision)
@@ -66,18 +71,25 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
   }, [actions, canvas.workflowRevision, commitCommand, draft, t, workflow])
 
   const persistPositions = useCallback(async (positions: SaveCanvasLayoutRequest['nodePositions']) => {
-    actions.setSaveStatus('saving'); const result = await props.saveLayout({ workflowId: workflow.id, nodePositions: positions })
+    actions.setSaveStatus('saving')
+    const result = await props.saveLayout({
+      canvasId: canvas.id,
+      workflowId: workflow.id,
+      expectedLayoutRevision: layoutRevision.current,
+      nodePositions: positions,
+    })
     if (!result.ok) { setFailure(result); return false }
+    layoutRevision.current = result.layoutRevision
     actions.clearLocalPositions(); actions.setSaveStatus('saved'); return true
-  }, [actions, props.saveLayout, setFailure, workflow.id])
-  const copy = useCallback(() => { actions.setClipboard(copySelection(workflow, interaction.selectedNodeIds, layout) ?? null) }, [actions, interaction.selectedNodeIds, layout, workflow])
+  }, [actions, canvas.id, props.saveLayout, setFailure, workflow.id])
+  const copy = useCallback(() => { actions.setClipboard(copySelection(workflow, interaction.selectedNodeIds, compatibleLayout) ?? null) }, [actions, compatibleLayout, interaction.selectedNodeIds, workflow])
   const paste = useCallback(async () => {
     if (clipboard === null) return
     const plan = pasteClipboard(clipboard); const result = await commitCommand(commandFor(workflow, t('editor.commandPaste'), plan.operations), canvas.workflowRevision)
     if (!result.ok) return
-    actions.mergeLocalPositions(plan.positions); await persistPositions({ ...mergedLayoutPositions(workflow, layout, localPositions), ...plan.positions } as SaveCanvasLayoutRequest['nodePositions'])
+    actions.mergeLocalPositions(plan.positions); await persistPositions({ ...mergedLayoutPositions(workflow, compatibleLayout, localPositions), ...plan.positions } as SaveCanvasLayoutRequest['nodePositions'])
     props.onSelectNodes(canvas, plan.nodeIds)
-  }, [actions, canvas, canvas.workflowRevision, clipboard, commitCommand, layout, localPositions, persistPositions, props.onSelectNodes, t, workflow])
+  }, [actions, canvas, canvas.workflowRevision, clipboard, commitCommand, compatibleLayout, localPositions, persistPositions, props.onSelectNodes, t, workflow])
   const removeSelection = useCallback(async () => {
     const operations = deleteSelectionOperations(workflow, interaction.selectedNodeIds, interaction.selectedEdgeIds); if (operations.length === 0) return
     const result = await commitCommand(commandFor(workflow, t('editor.commandDelete'), operations), canvas.workflowRevision); if (result.ok) props.onClearSelection()
@@ -102,9 +114,9 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
     const result = await commitCommand(commandFor(workflow, t('editor.commandAddNode'), [{ op: 'add-node', node }]), canvas.workflowRevision); if (!result.ok) return
     const index = workflow.nodes.length; const position = { x: 36 + (index % 4) * 220, y: 36 + Math.floor(index / 4) * 132 }
     actions.setLocalPosition(String(id), position.x, position.y)
-    await persistPositions({ ...mergedLayoutPositions(workflow, layout, localPositions), [id]: position } as SaveCanvasLayoutRequest['nodePositions'])
+    await persistPositions({ ...mergedLayoutPositions(workflow, compatibleLayout, localPositions), [id]: position } as SaveCanvasLayoutRequest['nodePositions'])
     props.onSelectNode(canvas, id)
-  }, [actions, canvas, canvas.workflowRevision, commitCommand, layout, localPositions, persistPositions, props.onSelectNode, t, workflow])
+  }, [actions, canvas, canvas.workflowRevision, commitCommand, compatibleLayout, localPositions, persistPositions, props.onSelectNode, t, workflow])
   const connect = useCallback(async (source: CanvasPortEndpoint, target: CanvasPortEndpoint) => {
     if (source.nodeId === target.nodeId || source.type !== target.type) { actions.setSaveStatus('save-failed'); return }
     const edge = { id: `edge-${globalThis.crypto.randomUUID()}` as WorkflowEdgeId, sourceNodeId: source.nodeId, sourcePort: source.port, targetNodeId: target.nodeId, targetPort: target.port }
@@ -127,7 +139,7 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
       <div className={css.commandBar}><button type="button" disabled={undo.length === 0 || saveStatus === 'saving'} onClick={() => { void undoOnce() }}>{t('editor.undo')}</button><button type="button" disabled={redo.length === 0 || saveStatus === 'saving'} onClick={() => { void redoOnce() }}>{t('editor.redo')}</button><button type="button" disabled={interaction.selectedNodeIds.length === 0} onClick={copy}>{t('editor.copy')}</button><button type="button" disabled={clipboard === null || saveStatus === 'saving'} onClick={() => { void paste() }}>{t('editor.paste')}</button><button type="button" disabled={interaction.selectedNodeIds.length === 0 && interaction.selectedEdgeIds.length === 0} onClick={() => { void removeSelection() }}>{t('editor.delete')}</button><span>{workflow.name} · r{canvas.workflowRevision}</span></div>
       <div className={css.graphViewport}><div className={css.graphCanvas} style={{ width, height }}><svg className={css.edges} width={width} height={height} aria-hidden="true">{flow.edges.map(edge => { const source = nodeById.get(String(edge.source)); const target = nodeById.get(String(edge.target)); return source === undefined || target === undefined ? null : <line key={edge.id} x1={source.position.x + 170} y1={source.position.y + 38} x2={target.position.x} y2={target.position.y + 38} /> })}</svg>{flow.nodes.map(node => {
         const selected = interaction.selectedNodeIds.includes(node.id); const unavailable = !props.capabilities.video.enabled && (node.type === 'video.generate' || node.type === 'video.image-to-video')
-        return <button key={node.id} type="button" className={css.node} data-selected={selected ? 'true' : 'false'} data-unavailable={unavailable ? 'true' : 'false'} style={{ left: node.position.x, top: node.position.y }} onClick={() => { props.onSelectNode(canvas, node.id) }} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); drag.current = { nodeId: node.id, startPointerX: event.clientX, startPointerY: event.clientY, startX: node.position.x, startY: node.position.y, x: node.position.x, y: node.position.y } }} onPointerMove={event => { const active = drag.current; if (active?.nodeId !== node.id) return; active.x = active.startX + event.clientX - active.startPointerX; active.y = active.startY + event.clientY - active.startPointerY; actions.setLocalPosition(String(node.id), active.x, active.y) }} onPointerUp={() => { const active = drag.current; if (active?.nodeId !== node.id) return; drag.current = null; void persistPositions(mergedLayoutPositions(workflow, layout, { ...localPositions, [String(node.id)]: { x: active.x, y: active.y } })) }}><strong>{node.label}</strong><span>{node.type}</span>{unavailable && <em>{t('feature.unavailable')}</em>}</button>
+        return <button key={node.id} type="button" className={css.node} data-selected={selected ? 'true' : 'false'} data-unavailable={unavailable ? 'true' : 'false'} style={{ left: node.position.x, top: node.position.y }} onClick={() => { props.onSelectNode(canvas, node.id) }} onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); drag.current = { nodeId: node.id, startPointerX: event.clientX, startPointerY: event.clientY, startX: node.position.x, startY: node.position.y, x: node.position.x, y: node.position.y } }} onPointerMove={event => { const active = drag.current; if (active?.nodeId !== node.id) return; active.x = active.startX + event.clientX - active.startPointerX; active.y = active.startY + event.clientY - active.startPointerY; actions.setLocalPosition(String(node.id), active.x, active.y) }} onPointerUp={() => { const active = drag.current; if (active?.nodeId !== node.id) return; drag.current = null; void persistPositions(mergedLayoutPositions(workflow, compatibleLayout, { ...localPositions, [String(node.id)]: { x: active.x, y: active.y } })) }}><strong>{node.label}</strong><span>{node.type}</span>{unavailable && <em>{t('feature.unavailable')}</em>}</button>
       })}</div></div>
       {workflow.edges.length > 0 && <div className={css.edgeStrip}>{workflow.edges.map(edge => <button key={edge.id} type="button" aria-pressed={interaction.selectedEdgeIds.includes(edge.id)} onClick={() => { props.onSelectEdge(canvas, edge.id) }}>{edge.sourceNodeId} → {edge.targetNodeId}</button>)}</div>}
     </main>

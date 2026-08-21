@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import SessionStore from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SessionProjectionRegistry, { SESSION_PROJECTION_CONTROL_MARKER } from '@deepseek-ai/dsh-session-projection'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -27,6 +27,11 @@ async function harness(): Promise<{ ctx: Context; session: Session }> {
   return { ctx, session }
 }
 
+function visibility(value: unknown): { generation: number; present: boolean; value?: unknown } | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return (value as Record<string, unknown>)[SESSION_PROJECTION_CONTROL_MARKER] as never
+}
+
 describe('SessionProjectionRegistry browser read guards', () => {
   it('omits a denied key from snapshots without changing its internal checkpoint state', async () => {
     const { ctx, session } = await harness()
@@ -37,7 +42,7 @@ describe('SessionProjectionRegistry browser read guards', () => {
     expect(ctx.sessionProjections.checkpoint(session)['test/guarded-count']?.val).toBe(1)
   })
 
-  it('suppresses change-feed values denied by a read guard', async () => {
+  it('suppresses ordinary change-feed values while a key has never been browser-visible', async () => {
     const { ctx, session } = await harness()
     const seen: unknown[] = []
     ctx.sessionProjections.registerReadGuard('test/guarded-count', () => false)
@@ -47,6 +52,47 @@ describe('SessionProjectionRegistry browser read guards', () => {
 
     session.append('turn/start', { turn: 1 })
     expect(seen).toEqual([])
+  })
+
+  it('emits explicit same-seq absence and re-appearance when a guard is installed and disposed', async () => {
+    const { ctx, session } = await harness()
+    session.append('turn/start', { turn: 1 })
+    expect(ctx.sessionProjections.snapshot(session).values['test/guarded-count']).toBe(1)
+    const seen: Array<{ seq: number; value: unknown }> = []
+    ctx.sessionProjections.onChanged((_session, key, value, seq) => {
+      if (key === 'test/guarded-count') seen.push({ seq, value })
+    })
+
+    const dispose = ctx.sessionProjections.registerReadGuard('test/guarded-count', () => false)
+    expect(visibility(seen.at(-1)?.value)).toMatchObject({ generation: 1, present: false })
+    expect(seen.at(-1)?.seq).toBe(session.seq - 1)
+
+    dispose()
+    expect(visibility(seen.at(-1)?.value)).toMatchObject({ generation: 2, present: true, value: 1 })
+    expect(seen.at(-1)?.seq).toBe(session.seq - 1)
+  })
+
+  it('can refresh a mutable ACL decision without inventing a Session event', async () => {
+    const { ctx, session } = await harness()
+    session.append('turn/start', { turn: 1 })
+    let allowed = true
+    ctx.sessionProjections.registerReadGuard('test/guarded-count', () => allowed)
+    ctx.sessionProjections.snapshot(session)
+    const beforeSeq = session.seq
+    const seen: unknown[] = []
+    ctx.sessionProjections.onChanged((_session, key, value) => {
+      if (key === 'test/guarded-count') seen.push(value)
+    })
+
+    allowed = false
+    ctx.sessionProjections.refreshBrowserVisibility(session, ['test/guarded-count'])
+    expect(session.seq).toBe(beforeSeq)
+    expect(visibility(seen.at(-1))).toMatchObject({ generation: 1, present: false })
+
+    allowed = true
+    ctx.sessionProjections.refreshBrowserVisibility(session, ['test/guarded-count'])
+    expect(session.seq).toBe(beforeSeq)
+    expect(visibility(seen.at(-1))).toMatchObject({ generation: 2, present: true, value: 1 })
   })
 
   it('fails closed when a read guard throws', async () => {
@@ -69,16 +115,25 @@ describe('SessionProjectionRegistry browser read guards', () => {
     expect(seenSessionIds).toContain(String(session.id))
   })
 
-  it('gives detached checkpoint/restore views no invented Session identity so identity-dependent guards can deny', async () => {
+  it('accepts an exact carrier-supplied Session identity for detached checkpoint/restore authorization', async () => {
     const { ctx, session } = await harness()
     session.append('turn/start', { turn: 1 })
     const checkpoint = ctx.sessionProjections.checkpoint(session)
-    ctx.sessionProjections.registerReadGuard('test/guarded-count', context => context.sessionId !== undefined)
+    ctx.sessionProjections.registerReadGuard('test/guarded-count', context => context.sessionId === String(session.id))
 
     expect(ctx.sessionProjections.viewCheckpoint(checkpoint)).not.toHaveProperty('test/guarded-count')
-    const restored = ctx.sessionProjections.restore({}, [...session.events], 0)
-    expect(restored.snapshot.values).not.toHaveProperty('test/guarded-count')
-    expect(restored.checkpoint['test/guarded-count']?.val).toBe(1)
+    expect(ctx.sessionProjections.viewCheckpoint(checkpoint, {
+      surface: 'browser', sessionId: String(session.id),
+    })['test/guarded-count']).toBe(1)
+
+    const denied = ctx.sessionProjections.restore({}, [...session.events], 0)
+    expect(denied.snapshot.values).not.toHaveProperty('test/guarded-count')
+    expect(denied.checkpoint['test/guarded-count']?.val).toBe(1)
+
+    const restored = ctx.sessionProjections.restore({}, [...session.events], 0, {
+      surface: 'browser', sessionId: String(session.id),
+    })
+    expect(restored.snapshot.values['test/guarded-count']).toBe(1)
   })
 
   it('removes the visibility decision when the explicit read-guard disposer runs', async () => {

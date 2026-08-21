@@ -13,6 +13,7 @@ import {
 import type { CanvasFoldState } from './fold.ts'
 import {
   applyCanvasLayoutEvent,
+  assertCurrentCanvasLayoutSnapshot,
   cloneCanvasLayoutFoldState,
   decodeCanvasLayoutChange,
   emptyCanvasLayoutFoldState,
@@ -21,10 +22,7 @@ import type { CanvasLayoutFoldState } from './layout.ts'
 import { consumeCanvasWritePermit } from './write-authority.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-canvas'
-
-/** Cordis companion plugin name. */
 export const name = 'canvas-invariant'
-/** Services required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
 interface CombinedState {
@@ -50,8 +48,11 @@ function applyChecked(state: CombinedState, event: SessionEvent, fail: Invariant
     if (event.type === 'canvas/layout-change') {
       const canvas = state.canvas.canvas
       const layout = state.layout.layout
-      if (canvas === null || canvas.workflow === null || layout === null || layout.workflowId !== canvas.workflow.id) {
-        throw new Error('Canvas layout change must target the current Canvas workflow identity')
+      if (canvas === null || canvas.workflow === null || layout === null) {
+        throw new Error('Canvas layout change must target a current Canvas workflow')
+      }
+      if (layout.canvasId !== canvas.id || layout.workflowId !== canvas.workflow.id) {
+        throw new Error('Canvas layout change must target the current Canvas generation and workflow identity')
       }
       const nodeIds = new Set(canvas.workflow.nodes.map(node => String(node.id)))
       for (const nodeId of Object.keys(layout.nodePositions)) {
@@ -64,13 +65,7 @@ function applyChecked(state: CombinedState, event: SessionEvent, fail: Invariant
   }
 }
 
-/**
- * Apply current-writer-only checks at the Session pre-commit boundary.
- * Historical seed replay remains compatible with metadata v1 and the legacy
- * `run-complete` operation. New Canvas/layout writes must come through the
- * package-owned permit issued only after CanvasService provenance/authorization
- * checks; the invariant then verifies current protocol and durable-data safety.
- */
+/** Current-writer-only checks at the Session pre-commit boundary. */
 function assertCurrentWriter(session: Session, event: SessionEvent, fail: InvariantFailure): void {
   if (event.type !== 'canvas/change' && event.type !== 'canvas/layout-change') return
   try {
@@ -80,6 +75,7 @@ function assertCurrentWriter(session: Session, event: SessionEvent, fail: Invari
     if (event.type === 'canvas/layout-change') {
       const change = decodeCanvasLayoutChange(event.data)
       if (change === undefined) throw new Error('Canvas event data does not decode as canvas/layout-change')
+      assertCurrentCanvasLayoutSnapshot(change.layout)
       return
     }
 
@@ -98,7 +94,6 @@ function assertCurrentWriter(session: Session, event: SessionEvent, fail: Invari
   }
 }
 
-/** Install independent incremental Canvas/layout folds over every attached Session. */
 const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
   const states = new WeakMap<Session, CombinedState>()
   const staged = new WeakMap<SessionEvent, { session: Session; state: CombinedState }>()
@@ -133,6 +128,5 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   }, { global: true })
 }, { inject: ['sessions'] })
 
-/** Register this package's Canvas-stream invariant companion. */
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))

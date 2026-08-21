@@ -52,27 +52,44 @@ const emptyInteraction = {
   selectedAssetRefs: [],
 } as const
 
+function canvasViewProps(
+  canvas: CanvasSnapshot | null | undefined,
+  openState: 'cold' | 'loading' | 'open' | 'error' = 'open',
+): ComponentProps<typeof CanvasView> {
+  return {
+    useSession: selector => selector({ openState } as never),
+    useProjection: (key: string) => key === 'canvas' ? canvas : null,
+    useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
+    useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),
+    capabilities: capabilities({ editor: false }),
+    setMode: () => {},
+    selectNode: () => {},
+    selectNodes: () => {},
+    selectEdge: () => {},
+    selectEdges: () => {},
+    selectOutput: () => {},
+    setRegion: () => {},
+    clearSelection: () => {},
+    t,
+  } as unknown as ComponentProps<typeof CanvasView>
+}
+
 describe('Canvas feature-capability presentation', () => {
   it('forces Minimal and hides the mode switch when Editor is disabled', () => {
-    const canvas = canvasWithVideo()
-    const props = {
-      useProjection: (key: string) => key === 'canvas' ? canvas : null,
-      useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
-      useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),
-      capabilities: capabilities({ editor: false }),
-      setMode: () => {},
-      selectNode: () => {},
-      selectEdge: () => {},
-      selectOutput: () => {},
-      setRegion: () => {},
-      clearSelection: () => {},
-      t,
-    } as unknown as ComponentProps<typeof CanvasView>
-
-    const html = renderToStaticMarkup(<CanvasView {...props} />)
+    const html = renderToStaticMarkup(<CanvasView {...canvasViewProps(canvasWithVideo())} />)
     expect(html).not.toContain('mode.editor')
     expect(html).not.toContain('editor.title')
     expect(html).toContain('minimal.output')
+  })
+
+  it('distinguishes a pending Canvas Projection from authoritative absence', () => {
+    const loading = renderToStaticMarkup(<CanvasView {...canvasViewProps(undefined, 'loading')} />)
+    expect(loading).toContain('projection.loading')
+    expect(loading).not.toContain('projection.unavailable')
+
+    const unavailable = renderToStaticMarkup(<CanvasView {...canvasViewProps(undefined, 'open')} />)
+    expect(unavailable).toContain('projection.unavailable')
+    expect(unavailable).not.toContain('projection.loading')
   })
 
   it('keeps a historical Video node visible while marking it unavailable', () => {

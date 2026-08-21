@@ -8,34 +8,18 @@
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 
-/** Identifies the current Canvas document within one session. */
 export type CanvasId = Branded<'CanvasId'>
-/** Identifies one semantic media workflow across revisions. */
 export type MediaWorkflowId = Branded<'MediaWorkflowId'>
-/** Identifies one workflow node. */
 export type WorkflowNodeId = Branded<'WorkflowNodeId'>
-/** Identifies one workflow edge. */
 export type WorkflowEdgeId = Branded<'WorkflowEdgeId'>
-/** Identifies one execution of a fixed workflow revision. */
 export type CanvasRunId = Branded<'CanvasRunId'>
-/** Identifies one user-facing workflow variant. */
 export type CanvasVariantId = Branded<'CanvasVariantId'>
-/** Identifies one durable video object without exposing a filesystem path or bearer URL. */
 export type VideoAssetId = Branded<'VideoAssetId'>
 
-/** JSON-safe primitive stored inside semantic workflow configuration. */
 export type CanvasJsonPrimitive = null | boolean | number | string
-/** JSON-safe value stored inside semantic workflow configuration. */
 export type CanvasJsonValue = CanvasJsonPrimitive | readonly CanvasJsonValue[] | { readonly [key: string]: CanvasJsonValue }
-
-/** Media values that a node port may accept or produce. */
 export type MediaPortType = 'text' | 'image' | 'video' | 'image-list' | 'video-list' | 'mask'
 
-/**
- * Declaration-merge surface for node identifiers known to the current TypeScript composition.
- * Plugins may augment this map for discoverability and registry typing, but Canvas Domain runtime
- * admission is intentionally open-world so durable workflows survive when a plugin is unavailable.
- */
 export interface MediaWorkflowNodeTypeMap {
   'asset.input': true
   'prompt': true
@@ -46,15 +30,9 @@ export interface MediaWorkflowNodeTypeMap {
   'output': true
 }
 
-/** Node identifiers known to the current TypeScript composition. */
 export type KnownMediaWorkflowNodeType = keyof MediaWorkflowNodeTypeMap
-/**
- * Open-world semantic node identifier stored by Canvas Domain.
- * N10/N12 registries decide whether an identifier is installed, valid for its ports/config, and executable.
- */
 export type MediaWorkflowNodeType = string
 
-/** One semantic workflow node; renderer and provider-specific fields do not belong here. */
 export interface MediaWorkflowNode {
   readonly id: WorkflowNodeId
   readonly type: MediaWorkflowNodeType
@@ -63,7 +41,6 @@ export interface MediaWorkflowNode {
   readonly config: Readonly<Record<string, CanvasJsonValue>>
 }
 
-/** Directed connection between named semantic node ports. */
 export interface MediaWorkflowEdge {
   readonly id: WorkflowEdgeId
   readonly sourceNodeId: WorkflowNodeId
@@ -72,7 +49,6 @@ export interface MediaWorkflowEdge {
   readonly targetPort: string
 }
 
-/** Complete semantic DAG definition. UI layout is intentionally separate. */
 export interface MediaWorkflow {
   readonly id: MediaWorkflowId
   readonly schemaVersion: number
@@ -82,7 +58,12 @@ export interface MediaWorkflow {
   readonly outputNodeIds: readonly WorkflowNodeId[]
 }
 
-/** Persisted editor layout kept independent from semantic workflow revisioning. */
+/**
+ * Persisted editor layout independent from semantic workflow revisioning.
+ * `canvasId`/`layoutRevision` are optional only for historical N05-v1 rows;
+ * every current writer emits {@link CurrentCanvasLayoutSnapshot} and replay
+ * normalizes legacy rows before exposing the current Projection.
+ */
 export interface CanvasLayoutSnapshot {
   readonly schemaVersion: number
   readonly workflowId: MediaWorkflowId
@@ -93,9 +74,16 @@ export interface CanvasLayoutSnapshot {
     readonly zoom: number
   }
   readonly updatedAt: number
+  readonly canvasId?: CanvasId
+  readonly layoutRevision?: number
 }
 
-/** Durable reference for one generated or imported video. */
+/** Current-generation layout identity used by Browser Projection and CAS writes. */
+export interface CurrentCanvasLayoutSnapshot extends CanvasLayoutSnapshot {
+  readonly canvasId: CanvasId
+  readonly layoutRevision: number
+}
+
 export interface VideoAssetRef {
   readonly assetId: VideoAssetId
   readonly mediaType: string
@@ -105,25 +93,19 @@ export interface VideoAssetRef {
   readonly durationMs?: number
 }
 
-/** Durable image result backed by the existing attachment capability. */
 export interface CanvasImageAssetRef {
   readonly kind: 'image'
   readonly image: Readonly<ImageAttachmentRef>
 }
 
-/** Durable video result backed by the future media-asset capability. */
 export interface CanvasVideoAssetRef {
   readonly kind: 'video'
   readonly video: VideoAssetRef
 }
 
-/** Durable media reference stored by Canvas; binary payloads never appear here. */
 export type CanvasAssetRef = CanvasImageAssetRef | CanvasVideoAssetRef
-
-/** High-level error classes rendered differently by future consumers. */
 export type CanvasErrorCategory = 'validation' | 'conflict' | 'permission' | 'provider' | 'infrastructure' | 'interrupted' | 'quota'
 
-/** Stable errors currently owned by the pure Canvas domain. */
 export type CanvasErrorCode =
   | 'CANVAS_INVALID_ID'
   | 'CANVAS_INVALID_REVISION'
@@ -134,7 +116,6 @@ export type CanvasErrorCode =
   | 'CANVAS_INVALID_RUN'
   | 'CANVAS_INVALID_OUTPUT'
 
-/** Stable service failures rejected before a Canvas mutation commits. */
 export type CanvasServiceErrorCode =
   | 'CANVAS_AGENT_NOT_LIVE'
   | 'CANVAS_NOT_FOUND'
@@ -149,17 +130,14 @@ export type CanvasServiceErrorCode =
   | 'CANVAS_INVALID_ACCESS_CONTEXT'
   | 'CANVAS_SENSITIVE_DATA'
 
-/** Wire-safe error detail attached to a failed or interrupted run. */
 export interface CanvasRunError {
   readonly category: CanvasErrorCategory
   readonly code: string
   readonly message: string
 }
 
-/** Lifecycle of one execution of an immutable workflow revision. */
 export type CanvasRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
-/** Durable lifecycle summary for one current or most-recent run. */
 export interface CanvasRunSnapshot {
   readonly id: CanvasRunId
   readonly status: CanvasRunStatus
@@ -171,7 +149,6 @@ export interface CanvasRunSnapshot {
   readonly error?: CanvasRunError
 }
 
-/** Bounded history DTO derived from Session history; it is never a second authority. */
 export interface CanvasRunHistoryEntry {
   readonly runId: CanvasRunId
   readonly variantId?: CanvasVariantId
@@ -184,7 +161,6 @@ export interface CanvasRunHistoryEntry {
   readonly promptSummary?: string
 }
 
-/** Current user-facing output. A previous successful output may remain while a later run fails. */
 export interface CanvasOutput {
   readonly runId: CanvasRunId
   readonly workflowId: MediaWorkflowId
@@ -193,7 +169,6 @@ export interface CanvasOutput {
   readonly primaryAssetIndex: number
 }
 
-/** Complete current Canvas state. Session events later carry this value whole after every mutation. */
 export interface CanvasSnapshot {
   readonly schemaVersion: number
   readonly id: CanvasId
@@ -207,10 +182,8 @@ export interface CanvasSnapshot {
   readonly updatedAt: number
 }
 
-/** Version of the durable `canvas/change` envelope. */
 export type CanvasChangeVersion = 1
 
-/** Stable migration/decode failure reasons at durable Canvas boundaries. */
 export type CanvasMigrationErrorCode =
   | 'CANVAS_MIGRATION_INVALID_VALUE'
   | 'CANVAS_UNSUPPORTED_SCHEMA_VERSION'
@@ -218,7 +191,6 @@ export type CanvasMigrationErrorCode =
   | 'CANVAS_UNSUPPORTED_NODE_VERSION'
   | 'CANVAS_UNSUPPORTED_FUTURE_NODE_VERSION'
 
-/** Non-fatal compatibility information surfaced while reading historical Canvas data. */
 export interface CanvasMigrationNotice {
   readonly code: 'CANVAS_DEPRECATED_NODE'
   readonly lifecycle: 'deprecated'
@@ -227,13 +199,11 @@ export interface CanvasMigrationNotice {
   readonly toType: MediaWorkflowNodeType
 }
 
-/** Result of migration before or after current-domain invariant validation. */
 export interface CanvasMigrationResult<T> {
   readonly value: T
   readonly notices: readonly CanvasMigrationNotice[]
 }
 
-/** Host permissions consumed by CanvasService and later Remote/Tool/History/Asset routes. */
 export type CanvasPermission =
   | 'canvas.read'
   | 'canvas.edit'
@@ -247,19 +217,14 @@ export type CanvasPermission =
   | 'canvas.variant.create'
   | 'canvas.layout.write'
 
-/** Human, Agent, and Host-system identities recognized by Canvas authorization/audit. */
 export type CanvasActorKind = 'human' | 'agent' | 'system'
-
-/** Durable-safe Canvas actor identity. Provider credentials and request headers never belong here. */
 export type CanvasActor =
   | { readonly kind: 'human'; readonly id: string }
   | { readonly kind: 'agent'; readonly id: string }
   | { readonly kind: 'system'; readonly id: string }
 
-/** Known Host entry points that may request Canvas permissions. */
 export type CanvasRequestSource = 'host' | 'browser-remote' | 'agent-tool' | 'system-reconciler' | 'asset-route'
 
-/** Request-scoped actor/source metadata sampled by the Host caller. */
 export interface CanvasAccessContext {
   readonly actor: CanvasActor
   readonly source: CanvasRequestSource
@@ -267,7 +232,6 @@ export interface CanvasAccessContext {
   readonly correlationId?: string
 }
 
-/** Resource identity supplied to external Host authorization policy. */
 export type CanvasAuthorizationResource =
   | { readonly kind: 'session' }
   | { readonly kind: 'canvas'; readonly canvasId: CanvasId }
@@ -277,14 +241,12 @@ export type CanvasAuthorizationResource =
   | { readonly kind: 'variant'; readonly canvasId: CanvasId; readonly variantId: CanvasVariantId }
   | { readonly kind: 'layout'; readonly canvasId: CanvasId; readonly workflowId: MediaWorkflowId }
 
-/** Complete authorization request evaluated only on the Host. */
 export interface CanvasAuthorizationRequest extends CanvasAccessContext {
   readonly permission: CanvasPermission
   readonly sessionId: string
   readonly resource: CanvasAuthorizationResource
 }
 
-/** Stable authorization result. Detailed policy diagnostics stay Host-internal and never contain credentials. */
 export type CanvasAuthorizationDecision =
   | { readonly allowed: true }
   | {
@@ -293,29 +255,24 @@ export type CanvasAuthorizationDecision =
     readonly policyCode?: string
   }
 
-/** Single-user default policy with optional permission-specific actor-kind overrides. */
 export interface CanvasAuthorizationConfig {
   readonly defaultActors?: readonly CanvasActorKind[]
   readonly permissions?: Partial<Record<CanvasPermission, readonly CanvasActorKind[]>>
 }
 
-/** Whether Canvas may use its single-user fallback when no external authorization service is mounted. */
 export type CanvasAuthorizationMode = 'single-user-fallback' | 'required-external'
 
-/** CanvasService authorization configuration. */
 export interface CanvasServiceConfig {
   readonly authorization?: CanvasAuthorizationConfig
   readonly authorizationMode?: CanvasAuthorizationMode
 }
 
-/** Compare-and-set identity for one current semantic workflow revision. */
 export interface WorkflowRef {
   readonly canvasId: CanvasId
   readonly workflowId: MediaWorkflowId
   readonly workflowRevision: number
 }
 
-/** Atomic semantic operation applied in-order to one detached workflow draft. */
 export type WorkflowEditOperation =
   | { readonly op: 'add-node'; readonly node: MediaWorkflowNode }
   | { readonly op: 'remove-node'; readonly nodeId: WorkflowNodeId }
@@ -330,19 +287,16 @@ export type WorkflowEditOperation =
   | { readonly op: 'set-output-nodes'; readonly nodeIds: readonly WorkflowNodeId[] }
   | { readonly op: 'rename-workflow'; readonly name: string }
 
-/** Host request for the first/current Canvas and its initial workflow. */
 export interface CreateCanvasRequest {
   readonly workflow: MediaWorkflow
   readonly currentVariantId?: CanvasVariantId
 }
 
-/** Select one already-durable output candidate by its current run identity. */
 export interface SelectCanvasOutputRequest {
   readonly runId: CanvasRunId
   readonly assetIndex: number
 }
 
-/** Input for constructing a fresh Canvas before any run lifecycle exists. */
 export interface CreateCanvasSnapshotInput {
   readonly id: CanvasId
   readonly createdAt: number
@@ -350,7 +304,6 @@ export interface CreateCanvasSnapshotInput {
   readonly currentVariantId?: CanvasVariantId
 }
 
-/** Input for constructing a workflow at the current schema version. */
 export interface CreateMediaWorkflowInput {
   readonly id: MediaWorkflowId
   readonly name: string
@@ -359,5 +312,4 @@ export interface CreateMediaWorkflowInput {
   readonly outputNodeIds?: readonly WorkflowNodeId[]
 }
 
-/** Presentation-level state derived only from the durable Canvas snapshot. */
 export type CanvasProductState = 'EMPTY' | 'READY' | 'DIRTY_READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'INTERRUPTED'

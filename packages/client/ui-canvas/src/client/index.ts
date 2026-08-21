@@ -155,6 +155,10 @@ async function commitOperations(ctx: ClientContext, remote: CanvasMutationRemote
 async function saveLayout(remote: CanvasMutationRemote, sessionId: SessionId, request: SaveCanvasLayoutRequest): Promise<CanvasLayoutWriteResult> {
   try {
     const result = await remote.saveLayout(sessionId, request)
-    return result.ok ? { ok: true } : { ok: false, status: 'save-failed', message: result.error.message }
+    if (!result.ok) return result.error.code === 'CANVAS_STALE_LAYOUT_REVISION'
+      || result.error.code === 'CANVAS_LAYOUT_CANVAS_MISMATCH'
+      ? { ok: false, status: 'conflict', message: result.error.message }
+      : { ok: false, status: 'save-failed', message: result.error.message }
+    return { ok: true, layoutRevision: result.value.layoutRevision }
   } catch (error) { return { ok: false, status: 'offline', message: error instanceof Error ? error.message : String(error) } }
 }
