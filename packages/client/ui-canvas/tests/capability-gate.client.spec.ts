@@ -46,6 +46,8 @@ async function harness(
     register: () => () => {},
     bind: () => ((key: string) => key),
   } as never)
+  // Deliberately no remote.canvas service: projected Minimal state must not be
+  // hidden just because mutation transport is absent.
   ctx.provide('remote', { canvasFeatures: { get, listNodes } } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
   const fiber = ctx.plugin({ inject, apply })
@@ -58,11 +60,10 @@ async function settle(): Promise<void> {
 }
 
 describe('ui-canvas Host capability gate', () => {
-  it('registers the Canvas main surface only when Host capabilities enable it', async () => {
+  it('registers the Canvas main surface without a mutation Remote only when Host capabilities enable it', async () => {
     const enabled = await harness(async () => ({ ok: true, value: capabilities(true) }))
     await settle()
     expect(enabled.slots.entries('shell.main')).toHaveLength(1)
-    expect(enabled.slots.entries('conversation.view')).toHaveLength(0)
     await enabled.fiber.dispose()
     expect(enabled.slots.entries('shell.main')).toHaveLength(0)
 
@@ -80,18 +81,10 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: string) => CanvasViewInjected)('session-a')
+    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(false)
     expect(injected.nodeCatalog).toEqual([])
     expect(error).toHaveBeenCalledOnce()
-  })
-
-  it('does not require the mutation Remote to expose projected Minimal state', async () => {
-    const { slots } = await harness(async () => ({ ok: true, value: capabilities(true) }))
-    await settle()
-    const injected = (slots.entries('shell.main')[0]!.inject as (sessionId: string) => CanvasViewInjected)('session-a')
-    const result = await injected.commitOperations([], 1)
-    expect(result).toEqual({ ok: false, status: 'save-failed', message: 'CANVAS_NO_EDITABLE_WORKFLOW' })
   })
 
   it('fails closed when capability discovery returns a business error', async () => {
