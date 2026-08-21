@@ -6,7 +6,8 @@ import type { CanvasMode } from '../types.ts'
 
 /**
  * UI-local mode ledger. It has no Session, Remote, persistence, or Canvas mutation dependency.
- * The first mode is Minimal on narrow screens and Editor otherwise.
+ * The first mode is Minimal on narrow screens and Editor otherwise; later viewport changes do not
+ * overwrite an explicit per-session preference.
  */
 export class CanvasModeStore {
   private readonly rows = new Map<SessionId, SnapshotStore<CanvasMode>>()
@@ -25,10 +26,20 @@ export class CanvasModeStore {
     row.set(mode)
   }
 
-  /** Drop one UI preference when an owning integration explicitly chooses to prune it. */
+  /** Drop one UI preference when its client-side Session lifetime ends. */
   delete(sessionId: SessionId): void {
     this.rows.delete(sessionId)
   }
+
+  /** Remove rows that no longer belong to the current Session catalog. */
+  prune(liveSessionIds: ReadonlySet<SessionId>): void {
+    for (const sessionId of this.rows.keys()) {
+      if (!liveSessionIds.has(sessionId)) this.rows.delete(sessionId)
+    }
+  }
+
+  /** Drop every row when the owning plugin fiber is disposed or replaced. */
+  clearAll(): void { this.rows.clear() }
 
   private row(sessionId: SessionId): SnapshotStore<CanvasMode> {
     let row = this.rows.get(sessionId)
