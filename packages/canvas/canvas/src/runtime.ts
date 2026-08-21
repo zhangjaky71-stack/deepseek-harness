@@ -128,6 +128,24 @@ function edgeIndex(edges: readonly MediaWorkflowEdge[], edgeId: MediaWorkflowEdg
   return edges.findIndex(edge => edge.id === edgeId)
 }
 
+function authorizationMode(value: unknown): CanvasAuthorizationMode {
+  if (value === undefined || value === 'single-user-fallback') return 'single-user-fallback'
+  if (value === 'required-external') return 'required-external'
+  throw new Error(`unsupported Canvas authorizationMode ${String(value)}`)
+}
+
+function normalizeExternalAuthorizationDecision(value: unknown): CanvasAuthorizationDecision {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-invalid-response' }
+  }
+  const decision = value as { allowed?: unknown; reason?: unknown }
+  if (decision.allowed === true) return { allowed: true }
+  if (decision.allowed === false && (decision.reason === 'denied' || decision.reason === 'policy-unavailable')) {
+    return { allowed: false, reason: decision.reason }
+  }
+  return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-invalid-response' }
+}
+
 function applyWorkflowOperations(current: MediaWorkflow, operations: readonly WorkflowEditOperation[]): MediaWorkflow {
   if (operations.length === 0) invalidEdit('Canvas workflow edit requires at least one operation')
   let name = current.name
@@ -208,7 +226,7 @@ export class CanvasService extends TypertRemoteService {
   constructor(ctx: Context, config: CanvasServiceConfig = {}) {
     super(ctx, 'canvas')
     this.fallbackAuthorization = new CanvasAuthorizationPolicy(config.authorization)
-    this.authorizationMode = config.authorizationMode ?? 'single-user-fallback'
+    this.authorizationMode = authorizationMode(config.authorizationMode)
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       registerCanvasProjections(projectionCtx, sessionId => this.canBrowserReadProjection(sessionId))
     })
@@ -223,7 +241,7 @@ export class CanvasService extends TypertRemoteService {
       return this.fallbackAuthorization.authorize(request)
     }
     try {
-      return external.authorize(request)
+      return normalizeExternalAuthorizationDecision(external.authorize(request))
     } catch {
       return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-error' }
     }
@@ -241,17 +259,24 @@ export class CanvasService extends TypertRemoteService {
     const workflow = cloneWorkflow(request.workflow)
     assertMediaWorkflow(workflow)
     features?.assertWorkflowCreatable(workflow)
-    if (request.currentVariantId !== undefined) {
-      features?.assertEnabled('variants')
-      this.assertAuthorized(agent, prepared.cache, prepared.access, 'canvas.variant.create')
-    }
     this.assertWorkflowAuditSafe(workflow)
     if (prepared.cache.state.canvas !== null) {
       throw new CanvasServiceError(`Canvas "${prepared.cache.state.canvas.id}" already exists`, 'CANVAS_ALREADY_EXISTS')
     }
+    const canvasId = CanvasId(`canvas-${randomUUID()}`)
+    if (request.currentVariantId !== undefined) {
+      features?.assertEnabled('variants')
+      this.assertAuthorized(
+        agent,
+        prepared.cache,
+        prepared.access,
+        'canvas.variant.create',
+        { kind: 'variant', canvasId, variantId: request.currentVariantId },
+      )
+    }
     const now = Date.now()
     const canvas = createCanvasSnapshot({
-      id: CanvasId(`canvas-${randomUUID()}`),
+      id: canvasId,
       createdAt: now,
       workflow,
       ...request.currentVariantId === undefined ? {} : { currentVariantId: request.currentVariantId },
@@ -442,13 +467,14 @@ export class CanvasService extends TypertRemoteService {
     cache: CanvasCache,
     access: CanvasAccessContext,
     permission: CanvasPermission,
+    resource: CanvasAuthorizationResource = this.authorizationResource(cache, permission),
   ): void {
     const decision = this.authorize({
       permission,
       actor: access.actor,
       source: access.source,
       sessionId: String(agent.session.id),
-      resource: this.authorizationResource(cache, permission),
+      resource,
       ...(access.requestId === undefined ? {} : { requestId: access.requestId }),
       ...(access.correlationId === undefined ? {} : { correlationId: access.correlationId }),
     })
@@ -479,13 +505,16 @@ export class CanvasService extends TypertRemoteService {
   }
 
   private browserAccess(agent: Agent): CanvasAccessContext {
-    return canvasBrowserAccess(String(agent.id))
+    return canvasBrowserAccess(String(agent.session.id))
   }
 
   private resolveAccess(agent: Agent, access?: CanvasAccessContext): CanvasAccessContext {
     try {
       const canonical = canonicalCanvasAccessContext(access ?? canvasHostAgentAccess(String(agent.id)))
-      assertCanvasAccessProvenance(canonical, String(agent.id))
+      assertCanvasAccessProvenance(canonical, {
+        agentId: String(agent.id),
+        sessionId: String(agent.session.id),
+      })
       return canonical
     } catch (error) {
       const message = error instanceof Error ? error.message : 'invalid Canvas access context'
@@ -496,10 +525,11 @@ export class CanvasService extends TypertRemoteService {
   private canBrowserReadProjection(sessionId: string | undefined): boolean {
     if (sessionId === undefined) {
       if (this.ctx.get('canvasAuthorization') !== undefined || this.authorizationMode === 'required-external') return false
+      const access = canvasBrowserAccess('detached-session')
       return this.fallbackAuthorization.authorize({
         permission: 'canvas.read',
-        actor: { kind: 'human', id: 'single-user-browser' },
-        source: 'browser-remote',
+        actor: access.actor,
+        source: access.source,
         sessionId: 'detached-session',
         resource: { kind: 'session' },
       }).allowed
@@ -541,7 +571,9 @@ export class CanvasService extends TypertRemoteService {
     try {
       assertCanvasDurableAuditSafe(canvas)
     } catch (error) {
-      if (error instanceof Error) throw new CanvasServiceError(error.message, 'CANVAS_SENSITIVE_DATA')
+      if (error instanceof CanvasSensitiveDataError) {
+        throw new CanvasServiceError(error.message, 'CANVAS_SENSITIVE_DATA')
+      }
       throw error
     }
   }
