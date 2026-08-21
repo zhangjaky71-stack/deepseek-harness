@@ -163,6 +163,7 @@ function normalizeExternalAuthorizationDecision(value: unknown): CanvasAuthoriza
     || policyCode.length > 128
     || policyCode.trim() !== policyCode
     || /[\u0000-\u001f\u007f]/.test(policyCode)
+    || !/^[A-Za-z0-9._:@/-]+$/.test(policyCode)
   ) {
     return invalidExternalAuthorizationDecision()
   }
