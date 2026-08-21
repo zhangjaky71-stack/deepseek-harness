@@ -29,6 +29,9 @@ const layoutProjectionSchema = z.custom<CanvasLayoutSnapshot | null>((value) => 
   }
 }, { message: 'invalid Canvas layout projection value' })
 
+/** Host-side browser visibility decision for Canvas projection keys. */
+export type CanvasProjectionReadGate = (sessionId: string | undefined) => boolean
+
 /** Last-wins whole Canvas projection; malformed candidate events fail-soft. */
 export function applyCanvasProjection(state: CanvasSnapshot | null, event: SessionEvent): CanvasSnapshot | null {
   if (event.type !== 'canvas/change') return state
@@ -62,8 +65,12 @@ export function applyCanvasLayoutProjection(
   }
 }
 
-/** Register Canvas current-state and layout units on the composed projection registry. */
-export function registerCanvasProjections(ctx: Context): void {
+/**
+ * Register Canvas current-state/layout units and their optional Host browser-read gate.
+ * Projection mathematics remains identity-free; authorization is evaluated only when
+ * the registry serves a browser-facing snapshot/change value.
+ */
+export function registerCanvasProjections(ctx: Context, canRead?: CanvasProjectionReadGate): void {
   ctx.sessionProjections.register<'canvas', CanvasSnapshot | null>({
     key: 'canvas',
     schema: canvasProjectionSchema,
@@ -80,4 +87,8 @@ export function registerCanvasProjections(ctx: Context): void {
     view: (state: CanvasLayoutSnapshot | null) => state,
     stateVersion: 1,
   })
+  if (canRead !== undefined) {
+    ctx.sessionProjections.registerReadGuard('canvas', context => canRead(context.sessionId))
+    ctx.sessionProjections.registerReadGuard('canvasLayout', context => canRead(context.sessionId))
+  }
 }
