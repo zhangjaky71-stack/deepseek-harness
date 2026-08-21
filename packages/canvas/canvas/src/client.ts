@@ -15,7 +15,7 @@ export type * from './types.ts'
 export type * from './interaction-types.ts'
 export type * from './feature-types.ts'
 
-/** Opaque cursor over a stable Session-event boundary in Canvas run history. */
+/** Opaque cursor over a stable Session-event boundary in one Canvas generation's run history. */
 export type CanvasHistoryCursor = Branded<'CanvasHistoryCursor'>
 
 /** Browser/editor layout payload committed on drag-end or viewport save. */
@@ -40,15 +40,11 @@ export type CanvasLayoutErrorCode =
   | 'CANVAS_LAYOUT_WORKFLOW_MISMATCH'
   | 'CANVAS_STALE_LAYOUT_REVISION'
 
-/** Stable wire names reserved for the Canvas Browser mutation/query namespace. */
+/** Actual callable methods in the current Canvas Browser Remote namespace. */
 export type CanvasRemoteMethodName =
   | 'editWorkflow'
   | 'replaceWorkflow'
-  | 'createVariant'
-  | 'restoreWorkflow'
   | 'selectOutput'
-  | 'run'
-  | 'cancel'
   | 'clear'
   | 'saveLayout'
   | 'listRuns'
@@ -75,7 +71,9 @@ export interface CanvasClearReceipt {
   readonly canvasId: CanvasId
 }
 
+/** Bounded run-history query scoped to one durable Canvas generation. */
 export interface ListCanvasRunsRequest {
+  readonly canvasId: CanvasId
   readonly cursor?: CanvasHistoryCursor
   readonly limit?: number
 }
@@ -85,7 +83,9 @@ export interface CanvasRunHistoryPage {
   readonly nextCursor?: CanvasHistoryCursor
 }
 
+/** Exact run-history lookup scoped to one durable Canvas generation. */
 export interface GetCanvasRunRequest {
+  readonly canvasId: CanvasId
   readonly runId: CanvasRunId
 }
 
