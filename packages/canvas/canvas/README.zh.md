@@ -24,7 +24,7 @@ Durable value 统一走 `stored JSON → migrateStoredX() → current structural
 
 当前 `canvas/change` 与 `canvas/layout-change` 是 package-owned writer。`CanvasService` 只在一个 process-local、one-shot write permit 内执行 append；Canvas invariant 在 Session precommit 消费与 Event 完全匹配的 permit。其它 Host 路径即使构造出结构合法的 current event，也会在发布前被拒绝。
 
-这个 fence 用来阻止 trusted Host code 的误绕过与架构漂移，不是针对已经在同进程执行的恶意代码的 sandbox。Invariant 挂载前载入的历史 Event 仍可 replay，不要求 current-write permit。
+这个 fence 用来阻止 trusted Host code 的误绕过与架构漂移，不是针对已经在同进程执行的恶意代码的 sandbox。Invariant 挂载前载入的历史 Event 仍可 replay，不要求 current-write permit。依赖机械 direct-append 拒绝能力的生产组合必须挂载 Canvas invariant companion；轻量组合若未挂载，仍以 CanvasService 作为 current writer 的正确性边界。
 
 ## Host Authorization
 
@@ -41,23 +41,23 @@ Authorization request 包含规范 actor/source metadata、Session id，以及 t
 
 ## Actor / Source Provenance
 
-`CanvasAccessContext` 是 durable audit attribution，不是 caller 可以自由声明的 identity。当前 Host provenance binding 要求：
+`CanvasAccessContext` 是 durable audit attribution，不是 caller 可以自由声明的 identity。Browser 与 Asset 路径使用 Host 铸造的单用户 Browser principal（`human:host-browser`）；target Session 始终作为独立 Authorization 输入（`sessionId` 与 resource scope），不会被拿来冒充 human identity。Agent/System 路径继续有自己的更强 provenance 规则：
 
-- `browser-remote` → `human`，id 必须是当前单用户 Host Session/Agent surrogate。
+- `browser-remote` → Host 铸造的 `human:host-browser` principal。
 - `agent-tool` → `agent`，id 必须精确等于 target Agent。
 - `system-reconciler` → `system`。
-- `asset-route` → 在正式 identity layer 出现前使用 Host-bound human Session surrogate。
+- `asset-route` → 在正式 authenticated human identity layer 出现前使用同一个 Host-minted Browser principal。
 - `host` → exact target Agent identity，或显式 system actor。
 
-Package 导出 Host-owned constructor：`canvasHostAgentAccess`、`canvasBrowserAccess`、`canvasAgentToolAccess`、`canvasSystemAccess`，Transport/Tool 不需要自行拼 provenance。Actor id 有长度上限；durable request/correlation id 最长 128 字符，拒绝 control character、首尾空白，并限制为 log-safe 字符集。
+Package 导出 Host-owned constructor：`canvasHostAgentAccess`、`canvasBrowserAccess`、`canvasAgentToolAccess`、`canvasSystemAccess`，Transport/Tool 不需要自行拼 provenance。`canvasBrowserAccess()` 要求 Host caller 已经解析出 target Session，但不会把 Session id 变成 user id。Actor id 有长度上限；durable request/correlation id 最长 128 字符，拒绝 control character、首尾空白，并限制为 log-safe 字符集。
 
-当前 human id 明确只是单用户 surrogate。未来多用户 identity/tenancy 应替换 principal 来源，但不能把 authorization 移出 Host。
+当前 Browser principal 明确只是单用户 Host surrogate。未来 authenticated human/tenant identity 只需要替换同一 Host authorization seam 后面的 principal source，不需要重做 Session/resource model 或 permission vocabulary。
 
 ## Sensitive Durable-data Boundary
 
 Canvas 通过结构性规则保护 durable state，而不是依赖 UI 约定。Workflow config 递归拒绝已知 credential/header/binary carrier key，包括 normalize/suffix 后的 API key、access/auth/session/id token、client/callback secret、private/secret key、authorization/cookie/header、base64/data-URL/blob，以及 raw media bytes。还会拒绝显式 data-URL base64、PEM private-key block、明显的 Bearer credential string，以及常见长 `sk-`/`rk-` credential signature。
 
-`assertCanvasDurableAuditSafe()` 把 current-writer 安全边界扩展到 Workflow 之外。Durable Run diagnostic 在 commit 前有长度限制并扫描，因此 Provider SDK Error 中包含 Authorization Header/API credential 时不能被原样复制到 `CanvasRunError.message`。Host/Provider code 必须把 raw failure 分类并脱敏为稳定 safe code + safe summary；N23 如需更多诊断，只能写入经过脱敏的 structured log/trace，而不能进入 Session JSON。Durable image display name 同样会被限制和扫描；Binary 与 Provider raw response 始终在 Canvas state 之外。
+`assertCanvasDurableAuditSafe()` 把 current-writer 安全边界扩展到 Workflow 之外。Durable Run diagnostic 在 commit 前有长度限制并扫描，因此 Provider SDK Error 中包含 Authorization Header/API credential 时不能被原样复制到 `CanvasRunError.message`。Host/Provider code 必须把 raw failure 分类并脱敏为稳定 safe code + safe summary；N23 如需更多诊断，只能写入经过脱敏的 structured log/trace，而不能进入 Session JSON。Durable image/video object id 与 image display name 同样会被限制和扫描；Binary 与 Provider raw response 始终在 Canvas state 之外。
 
 这些规则承诺的是 Harness/Provider/Host 自身的结构化 credential carrier 与 raw provider diagnostic 不会被有意写入 Canvas durable state。它们**不**承诺能完美识别用户主动粘贴到语义文本中的任意 secret-like string；启发式扫描不能替代完整 DLP 系统。
 
@@ -65,7 +65,7 @@ Canvas 通过结构性规则保护 durable state，而不是依赖 UI 约定。W
 
 当 `ctx.sessionProjections` 存在时，Canvas 注册 `canvas → CanvasSnapshot | null` 和 `canvasLayout → CanvasLayoutSnapshot | null`。Projection Fold 保持纯数学、完全不含 identity。Canvas 另外通过 Session Projection Registry 注册 browser read guard，使同一 Host `canvas.read` policy 同时控制 snapshot/history baseline/change-frame 是否可以把这两个 key 发送出 Host。
 
-这修复了此前 `ctx.canvas.get()` 被 deny、但 Browser Projection 仍然可能暴露 Canvas 的漏洞。Live Projection Read 使用 exact Session id 评估 `canvas.read`。Detached cache/history view 不会虚构 identity：当部署使用 external/required identity-dependent policy 时，Canvas fail closed 并省略 guarded key，直到获得 live authorized Session view。Internal projection cell/checkpoint 仍保留完整派生状态；read deny 不会改写 Session History。
+这修复了此前 `ctx.canvas.get()` 被 deny、但 Browser Projection 仍然可能暴露 Canvas 的漏洞。Live Projection Read 携带 exact target Session id，并使用与 Canvas Remote、Interaction 相同的 Host-minted Browser principal。Detached cache/history view 当前不会虚构 Session identity：当部署使用 external/required identity-dependent policy 时，Canvas fail closed 并省略 guarded key，直到获得 live authorized Session view。Internal projection cell/checkpoint 仍保留完整派生状态；read deny 不会改写 Session History。
 
 ## Editor Layout
 
@@ -73,11 +73,11 @@ Layout State 继续使用独立 durable stream。`CanvasService.saveLayout()` �
 
 ## Browser Remote 与 Interaction
 
-Browser mutation wrapper 在 Host 上创建可信 `human + browser-remote` access；Browser payload 不提供自己的 actor/source。Mutation 返回小 receipt；当前 Canvas/Layout 通过 Session Projection 到达 Browser，因此没有第二条 `getCurrent` RPC。
+Browser mutation wrapper 在 Host 上创建可信 `human:host-browser + browser-remote` access；Browser payload 不提供自己的 actor/source。已解析 Session id 始终只是 Authorization target，不会升级为 user principal。Mutation 返回小 receipt；当前 Canvas/Layout 通过 Session Projection 到达 Browser，因此没有第二条 `getCurrent` RPC。
 
 Run History 继续是由 `canvas/change` 派生的 bounded view，而不是第二套 durable database。`listRuns()` 与 `getRun()` 要求 `canvas.history.read`，只返回 durable reference/metadata。
 
-`CanvasInteractionContext` 是 request-local state，不是 Canvas durable state。`CanvasInteractionService` 将 Browser selection 绑定到精确 ordinary prompt RPC id；`CanvasInteractionBridge` 校验 Canvas identity/revision/asset，并绑定到实际 admitted user message，然后通过正常、可记录的 Agent message path 注入模型上下文。Selection/focus 本身保持 ephemeral。
+`CanvasInteractionContext` 是 request-local state，不是 Canvas durable state。`CanvasInteractionService` 将 Browser selection 绑定到精确 ordinary prompt RPC id；`CanvasInteractionBridge` 使用相同 Host-minted Browser principal，校验 Canvas identity/revision/asset，并绑定到实际 admitted user message，然后通过正常、可记录的 Agent message path 注入模型上下文。Selection/focus 本身保持 ephemeral。
 
 ## Deployment Feature Policy
 
@@ -98,8 +98,8 @@ Canvas Domain/Authorization/Projection 本身不直接面向模型。N18 Agent T
 ## 已知限制与暂缓事项
 
 - 内建 Policy 仍然只是面向当前单用户部署的 actor-kind policy。Workspace ownership、tenant ACL 与 authenticated human identity 属于未来 Host policy，并继续位于 `ctx.canvasAuthorization` 后面。
-- Browser Projection Authorization 当前拥有 exact Session identity，但没有独立 user/tenant principal；使用 external/required policy 时，依赖 identity 的 detached read 因此 fail closed。
-- Package-local write permit 防止误用的 alternate current writer，不是恶意 same-process code sandbox。
+- 当前 Browser principal 由 Host 铸造，但还不是真正逐用户 authenticated identity。Live Authorization 会另外携带 exact target Session；identity-dependent detached read 因 generic detached projection read context 当前没有 Session target 而 fail closed。
+- Package-local write permit 只有在 Canvas invariant companion 挂载时才机械阻止 alternate current writer；它不是恶意 same-process code sandbox。
 - Sensitive-value signature 是 defense in depth，不是面向任意用户文本的通用 DLP engine。
 - Provider Execution、Retry/Cancel Reconciliation、物理 Asset Store 与 Authorized Binary Route 仍由后续 Workplan Node 实现。
 - 发布验收前，仍需在最终 rc.8-compatible workspace 重新生成并验证 repository-pinned lockfile/module-graph/Typert generated artifact。
