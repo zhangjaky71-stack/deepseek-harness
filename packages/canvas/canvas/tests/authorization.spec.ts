@@ -12,6 +12,7 @@ import CanvasService, {
   CanvasVariantId,
   WorkflowNodeId,
   assertCanvasDurableAuditSafe,
+  canvasBrowserAccess,
   decodeCanvasChange,
 } from '@deepseek-ai/dsh-canvas'
 import * as CanvasInvariantCompanion from '@deepseek-ai/dsh-canvas/invariant'
@@ -73,11 +74,7 @@ async function harness(options: HarnessOptions = {}) {
 }
 
 function humanAccess(agent: Agent, requestId = 'request-human-1'): CanvasAccessContext {
-  return {
-    actor: { kind: 'human', id: String(agent.id) },
-    source: 'browser-remote',
-    requestId,
-  }
+  return canvasBrowserAccess(String(agent.session.id), requestId)
 }
 
 function agentAccess(agent: Agent): CanvasAccessContext {
@@ -154,10 +151,11 @@ describe('Canvas Host authorization and audit', () => {
     expect(session.seq).toBe(0)
   })
 
-  it('binds source and actor provenance to the exact target Agent/Session', async () => {
+  it('binds source and actor provenance to Host-owned principals', async () => {
     const { ctx, agent, session } = await harness()
     const invalid: readonly CanvasAccessContext[] = [
       { actor: { kind: 'system', id: 'forged-system' }, source: 'browser-remote' },
+      { actor: { kind: 'human', id: 'forged-browser-user' }, source: 'browser-remote' },
       { actor: { kind: 'human', id: String(agent.id) }, source: 'agent-tool' },
       { actor: { kind: 'agent', id: 'another-agent' }, source: 'agent-tool' },
       { actor: { kind: 'human', id: String(agent.id) }, source: 'system-reconciler' },
@@ -294,8 +292,7 @@ describe('Canvas Host authorization and audit', () => {
     const { ctx, agent, session } = await harness()
     const oversized = 'x'.repeat(129)
     expect(() => ctx.canvas.create(agent, { workflow: baseWorkflow() }, {
-      actor: { kind: 'human', id: String(agent.id) },
-      source: 'browser-remote',
+      ...humanAccess(agent),
       requestId: oversized,
     })).toThrow(expect.objectContaining<Partial<CanvasServiceError>>({ code: 'CANVAS_INVALID_ACCESS_CONTEXT' }))
     expect(session.seq).toBe(0)
