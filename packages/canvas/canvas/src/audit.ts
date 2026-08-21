@@ -21,6 +21,7 @@ const MAX_ACTOR_ID_CHARS = 256
 const MAX_AUDIT_ID_CHARS = 128
 const MAX_DIAGNOSTIC_CODE_CHARS = 128
 const MAX_DIAGNOSTIC_MESSAGE_CHARS = 1024
+const MAX_ASSET_ID_CHARS = 512
 const MAX_ASSET_NAME_CHARS = 512
 const AUDIT_ID_PATTERN = /^[A-Za-z0-9._:@/-]+$/
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/
@@ -87,11 +88,15 @@ function canonicalActor(value: unknown): CanvasActor {
   }
 }
 
+/** Exact Host identities available when binding Canvas request provenance. */
+export interface CanvasProvenanceTarget {
+  readonly agentId: string
+  readonly sessionId: string
+}
+
 /**
  * Validate and detach request-scoped actor/source metadata before authorization or audit.
  * Durable request/correlation ids are deliberately bounded and log-safe.
- * @param value - explicit access metadata supplied by a Host caller.
- * @returns canonical access metadata containing only approved fields.
  */
 export function canonicalCanvasAccessContext(value: CanvasAccessContext): CanvasAccessContext {
   if (!SOURCES.has(value.source)) throw new Error(`unsupported Canvas request source ${String(value.source)}`)
@@ -110,19 +115,20 @@ export function canonicalCanvasAccessContext(value: CanvasAccessContext): Canvas
 }
 
 /**
- * Bind caller-supplied metadata to the Host entry point that actually owns the target Agent/Session.
- * This prevents a Host consumer from claiming a stronger actor kind or another Agent identity.
+ * Bind caller metadata to the exact Host Agent/Session that owns the request.
+ * Browser/asset human attribution is Session-scoped; Agent Tool/Host Agent attribution is Agent-scoped.
  */
-export function assertCanvasAccessProvenance(access: CanvasAccessContext, targetAgentId: string): void {
-  const expected = nonEmpty(targetAgentId, 'Canvas target agent id')
+export function assertCanvasAccessProvenance(access: CanvasAccessContext, target: CanvasProvenanceTarget): void {
+  const agentId = nonEmpty(target.agentId, 'Canvas target agent id')
+  const sessionId = nonEmpty(target.sessionId, 'Canvas target session id')
   switch (access.source) {
     case 'browser-remote':
-      if (access.actor.kind !== 'human' || access.actor.id !== expected) {
-        throw new Error('browser-remote Canvas access must use the Host-bound human session identity')
+      if (access.actor.kind !== 'human' || access.actor.id !== sessionId) {
+        throw new Error('browser-remote Canvas access must use the Host-bound human Session identity')
       }
       return
     case 'agent-tool':
-      if (access.actor.kind !== 'agent' || access.actor.id !== expected) {
+      if (access.actor.kind !== 'agent' || access.actor.id !== agentId) {
         throw new Error('agent-tool Canvas access must use the exact target Agent identity')
       }
       return
@@ -130,13 +136,13 @@ export function assertCanvasAccessProvenance(access: CanvasAccessContext, target
       if (access.actor.kind !== 'system') throw new Error('system-reconciler Canvas access must use a system actor')
       return
     case 'asset-route':
-      if (access.actor.kind !== 'human' || access.actor.id !== expected) {
-        throw new Error('asset-route Canvas access must use the Host-bound human session identity')
+      if (access.actor.kind !== 'human' || access.actor.id !== sessionId) {
+        throw new Error('asset-route Canvas access must use the Host-bound human Session identity')
       }
       return
     case 'host':
       if (access.actor.kind === 'system') return
-      if (access.actor.kind === 'agent' && access.actor.id === expected) return
+      if (access.actor.kind === 'agent' && access.actor.id === agentId) return
       throw new Error('host Canvas access must use the exact target Agent identity or a system actor')
     default:
       access.source satisfies never
@@ -148,14 +154,14 @@ export function canvasHostAgentAccess(agentId: string): CanvasAccessContext {
   return canonicalCanvasAccessContext({ actor: { kind: 'agent', id: agentId }, source: 'host' })
 }
 
-/** Host-owned Browser attribution; Browser payloads never supply actor/source themselves. */
+/** Host-owned Browser attribution; the human surrogate is the exact Session identity. */
 export function canvasBrowserAccess(
-  agentId: string,
+  sessionId: string,
   requestId?: string,
   correlationId?: string,
 ): CanvasAccessContext {
   return canonicalCanvasAccessContext({
-    actor: { kind: 'human', id: agentId },
+    actor: { kind: 'human', id: sessionId },
     source: 'browser-remote',
     ...(requestId === undefined ? {} : { requestId }),
     ...(correlationId === undefined ? {} : { correlationId }),
@@ -190,11 +196,7 @@ export function canvasSystemAccess(
   })
 }
 
-/**
- * Materialize the current durable audit metadata shape.
- * @param access - canonicalizable actor/source metadata.
- * @returns metadata v2 containing only approved audit fields; caller extras are discarded.
- */
+/** Materialize current durable audit metadata by allow-list. */
 export function canvasChangeMeta(access: CanvasAccessContext): CanvasChangeMetaV2 {
   const canonical = canonicalCanvasAccessContext(access)
   return {
@@ -247,10 +249,6 @@ function scan(value: CanvasJsonValue, path: string): void {
 
 /** Security rejection that names only the prohibited field/path, never the rejected value. */
 export class CanvasSensitiveDataError extends Error {
-  /**
-   * @param path - durable location containing prohibited data.
-   * @param key - optional rejected key name; its value is intentionally omitted from diagnostics.
-   */
   constructor(readonly path: string, readonly key?: string) {
     super(key === undefined
       ? `Canvas durable value is prohibited at ${path}`
@@ -268,15 +266,21 @@ export function assertCanvasWorkflowAuditSafe(workflow: MediaWorkflow): void {
   for (const node of workflow.nodes) scan(node.config, `workflow.nodes.${node.id}.config`)
 }
 
-/** Require one durable diagnostic to be short, log-safe, and free of obvious credential carriers. */
-export function assertCanvasSafeDiagnosticText(value: string, path: string, maxChars = MAX_DIAGNOSTIC_MESSAGE_CHARS): void {
-  boundedText(value, path, maxChars)
+/** Require one durable diagnostic/reference string to be bounded, log-safe, and free of explicit credential carriers. */
+export function assertCanvasSafeDiagnosticText(
+  value: string,
+  path: string,
+  maxChars = MAX_DIAGNOSTIC_MESSAGE_CHARS,
+): void {
+  if (value.length === 0 || value.length > maxChars || CONTROL_CHAR_PATTERN.test(value) || value.trim() !== value) {
+    throw new CanvasSensitiveDataError(path)
+  }
   assertSafeDurableString(value, path, maxChars)
 }
 
 /**
  * Validate every current Canvas field that may later receive Host/provider-generated text.
- * Semantic user text remains governed by workflow scanning; provider raw payloads/errors never belong here.
+ * Provider raw payloads/errors and binary values never belong in the durable snapshot.
  */
 export function assertCanvasDurableAuditSafe(canvas: CanvasSnapshot | null): void {
   if (canvas === null) return
@@ -287,8 +291,13 @@ export function assertCanvasDurableAuditSafe(canvas: CanvasSnapshot | null): voi
   }
   for (let index = 0; index < (canvas.output?.assets.length ?? 0); index += 1) {
     const asset = canvas.output!.assets[index]!
-    if (asset.kind === 'image' && asset.image.name !== undefined) {
-      assertCanvasSafeDiagnosticText(asset.image.name, `canvas.output.assets[${index}].image.name`, MAX_ASSET_NAME_CHARS)
+    if (asset.kind === 'image') {
+      assertCanvasSafeDiagnosticText(asset.image.attachmentId, `canvas.output.assets[${index}].image.attachmentId`, MAX_ASSET_ID_CHARS)
+      if (asset.image.name !== undefined) {
+        assertCanvasSafeDiagnosticText(asset.image.name, `canvas.output.assets[${index}].image.name`, MAX_ASSET_NAME_CHARS)
+      }
+    } else {
+      assertCanvasSafeDiagnosticText(asset.video.assetId, `canvas.output.assets[${index}].video.assetId`, MAX_ASSET_ID_CHARS)
     }
   }
 }
