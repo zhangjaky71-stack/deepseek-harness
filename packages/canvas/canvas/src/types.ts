@@ -149,7 +149,9 @@ export interface CanvasRunSnapshot {
   readonly error?: CanvasRunError
 }
 
+/** Rebuildable Session-derived history row for one immutable Canvas generation. */
 export interface CanvasRunHistoryEntry {
+  readonly canvasId: CanvasId
   readonly runId: CanvasRunId
   readonly variantId?: CanvasVariantId
   readonly workflowId: MediaWorkflowId
@@ -158,6 +160,7 @@ export interface CanvasRunHistoryEntry {
   readonly outputs: readonly CanvasAssetRef[]
   readonly startedAt: number
   readonly finishedAt?: number
+  /** Reserved for N19/N23 presentation/observability; N06 does not synthesize it. */
   readonly promptSummary?: string
 }
 
