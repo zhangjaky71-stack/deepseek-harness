@@ -5,6 +5,7 @@ import type {
   CanvasAuthorizationConfig,
   CanvasAuthorizationDecision,
   CanvasAuthorizationRequest,
+  CanvasAuthorizationResource,
   CanvasPermission,
 } from './types.ts'
 
@@ -23,10 +24,60 @@ const PERMISSIONS: ReadonlySet<CanvasPermission> = new Set([
   'canvas.layout.write',
 ])
 const ACTOR_KINDS: ReadonlySet<CanvasActorKind> = new Set(ALL_ACTOR_KINDS)
+const MAX_SESSION_ID_CHARS = 256
 
-function nonEmpty(value: unknown, subject: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`${subject} must be a non-empty string`)
+function nonEmpty(value: unknown, subject: string, maxChars = 512): string {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${subject} must be a non-empty string`)
+  if (value.length > maxChars) throw new Error(`${subject} must be at most ${maxChars} characters`)
   return value
+}
+
+function exactKeys(value: object, keys: readonly string[], subject: string): void {
+  if (Object.keys(value).sort().join(',') !== [...keys].sort().join(',')) {
+    throw new Error(`${subject} contains unsupported fields`)
+  }
+}
+
+function assertResource(resource: CanvasAuthorizationResource): void {
+  if (resource === null || typeof resource !== 'object' || Array.isArray(resource)) {
+    throw new Error('Canvas authorization resource must be an object')
+  }
+  switch (resource.kind) {
+    case 'session':
+      exactKeys(resource, ['kind'], 'Canvas session authorization resource')
+      return
+    case 'canvas':
+      exactKeys(resource, ['canvasId', 'kind'], 'Canvas authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      return
+    case 'workflow':
+      exactKeys(resource, ['canvasId', 'kind', 'workflowId'], 'Canvas workflow authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      nonEmpty(resource.workflowId, 'Canvas authorization workflowId')
+      return
+    case 'run':
+      exactKeys(resource, ['canvasId', 'kind', 'runId'], 'Canvas run authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      nonEmpty(resource.runId, 'Canvas authorization runId')
+      return
+    case 'asset':
+      exactKeys(resource, ['assetId', 'canvasId', 'kind'], 'Canvas asset authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      nonEmpty(resource.assetId, 'Canvas authorization assetId')
+      return
+    case 'variant':
+      exactKeys(resource, ['canvasId', 'kind', 'variantId'], 'Canvas variant authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      nonEmpty(resource.variantId, 'Canvas authorization variantId')
+      return
+    case 'layout':
+      exactKeys(resource, ['canvasId', 'kind', 'workflowId'], 'Canvas layout authorization resource')
+      nonEmpty(resource.canvasId, 'Canvas authorization canvasId')
+      nonEmpty(resource.workflowId, 'Canvas authorization workflowId')
+      return
+    default:
+      resource satisfies never
+  }
 }
 
 /** Pure actor-kind allow-list policy used by Host authorization consumers. */
@@ -61,8 +112,8 @@ export class CanvasAuthorizationPolicy {
 
   /**
    * Evaluate one permission without mutating Canvas state.
-   * @param request - actor/source/session context plus the requested action.
-   * @returns an allow/deny decision with a stable non-sensitive deny reason.
+   * @param request - actor/source/session/resource context plus the requested action.
+   * @returns an allow/deny decision with a stable non-sensitive policy code.
    */
   authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
     if (!PERMISSIONS.has(request.permission)) throw new Error(`unsupported Canvas permission ${String(request.permission)}`)
@@ -72,11 +123,12 @@ export class CanvasAuthorizationPolicy {
       ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
       ...(request.correlationId === undefined ? {} : { correlationId: request.correlationId }),
     })
-    nonEmpty(request.sessionId, 'Canvas authorization sessionId')
+    nonEmpty(request.sessionId, 'Canvas authorization sessionId', MAX_SESSION_ID_CHARS)
+    assertResource(request.resource)
     const allowedKinds = this.permissionActors.get(request.permission) ?? this.defaultActors
     return allowedKinds.has(canonical.actor.kind)
       ? { allowed: true }
-      : { allowed: false, reason: 'actor-kind-not-allowed' }
+      : { allowed: false, reason: 'denied', policyCode: 'actor-kind-not-allowed' }
   }
 }
 
@@ -102,7 +154,7 @@ export class CanvasAuthorizationService extends Service {
 
   /**
    * Evaluate one Canvas permission.
-   * @param request - actor/source/session context plus requested action.
+   * @param request - actor/source/session/resource context plus requested action.
    * @returns allow/deny decision without writing Session state.
    */
   authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
