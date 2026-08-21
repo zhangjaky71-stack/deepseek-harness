@@ -46,7 +46,7 @@ class MalformedAuthorizationService extends Service {
   }
 
   authorize(_request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
-    return { allowed: 'yes' } as never
+    return { allowed: true, reason: 'denied' } as never
   }
 }
 
@@ -75,7 +75,7 @@ describe('Canvas authorization hardening', () => {
     expect(String(thrown)).toContain('unsupported Canvas authorizationMode')
   })
 
-  it('fails closed when an external authorization service returns a malformed decision', async () => {
+  it('fails closed when an external authorization service returns a contradictory decision', async () => {
     const ctx = await baseContext()
     await ctx.plugin(MalformedAuthorizationService)
     await ctx.plugin(CanvasService, { authorizationMode: 'required-external' })
