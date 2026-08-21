@@ -6,7 +6,7 @@
 | N01 | Canvas Domain、类型系统与状态不变量 | `types.ts` 无运行时实现；Domain 不依赖 Browser；node type structural admission 是 open-world，不含 built-in whitelist；八种 Product State 有 Domain tests。 |
 | N02 | Schema Migration、Node Version 与 Golden Fixtures | 历史 fixture 可迁移；unknown plugin `type@version/config` 可在插件缺失时 reload；Core-only node version ownership；current schema unknown field fail loud。 |
 | N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | CanvasService 要求 exact-live Agent + Session；Service 自己 detached-fold preflight 后才 append；live writer meta v2；WorkflowRef CAS 错误分类稳定；semantic no-op 不增长 revision；RunId Session-wide 唯一；`run-update` 覆盖 queued/running/completed/failed/cancelled/interrupted 且 terminal 单调；active run 不可 clear，clear 使用 WorkflowRef CAS。 |
-| N04 | Authorization、Actor Provenance、Audit 与敏感数据边界 | UI 隐藏不是权限控制；current Canvas/Layout durable writer 无 package permit 不能绕过 Host path；actor/source 与 exact target Agent/Session provenance 绑定；external policy 可 `required-external` fail closed 且异常不泄漏；authorization request 有 typed resource scope；Browser `canvas`/`canvasLayout` Projection 同样受 `canvas.read` read guard；current durable Canvas 拒绝 Host/Provider credential、binary、raw provider diagnostic；read guard disposal/HMR 与 adversarial security tests 有证据。 |
+| N04 | Authorization、Actor Provenance、Audit 与敏感数据边界 | UI 隐藏不是权限控制；current Canvas/Layout durable writer 在挂载 invariant 的生产组合中无 package permit 不能绕过 Host path；Browser 使用 Host-minted principal 且 target Session/resource 与 human identity 分离，Agent Tool 绑定 exact Agent；未知 authorization mode 启动失败，external policy 缺失/异常/畸形响应可 fail closed；authorization request 有 typed resource scope；Browser `canvas`/`canvasLayout` Projection 同样受 `canvas.read` read guard；current durable Canvas 拒绝 Host/Provider credential、binary、raw provider diagnostic；read guard fiber disposal/HMR 与 adversarial security tests 有证据。 |
 | N05 | Session Projection、Canvas Layout Projection | Browser 刷新/reconnect 得到 authoritative Workflow/Run/Output；Projection fold 保持纯数学，N04 read guard 只作用于 browser delivery。 |
 | N06 | Remote、Mutation、History API | Browser 人工 mutation 不走私有 Session hack。 |
 | N07 | Canvas UI Shell、Minimal/Editor | `render-service` 持 root；ui-canvas 经 plugin/slot；UI 无第二份 authority。 |
@@ -24,8 +24,8 @@
 | N18 | Agent Tools / Command Bus | Agent/UI 共用同一 Domain command semantics；Tool 不直连 Provider；Agent Tool actor 复用 N04 exact-agent provenance。 |
 | N19 | History / Variant | 连续生成不丢上一版，可 restore/branch。 |
 | N20 | Real Image Provider | 自然语言可完成真实 text-to-image/image-edit。 |
-| N21 | Video Asset | Browser 授权 Range playback 稳定；route 不另造 ACL，复用 N04 asset permission/resource。 |
-| N22 | Async Video Provider | polling/callback/resume/cancel 达到 V1。 |
-| N23 | Progress / Observability | session→workflowRun→nodeRun→providerRequest 可追踪；progress 不膨胀 Session；structured logs/raw provider diagnostics 遵守 N04 credential-redaction boundary。 |
+| N21 | Video Asset | Browser 授权 Range playback 稳定；Asset binary route 复用 N04 Browser principal + typed resource authorization。 |
+| N22 | Async Video Provider | polling/callback/resume/cancel 达到 V1；callback/reconciler source 不可伪造 Browser/Agent actor。 |
+| N23 | Progress / Observability | session→workflowRun→nodeRun→providerRequest 可追踪；progress 不膨胀 Session；Provider raw error 先 redaction/classification 再进入 durable summary。 |
 | N24 | GC / Retention / Chaos | orphan、race、部分失败都有恢复/清理路径。 |
 | N25 | Full E2E / Release | REAL composition + upstream compatibility gate + P0/P1/V1 全部有证据。 |
