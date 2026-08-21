@@ -3,10 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import {
-  assertCanvasAccessProvenance,
-  assertCanvasDurableAuditSafe,
-} from './audit.ts'
+import { assertCanvasDurableAuditSafe } from './audit.ts'
 import {
   applyCanvasEvent,
   cloneCanvasFoldState,
@@ -71,8 +68,8 @@ function applyChecked(state: CombinedState, event: SessionEvent, fail: Invariant
  * Apply current-writer-only checks at the Session pre-commit boundary.
  * Historical seed replay remains compatible with metadata v1 and the legacy
  * `run-complete` operation. New Canvas/layout writes must come through the
- * package-owned write permit, carry provenance-bound audit metadata, avoid
- * credential/provider-raw durable text, and use `run-update` for lifecycle transitions.
+ * package-owned permit issued only after CanvasService provenance/authorization
+ * checks; the invariant then verifies current protocol and durable-data safety.
  */
 function assertCurrentWriter(session: Session, event: SessionEvent, fail: InvariantFailure): void {
   if (event.type !== 'canvas/change' && event.type !== 'canvas/layout-change') return
@@ -83,7 +80,6 @@ function assertCurrentWriter(session: Session, event: SessionEvent, fail: Invari
     if (event.type === 'canvas/layout-change') {
       const change = decodeCanvasLayoutChange(event.data)
       if (change === undefined) throw new Error('Canvas event data does not decode as canvas/layout-change')
-      assertCanvasAccessProvenance(change.meta, String(session.id))
       return
     }
 
@@ -92,7 +88,6 @@ function assertCurrentWriter(session: Session, event: SessionEvent, fail: Invari
     if (change.meta.schemaVersion !== 2) {
       throw new Error('new Canvas changes must use audit metadata schemaVersion 2')
     }
-    assertCanvasAccessProvenance(change.meta, String(session.id))
     if (change.operation === 'run-complete') {
       throw new Error('run-complete is historical replay vocabulary; current writers must use run-update')
     }
