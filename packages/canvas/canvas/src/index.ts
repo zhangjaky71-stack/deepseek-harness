@@ -47,8 +47,15 @@ export {
 export {
   CanvasSensitiveDataError,
   canonicalCanvasAccessContext,
+  assertCanvasAccessProvenance,
+  canvasHostAgentAccess,
+  canvasBrowserAccess,
+  canvasAgentToolAccess,
+  canvasSystemAccess,
   canvasChangeMeta,
   assertCanvasWorkflowAuditSafe,
+  assertCanvasSafeDiagnosticText,
+  assertCanvasDurableAuditSafe,
 } from './audit.ts'
 export { CanvasAuthorizationPolicy, CanvasAuthorizationService } from './authorization.ts'
 export {
@@ -80,7 +87,11 @@ export {
   applyCanvasLayoutEvent,
   foldCanvasLayout,
 } from './layout.ts'
-export { applyCanvasProjection, applyCanvasLayoutProjection } from './projection.ts'
+export {
+  applyCanvasProjection,
+  applyCanvasLayoutProjection,
+} from './projection.ts'
+export type { CanvasProjectionReadGate } from './projection.ts'
 export {
   DEFAULT_CANVAS_HISTORY_PAGE_SIZE,
   MAX_CANVAS_HISTORY_PAGE_SIZE,
