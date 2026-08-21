@@ -8,6 +8,7 @@ import { Context, Service, symbols } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import {
   remoteMethods,
+  TypertBusinessFailure,
   TypertLookupFailure,
   type InvocationDescriptor,
   type InvocationParameterDescriptor,
@@ -475,6 +476,9 @@ function rpcFailure(error: unknown): ConnectionRpcResult {
       error: { code: 'cancelled', message: error.message, details: {} },
     }
   }
+  if (error instanceof TypertBusinessFailure) {
+    return { ok: false, error: error.failure as ConnectionRpcError }
+  }
   if (error instanceof TypertLookupFailure) {
     return { ok: false, error: error.failure as ConnectionRpcError }
   }
@@ -482,7 +486,7 @@ function rpcFailure(error: unknown): ConnectionRpcResult {
     ok: false,
     error: {
       code: 'internal',
-      message: error instanceof Error ? error.message : String(error),
+      message: 'Remote request failed',
       details: {},
     },
   }
