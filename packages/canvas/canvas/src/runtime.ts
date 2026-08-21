@@ -558,13 +558,17 @@ export class CanvasService extends TypertRemoteService {
         resource: { kind: 'session' },
       }).allowed
     }
+    const session = this.ctx.sessions.get(sessionId as Session['id'])
+    if (session === undefined) return false
+    const cache = this.cache(session)
+    this.sync(session, cache)
     const access = canvasBrowserAccess(sessionId)
     return this.authorize({
       permission: 'canvas.read',
       actor: access.actor,
       source: access.source,
       sessionId,
-      resource: { kind: 'session' },
+      resource: this.authorizationResource(cache, 'canvas.read'),
     }).allowed
   }
 
