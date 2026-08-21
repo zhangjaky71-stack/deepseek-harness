@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
 
+# Re-trigger after N06 regression fixtures reached the branch head.
 jobs:
   remediate:
     runs-on: ubuntu-latest
