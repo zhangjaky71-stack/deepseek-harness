@@ -13,6 +13,7 @@
     { "path": "../locale" },
     { "path": "../runtime" },
     { "path": "../ui-conversation" },
+    { "path": "../ui-layout" },
     { "path": "../ui-slots" },
     { "path": "../web-react" },
     { "path": "../../runtime-diagnostics/invariants" }
