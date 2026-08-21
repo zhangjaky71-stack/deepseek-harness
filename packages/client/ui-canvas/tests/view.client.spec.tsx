@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
-import { MinimalCanvas, WorkflowEditorShell } from '../src/client/CanvasView.tsx'
+import { MinimalCanvas } from '../src/client/CanvasView.tsx'
 
 const t = ((key: string) => key) as never
 const workflow = {
@@ -25,7 +25,7 @@ function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
   } as CanvasSnapshot
 }
 
-describe('Canvas view shells', () => {
+describe('Canvas Minimal surface', () => {
   it('RUNNING renders only the Cancel primary control and never Run', () => {
     const canvas = base({
       runRevision: 1,
@@ -57,11 +57,11 @@ describe('Canvas view shells', () => {
     expect(html).toContain('state.DIRTY_READY.body')
   })
 
-  it('Editor is a semantic workflow shell rather than a second Canvas state store', () => {
-    const canvas = base({})
-    const html = renderToStaticMarkup(<WorkflowEditorShell canvas={canvas} layout={null} t={t} />)
-    expect(html).toContain('View workflow')
-    expect(html).toContain('prompt')
-    expect(html).toContain('editor.placeholder')
+  it('renders only result/state presentation and no workflow topology', () => {
+    const html = renderToStaticMarkup(<MinimalCanvas canvas={base({})} t={t} />)
+    expect(html).toContain('data-canvas-state="READY"')
+    expect(html).not.toContain('View workflow')
+    expect(html).not.toContain('prompt')
+    expect(html).not.toContain('editor.library')
   })
 })
