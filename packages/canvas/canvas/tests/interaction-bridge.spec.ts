@@ -47,9 +47,9 @@ function sampled(revision = 1): CanvasInteractionContext {
 
 function agent(ctx: Context): Agent {
   return {
-    id: 'session-bridge',
+    id: 'agent-bridge',
     options: {},
-    session: { events: [] } as unknown as Session,
+    session: { id: 'session-bridge', events: [] } as unknown as Session,
     inbox: {} as Agent['inbox'],
     status: 'idle',
     ctx,
@@ -112,6 +112,26 @@ describe('CanvasInteractionBridge', () => {
     expect(decision.messages[0]?.source).toMatchObject({ kind: 'plugin', plugin: 'canvas-interaction', form: 'snapshot' })
     expect(decision.messages[1]?.id).toBe(exact.id)
     expect(contextText(decision)).toContain('selected nodes: node-a')
+  })
+
+  it('uses the same Host-minted browser principal as Canvas Remote/Projection reads', () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const subject = agent(ctx)
+    let seen: import('../src/types.ts').CanvasAccessContext | undefined
+    const bridge = new CanvasInteractionBridge(ctx, {
+      get: (_agent, access) => {
+        seen = access
+        return currentCanvas()
+      },
+    })
+    bridge.stage(subject, { rpcId: 'rpc-browser-principal', context: sampled() })
+    expect(seen).toMatchObject({
+      actor: { kind: 'human', id: 'host-browser' },
+      source: 'browser-remote',
+      requestId: 'rpc-browser-principal',
+      correlationId: 'rpc-browser-principal',
+    })
   })
 
   it('discard prevents an unadmitted staged prompt from leaking into later messages', async () => {
