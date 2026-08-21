@@ -3,7 +3,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { assertCanvasWorkflowAuditSafe } from './audit.ts'
+import {
+  assertCanvasAccessProvenance,
+  assertCanvasDurableAuditSafe,
+} from './audit.ts'
 import {
   applyCanvasEvent,
   cloneCanvasFoldState,
@@ -14,9 +17,11 @@ import type { CanvasFoldState } from './fold.ts'
 import {
   applyCanvasLayoutEvent,
   cloneCanvasLayoutFoldState,
+  decodeCanvasLayoutChange,
   emptyCanvasLayoutFoldState,
 } from './layout.ts'
 import type { CanvasLayoutFoldState } from './layout.ts'
+import { consumeCanvasWritePermit } from './write-authority.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-canvas'
 
@@ -65,24 +70,33 @@ function applyChecked(state: CombinedState, event: SessionEvent, fail: Invariant
 /**
  * Apply current-writer-only checks at the Session pre-commit boundary.
  * Historical seed replay remains compatible with metadata v1 and the legacy
- * `run-complete` operation; new writes must carry audit metadata v2, must not
- * persist credential/binary-shaped workflow fields, and use `run-update` for
- * lifecycle transitions.
+ * `run-complete` operation. New Canvas/layout writes must come through the
+ * package-owned write permit, carry provenance-bound audit metadata, avoid
+ * credential/provider-raw durable text, and use `run-update` for lifecycle transitions.
  */
-function assertCurrentWriter(event: SessionEvent, fail: InvariantFailure): void {
-  if (event.type !== 'canvas/change') return
+function assertCurrentWriter(session: Session, event: SessionEvent, fail: InvariantFailure): void {
+  if (event.type !== 'canvas/change' && event.type !== 'canvas/layout-change') return
   try {
+    if (!consumeCanvasWritePermit(session, event)) {
+      throw new Error('current Canvas durable writes must be committed by CanvasService')
+    }
+    if (event.type === 'canvas/layout-change') {
+      const change = decodeCanvasLayoutChange(event.data)
+      if (change === undefined) throw new Error('Canvas event data does not decode as canvas/layout-change')
+      assertCanvasAccessProvenance(change.meta, String(session.id))
+      return
+    }
+
     const change = decodeCanvasChange(event.data)
     if (change === undefined) throw new Error('Canvas event data does not decode as canvas/change')
     if (change.meta.schemaVersion !== 2) {
       throw new Error('new Canvas changes must use audit metadata schemaVersion 2')
     }
+    assertCanvasAccessProvenance(change.meta, String(session.id))
     if (change.operation === 'run-complete') {
       throw new Error('run-complete is historical replay vocabulary; current writers must use run-update')
     }
-    if (change.canvas?.workflow !== null && change.canvas?.workflow !== undefined) {
-      assertCanvasWorkflowAuditSafe(change.canvas.workflow)
-    }
+    assertCanvasDurableAuditSafe(change.canvas)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     fail(`session event ${event.seq} violates the current Canvas writer contract: ${message}`)
@@ -108,7 +122,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return
     const [session, event] = args as [Session, SessionEvent]
-    assertCurrentWriter(event, fail)
+    assertCurrentWriter(session, event, fail)
     const state = cloneState(stateFor(session))
     applyChecked(state, event, fail)
     staged.set(event, { session, state })
