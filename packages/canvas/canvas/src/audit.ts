@@ -24,12 +24,14 @@ const MAX_DIAGNOSTIC_CODE_CHARS = 128
 const MAX_DIAGNOSTIC_MESSAGE_CHARS = 1024
 const MAX_ASSET_ID_CHARS = 512
 const MAX_ASSET_NAME_CHARS = 512
+const MAX_MEDIA_TYPE_CHARS = 128
 const AUDIT_ID_PATTERN = /^[A-Za-z0-9._:@/-]+$/
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/
 const DATA_URL_BASE64_PATTERN = /^data:[^,]{0,256};base64,/i
 const PRIVATE_KEY_PATTERN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i
 const BEARER_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}\b/i
 const SECRET_PREFIX_PATTERN = /\b(?:sk|rk)[-_][A-Za-z0-9_-]{20,}\b/
+const URL_LIKE_REFERENCE_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//
 const FORBIDDEN_DURABLE_KEYS = new Set([
   'authorization',
   'cookie',
@@ -300,9 +302,14 @@ export function assertCanvasSafeDiagnosticText(
   assertSafeDurableString(value, path, maxChars)
 }
 
+function assertOpaqueAssetId(value: string, path: string): void {
+  assertCanvasSafeDiagnosticText(value, path, MAX_ASSET_ID_CHARS)
+  if (URL_LIKE_REFERENCE_PATTERN.test(value)) throw new CanvasSensitiveDataError(path)
+}
+
 /**
  * Validate every current Canvas field that may later receive Host/provider-generated text.
- * Provider raw payloads/errors and binary values never belong in the durable snapshot.
+ * Provider raw payloads/errors, bearer/signed URLs, and binary values never belong in the durable snapshot.
  */
 export function assertCanvasDurableAuditSafe(canvas: CanvasSnapshot | null): void {
   if (canvas === null) return
@@ -314,12 +321,13 @@ export function assertCanvasDurableAuditSafe(canvas: CanvasSnapshot | null): voi
   for (let index = 0; index < (canvas.output?.assets.length ?? 0); index += 1) {
     const asset = canvas.output!.assets[index]!
     if (asset.kind === 'image') {
-      assertCanvasSafeDiagnosticText(asset.image.attachmentId, `canvas.output.assets[${index}].image.attachmentId`, MAX_ASSET_ID_CHARS)
-      if (asset.image.name !== undefined) {
+      assertOpaqueAssetId(asset.image.attachmentId, `canvas.output.assets[${index}].image.attachmentId`)
+      if (asset.image.name !== undefined && asset.image.name.length > 0) {
         assertCanvasSafeDiagnosticText(asset.image.name, `canvas.output.assets[${index}].image.name`, MAX_ASSET_NAME_CHARS)
       }
     } else {
-      assertCanvasSafeDiagnosticText(asset.video.assetId, `canvas.output.assets[${index}].video.assetId`, MAX_ASSET_ID_CHARS)
+      assertOpaqueAssetId(asset.video.assetId, `canvas.output.assets[${index}].video.assetId`)
+      assertCanvasSafeDiagnosticText(asset.video.mediaType, `canvas.output.assets[${index}].video.mediaType`, MAX_MEDIA_TYPE_CHARS)
     }
   }
 }
