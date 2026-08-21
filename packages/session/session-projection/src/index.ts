@@ -31,6 +31,16 @@ import type { SessionProjectionMap } from './types.ts'
 
 export type { SessionProjectionMap } from './types.ts'
 
+/** Browser-facing context supplied to projection read guards. */
+export interface ProjectionReadContext {
+  readonly surface: 'browser'
+  /** Present for live Session snapshots/change frames; absent for detached cache/history views. */
+  readonly sessionId?: string
+}
+
+/** Domain-owned fail-closed visibility decision over one already-computed projection value. */
+export type ProjectionReadGuard = (context: ProjectionReadContext, value: unknown) => boolean
+
 /**
  * One domain's state-driven computation unit: three pure synchronous
  * functions plus declarations — never an opaque getter. The framework drives
@@ -75,7 +85,7 @@ export interface ProjectionDefinition<K extends keyof SessionProjectionMap, S> {
 
 /**
  * Change-feed listener: one unit's value changed for one session. `value` is
- * the schema-validated `view` output; `seq` is the unit's watermark at
+ * the schema-validated and read-guarded `view` output; `seq` is the unit's watermark at
  * emission (the seq of the event that caused the change).
  */
 export type ProjectionChangeListener = (
@@ -93,7 +103,7 @@ export type ProjectionChangeListener = (
 export interface ProjectionSnapshot {
   /** Seq of the last event the values reflect; -1 for an empty log. */
   asOfSeq: number
-  /** Whole current value per registered key. */
+  /** Whole current value per registered and browser-readable key. */
   values: Partial<SessionProjectionMap>
 }
 
@@ -156,21 +166,17 @@ interface Registration {
  * `ctx.sessionProjections`: the projection unit table and its drive. The
  * service subscribes to `session/event` once; every committed event passes
  * every registered unit's `apply` (eager drive), and a changed state
- * reference notifies the change feed with the schema-validated view.
- * Cells build lazily — a unit registered after events flowed, or a session
- * older than the registry, folds `init` over the in-memory log on first
- * touch (event or read). Registration is an effect (disposer rides the
- * calling fiber): an unloaded domain plugin's key disappears from snapshots
- * and clients read it as capability absence. Domain
- * plugins register under `ctx.inject(['sessionProjections'], …)` so headless
- * assemblies without the registry stay unaffected. Registrants sharing a key
- * share one unit and are counted: the same tool package mounted in N agent
- * presets registers N times, and the key survives until the last one
- * unloads.
+ * reference notifies the change feed only when all domain read guards allow
+ * that browser-facing value. Cells build lazily — a unit registered after
+ * events flowed, or a session older than the registry, folds `init` over the
+ * in-memory log on first touch. Registration and read guards are effects, so
+ * unloaded domain plugins leave neither projection values nor stale security
+ * decisions behind.
  */
 export class SessionProjectionRegistry extends Service {
   private readonly registrations = new Map<string, Registration>()
   private readonly listeners = new Set<ProjectionChangeListener>()
+  private readonly readGuards = new Map<string, Set<ProjectionReadGuard>>()
 
   /**
    * Create and install the registry as `ctx.sessionProjections`.
@@ -201,10 +207,6 @@ export class SessionProjectionRegistry extends Service {
       if (existing === undefined) {
         this.registrations.set(key, { def: definition, cells: new WeakMap(), refs: 1 })
       } else {
-        // A differing `stateVersion` is the one incompatibility this can name:
-        // the versioned contract says the cached state shape differs, so the
-        // two registrants cannot share cells. Anything else about a definition
-        // is functions, which no runtime comparison can tell apart.
         if (existing.def.stateVersion !== definition.stateVersion) {
           throw new Error(`session projection key ${JSON.stringify(key)} is already registered at stateVersion ${String(existing.def.stateVersion)}; refusing to share it with stateVersion ${String(definition.stateVersion)}`)
         }
@@ -222,9 +224,29 @@ export class SessionProjectionRegistry extends Service {
   }
 
   /**
-   * Subscribe to the change feed. The registration is an effect on the
-   * calling context's fiber.
-   * @param listener - called once per unit whose state reference changed, per committed event.
+   * Register one browser-facing read guard for a projection key. Guards compose
+   * with AND semantics and fail closed when they throw. The disposer rides the
+   * calling fiber, so HMR/unload cannot leave a stale deny/allow decision.
+   */
+  registerReadGuard<K extends keyof SessionProjectionMap>(key: K, guard: ProjectionReadGuard): () => void {
+    const dispose = this.ctx.effect(() => {
+      const name = key as string
+      const guards = this.readGuards.get(name) ?? new Set<ProjectionReadGuard>()
+      guards.add(guard)
+      this.readGuards.set(name, guards)
+      return () => {
+        const live = this.readGuards.get(name)
+        if (live === undefined) return
+        live.delete(guard)
+        if (live.size === 0) this.readGuards.delete(name)
+      }
+    }, 'sessionProjections.registerReadGuard()')
+    return () => void dispose()
+  }
+
+  /**
+   * Subscribe to the browser-facing change feed. The registration is an effect on the calling context's fiber.
+   * @param listener - called once per readable unit whose state reference changed, per committed event.
    * @returns the exact disposer that unsubscribes.
    */
   onChanged(listener: ProjectionChangeListener): () => void {
@@ -238,36 +260,21 @@ export class SessionProjectionRegistry extends Service {
   }
 
   /**
-   * One consistent cut over every registered unit for one session, read from
-   * the watermark cache (missing cells fold lazily over the in-memory log).
-   * Fully synchronous — every value and `asOfSeq` reflect the same log
-   * position. Each value passes its unit's schema before leaving.
-   * @param session - the session whose projection values are read.
-   * @returns the snapshot; `values` is empty when no unit is registered.
+   * One consistent browser-facing cut over every registered unit for one session.
+   * Fully synchronous — every included value and `asOfSeq` reflect the same log position.
    */
   snapshot(session: Session): ProjectionSnapshot {
     const values: Record<string, unknown> = {}
+    const context: ProjectionReadContext = { surface: 'browser', sessionId: String(session.id) }
     for (const registration of this.registrations.values()) {
       const cell = this.cellFor(registration, session)
-      values[registration.def.key] = registration.def.schema.parse(registration.def.view(cell.state))
+      const value = registration.def.schema.parse(registration.def.view(cell.state))
+      if (this.readAllowed(registration.def.key, value, context)) values[registration.def.key] = value
     }
     return { asOfSeq: session.seq - 1, values: values }
   }
 
-  /**
-   * State-level checkpoint of every registered unit for one session, read
-   * from the watermark cache (missing cells fold lazily over the in-memory
-   * log). This is the write side of the persisted projection cache: the
-   * returned rows are the `(key → {ver, seq, val})` part of the durable
-   * `(sessionId, key, ver, seq, val)`
-   * rows. Every `val` is a DETACHED structured clone — never the live
-   * cell reference: the watermark cache is this registry's authoritative
-   * mutable state, and a caller reaching the live reference could corrupt
-   * every subsequent snapshot and frame through it (plain JSON by the unit
-   * contract, so the clone is total).
-   * @param session - the session whose unit states are checkpointed.
-   * @returns one row per registered key; empty when no unit is registered.
-   */
+  /** State-level checkpoint of every registered unit; read guards never alter internal cache state. */
   checkpoint(session: Session): ProjectionCheckpoint {
     const rows: ProjectionCheckpoint = {}
     for (const registration of this.registrations.values()) {
@@ -281,22 +288,7 @@ export class SessionProjectionRegistry extends Service {
     return rows
   }
 
-  /**
-   * The stored seq a {@link restore} tail read over `checkpoint` must start
-   * at: one event BELOW the lowest usable watermark (a row is usable when
-   * its `ver` matches the live unit's `stateVersion`; an absent or mismatched row
-   * pulls the floor to `0` — that key must refold the full log). The
-   * one-below anchor is load-bearing: the tail then proves how far the
-   * stored log still extends, so {@link restore} can detect a log that
-   * shrank below a row's watermark (crash-repair truncation) instead of
-   * serving the stale row as current — an empty tail read from the anchor
-   * yields an end below every watermark and the restore rejects for a full
-   * re-read.
-   * @param checkpoint - persisted rows for one session (possibly stale or empty).
-   * @returns the seq to hand the persistence `readFrom`, or `undefined`
-   *   when no unit is registered (no read needed — {@link restore} would
-   *   serve empty values regardless).
-   */
+  /** Determine the stored tail floor needed to restore every registered unit. */
   restoreFloor(checkpoint: ProjectionCheckpoint): number | undefined {
     let floor: number | undefined
     for (const registration of this.registrations.values()) {
@@ -310,53 +302,33 @@ export class SessionProjectionRegistry extends Service {
   }
 
   /**
-   * View a checkpoint's rows without any log read: for every registered
-   * unit whose row's `ver` matches, serve the schema-validated
-   * `view` of the stored state; mismatched or absent rows leave their key
-   * absent (a cold or listing consumer treats it as not-yet-available and a
-   * fuller read path refolds it). The zero-I/O rung of the read ladder —
-   * values are as stale as their rows, never wrong.
-   * @param checkpoint - persisted rows for one session (possibly stale or empty).
-   * @returns whole values per key with a usable row; empty when none.
+   * View usable checkpoint rows without log I/O. Detached browser views carry
+   * no session identity; a domain guard may therefore deny them fail-closed.
    */
   viewCheckpoint(checkpoint: ProjectionCheckpoint): Partial<SessionProjectionMap> {
     const values: Record<string, unknown> = {}
+    const context: ProjectionReadContext = { surface: 'browser' }
     for (const registration of this.registrations.values()) {
       const def = registration.def
       const row = checkpoint[def.key]
       if (row === undefined || row.ver !== def.stateVersion) continue
-      values[def.key] = def.schema.parse(def.view(row.val))
+      const value = def.schema.parse(def.view(row.val))
+      if (this.readAllowed(def.key, value, context)) values[def.key] = value
     }
     return values
   }
 
   /**
-   * Cold read: fold every registered unit over a stored log suffix, seeding
-   * each from its checkpoint row when usable — the one read recipe (cached
-   * state + forward tail replay + `view`) applied without a live `Session`.
-   * Call with the events returned by a persistence
-   * `readFrom(id, restoreFloor(checkpoint))` and that same floor as
-   * `baseSeq`; the floor's one-below anchor makes the supplied end honest,
-   * so a shrunk log is detected here. A row is usable iff its
-   * `ver` matches the live unit's `stateVersion`, it does not predate `baseSeq`
-   * (`seq >= baseSeq - 1`), and it does not claim events past the
-   * supplied end (`seq <= endSeq`); an unusable row is discarded
-   * and its key refolds from `init` — which is only sound over the full
-   * log, so a discarded row with `baseSeq > 0` throws (the caller re-reads
-   * from seq 0, e.g. after a crash-repair truncation shrank the log below
-   * a row's watermark).
-   * @param checkpoint - persisted rows for one session (possibly stale or empty).
-   * @param events - the stored events with `seq >= baseSeq`, in seq order.
-   * @param baseSeq - the seq `events` starts at (its first event's seq when non-empty).
-   * @returns the snapshot cut at the supplied log end (`asOfSeq` is the last
-   *   supplied event's seq, `baseSeq - 1` for an empty tail) plus the
-   *   refreshed checkpoint rows at that cut, ready for a durable write-back.
+   * Cold read over a stored log suffix. Internal checkpoint rows are refreshed
+   * for every unit, while the returned browser snapshot omits guarded values
+   * that cannot be authorized without a live Session identity.
    */
   restore(checkpoint: ProjectionCheckpoint, events: readonly SessionEvent[], baseSeq: number):
   { snapshot: ProjectionSnapshot; checkpoint: ProjectionCheckpoint } {
     const endSeq = events.at(-1)?.seq ?? baseSeq - 1
     const values: Record<string, unknown> = {}
     const refreshed: ProjectionCheckpoint = {}
+    const context: ProjectionReadContext = { surface: 'browser' }
     for (const registration of this.registrations.values()) {
       const def = registration.def
       const row = checkpoint[def.key]
@@ -375,7 +347,8 @@ export class SessionProjectionRegistry extends Service {
       for (const event of events) {
         if (event.seq > from) state = def.apply(state, event)
       }
-      values[def.key] = def.schema.parse(def.view(state))
+      const value = def.schema.parse(def.view(state))
+      if (this.readAllowed(def.key, value, context)) values[def.key] = value
       refreshed[def.key] = { ver: def.stateVersion, seq: endSeq, val: state }
     }
     return {
@@ -401,13 +374,26 @@ export class SessionProjectionRegistry extends Service {
     return cell
   }
 
-  /** Eager drive: pass one committed event through every registered unit; notify on changed references. */
+  /** Fail-closed AND composition of every domain read guard for one key. */
+  private readAllowed(key: string, value: unknown, context: ProjectionReadContext): boolean {
+    const guards = this.readGuards.get(key)
+    if (guards === undefined) return true
+    for (const guard of guards) {
+      try {
+        if (!guard(context, value)) return false
+      } catch {
+        return false
+      }
+    }
+    return true
+  }
+
+  /** Eager drive: pass one committed event through every registered unit; notify only readable changed values. */
   private drive(session: Session, event: SessionEvent): void {
+    const context: ProjectionReadContext = { surface: 'browser', sessionId: String(session.id) }
     for (const registration of this.registrations.values()) {
       let cell = registration.cells.get(session)
       if (cell === undefined) {
-        // Late build mid-stream: fold history before this event (seq = log
-        // index, so the prefix slice is exact), then take the normal gate.
         cell = this.buildCell(registration.def, session.events.slice(0, event.seq))
         registration.cells.set(session, cell)
       }
@@ -417,6 +403,7 @@ export class SessionProjectionRegistry extends Service {
       cell.observedSeq = event.seq
       if (changed && this.listeners.size > 0) {
         const value = registration.def.schema.parse(registration.def.view(next))
+        if (!this.readAllowed(registration.def.key, value, context)) continue
         for (const listener of this.listeners) {
           listener(session, registration.def.key as Extract<keyof SessionProjectionMap, string>, value, event.seq)
         }
