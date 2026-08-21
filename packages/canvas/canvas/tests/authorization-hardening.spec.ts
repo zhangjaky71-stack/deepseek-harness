@@ -2,6 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CanvasService, {
   CanvasServiceError,
   CanvasVariantId,
@@ -63,6 +64,19 @@ class CapturingAuthorizationService extends Service {
   }
 }
 
+class ResourceScopedAuthorizationService extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'canvasAuthorization')
+  }
+
+  authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
+    if (request.permission === 'canvas.read' && request.resource.kind === 'canvas') {
+      return { allowed: false, reason: 'denied', policyCode: 'canvas-resource-denied' }
+    }
+    return { allowed: true }
+  }
+}
+
 describe('Canvas authorization hardening', () => {
   it('rejects an unknown authorizationMode instead of silently falling back', async () => {
     const ctx = await baseContext()
@@ -107,5 +121,23 @@ describe('Canvas authorization hardening', () => {
       canvasId: created.id,
       variantId,
     })
+  })
+
+  it('uses the same canvas.read resource scope for live Browser Projection and ctx.canvas.get()', async () => {
+    const ctx = await baseContext()
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(ResourceScopedAuthorizationService)
+    await ctx.plugin(CanvasService, { authorizationMode: 'required-external' })
+    const agent = stubAgent(ctx, 'canvas-auth-projection-resource')
+    ctx.agents.register(agent)
+
+    ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    expect(() => ctx.canvas.get(agent)).toThrow(
+      expect.objectContaining<Partial<CanvasServiceError>>({ code: 'CANVAS_PERMISSION_DENIED' }),
+    )
+
+    const projection = ctx.sessionProjections.snapshot(agent.session)
+    expect(projection.values).not.toHaveProperty('canvas')
+    expect(projection.values).not.toHaveProperty('canvasLayout')
   })
 })
