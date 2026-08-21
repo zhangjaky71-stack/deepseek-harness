@@ -17,6 +17,7 @@ const SOURCES: ReadonlySet<CanvasRequestSource> = new Set([
   'system-reconciler',
   'asset-route',
 ])
+const HOST_BROWSER_ACTOR_ID = 'host-browser'
 const MAX_ACTOR_ID_CHARS = 256
 const MAX_AUDIT_ID_CHARS = 128
 const MAX_DIAGNOSTIC_CODE_CHARS = 128
@@ -114,21 +115,37 @@ export function canonicalCanvasAccessContext(value: CanvasAccessContext): Canvas
   }
 }
 
+function provenanceTarget(target: CanvasProvenanceTarget | string): CanvasProvenanceTarget {
+  if (typeof target === 'string') {
+    const id = nonEmpty(target, 'Canvas target agent id')
+    return { agentId: id, sessionId: id }
+  }
+  return {
+    agentId: nonEmpty(target.agentId, 'Canvas target agent id'),
+    sessionId: nonEmpty(target.sessionId, 'Canvas target session id'),
+  }
+}
+
 /**
- * Bind caller metadata to the exact Host Agent/Session that owns the request.
- * Browser/asset human attribution is Session-scoped; Agent Tool/Host Agent attribution is Agent-scoped.
+ * Bind caller metadata to the Host entry point that owns the request.
+ * Browser/asset calls use one Host-minted browser principal; the target Session remains a separate
+ * authorization resource. Agent Tool/Host Agent attribution remains bound to the exact Agent id.
+ * The string target overload preserves existing Agent-owned call sites while newer callers may pass
+ * the explicit `{ agentId, sessionId }` pair.
  */
-export function assertCanvasAccessProvenance(access: CanvasAccessContext, target: CanvasProvenanceTarget): void {
-  const agentId = nonEmpty(target.agentId, 'Canvas target agent id')
-  const sessionId = nonEmpty(target.sessionId, 'Canvas target session id')
+export function assertCanvasAccessProvenance(
+  access: CanvasAccessContext,
+  target: CanvasProvenanceTarget | string,
+): void {
+  const resolved = provenanceTarget(target)
   switch (access.source) {
     case 'browser-remote':
-      if (access.actor.kind !== 'human' || access.actor.id !== sessionId) {
-        throw new Error('browser-remote Canvas access must use the Host-bound human Session identity')
+      if (access.actor.kind !== 'human' || access.actor.id !== HOST_BROWSER_ACTOR_ID) {
+        throw new Error('browser-remote Canvas access must use the Host-minted browser principal')
       }
       return
     case 'agent-tool':
-      if (access.actor.kind !== 'agent' || access.actor.id !== agentId) {
+      if (access.actor.kind !== 'agent' || access.actor.id !== resolved.agentId) {
         throw new Error('agent-tool Canvas access must use the exact target Agent identity')
       }
       return
@@ -136,13 +153,13 @@ export function assertCanvasAccessProvenance(access: CanvasAccessContext, target
       if (access.actor.kind !== 'system') throw new Error('system-reconciler Canvas access must use a system actor')
       return
     case 'asset-route':
-      if (access.actor.kind !== 'human' || access.actor.id !== sessionId) {
-        throw new Error('asset-route Canvas access must use the Host-bound human Session identity')
+      if (access.actor.kind !== 'human' || access.actor.id !== HOST_BROWSER_ACTOR_ID) {
+        throw new Error('asset-route Canvas access must use the Host-minted browser principal')
       }
       return
     case 'host':
       if (access.actor.kind === 'system') return
-      if (access.actor.kind === 'agent' && access.actor.id === agentId) return
+      if (access.actor.kind === 'agent' && access.actor.id === resolved.agentId) return
       throw new Error('host Canvas access must use the exact target Agent identity or a system actor')
     default:
       access.source satisfies never
@@ -154,14 +171,19 @@ export function canvasHostAgentAccess(agentId: string): CanvasAccessContext {
   return canonicalCanvasAccessContext({ actor: { kind: 'agent', id: agentId }, source: 'host' })
 }
 
-/** Host-owned Browser attribution; the human surrogate is the exact Session identity. */
+/**
+ * Host-owned Browser attribution. The argument proves the Host has already resolved a target Session;
+ * it is intentionally not reused as the human principal. Session identity travels separately in the
+ * authorization request, while actor identity is one non-spoofable local Browser principal.
+ */
 export function canvasBrowserAccess(
   sessionId: string,
   requestId?: string,
   correlationId?: string,
 ): CanvasAccessContext {
+  nonEmpty(sessionId, 'Canvas browser target session id')
   return canonicalCanvasAccessContext({
-    actor: { kind: 'human', id: sessionId },
+    actor: { kind: 'human', id: HOST_BROWSER_ACTOR_ID },
     source: 'browser-remote',
     ...(requestId === undefined ? {} : { requestId }),
     ...(correlationId === undefined ? {} : { correlationId }),
