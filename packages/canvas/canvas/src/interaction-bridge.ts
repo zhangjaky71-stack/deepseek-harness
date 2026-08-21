@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { canvasBrowserAccess } from './audit.ts'
 import { decodeCanvasChange } from './fold.ts'
 import {
   CanvasInteractionContextError,
@@ -183,12 +184,7 @@ export class CanvasInteractionBridge {
   }
 
   private browserAccess(agent: Agent, rpcId: string): CanvasAccessContext {
-    return {
-      actor: { kind: 'human', id: String(agent.id) },
-      source: 'browser-remote',
-      requestId: rpcId,
-      correlationId: rpcId,
-    }
+    return canvasBrowserAccess(String(agent.session.id), rpcId, rpcId)
   }
 
   /** Every Browser-selected asset must already be a durable Canvas output of this exact Session. */
