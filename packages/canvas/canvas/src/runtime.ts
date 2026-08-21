@@ -26,9 +26,13 @@ import type { CanvasFoldState } from './fold.ts'
 import type { CanvasChange, CanvasOperation } from './events.ts'
 import {
   CanvasSensitiveDataError,
+  assertCanvasAccessProvenance,
+  assertCanvasDurableAuditSafe,
   assertCanvasWorkflowAuditSafe,
   canonicalCanvasAccessContext,
+  canvasBrowserAccess,
   canvasChangeMeta,
+  canvasHostAgentAccess,
 } from './audit.ts'
 import { CanvasAuthorizationPolicy } from './authorization.ts'
 import {
@@ -42,6 +46,7 @@ import { registerCanvasProjections } from './projection.ts'
 import { getCanvasRunHistory, listCanvasRunHistory } from './history.ts'
 import type { CanvasFeatureService } from './feature-service.ts'
 import type { CanvasFeatureName } from './feature-types.ts'
+import { withCanvasWritePermit } from './write-authority.ts'
 import type {
   CanvasClearReceipt,
   CanvasLayoutMutationReceipt,
@@ -55,7 +60,9 @@ import type {
 import type {
   CanvasAccessContext,
   CanvasAuthorizationDecision,
+  CanvasAuthorizationMode,
   CanvasAuthorizationRequest,
+  CanvasAuthorizationResource,
   CanvasLayoutSnapshot,
   CanvasPermission,
   CanvasRunHistoryEntry,
@@ -196,17 +203,30 @@ export class CanvasService extends TypertRemoteService {
 
   private readonly caches = new WeakMap<Session, CanvasCache>()
   private readonly fallbackAuthorization: CanvasAuthorizationPolicy
+  private readonly authorizationMode: CanvasAuthorizationMode
 
   constructor(ctx: Context, config: CanvasServiceConfig = {}) {
     super(ctx, 'canvas')
     this.fallbackAuthorization = new CanvasAuthorizationPolicy(config.authorization)
+    this.authorizationMode = config.authorizationMode ?? 'single-user-fallback'
     ctx.inject(['sessionProjections'], (projectionCtx) => {
-      registerCanvasProjections(projectionCtx)
+      registerCanvasProjections(projectionCtx, sessionId => this.canBrowserReadProjection(sessionId))
     })
   }
 
   authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
-    return this.ctx.get('canvasAuthorization')?.authorize(request) ?? this.fallbackAuthorization.authorize(request)
+    const external = this.ctx.get('canvasAuthorization')
+    if (external === undefined) {
+      if (this.authorizationMode === 'required-external') {
+        return { allowed: false, reason: 'policy-unavailable', policyCode: 'external-service-required' }
+      }
+      return this.fallbackAuthorization.authorize(request)
+    }
+    try {
+      return external.authorize(request)
+    } catch {
+      return { allowed: false, reason: 'policy-unavailable', policyCode: 'authorization-service-error' }
+    }
   }
 
   get(agent: Agent, access?: CanvasAccessContext): CanvasSnapshot | null {
@@ -331,7 +351,9 @@ export class CanvasService extends TypertRemoteService {
       layout,
       meta: canvasChangeMeta(prepared.access),
     }
-    agent.session.append('canvas/layout-change', change)
+    withCanvasWritePermit(agent.session, 'canvas/layout-change', change, () => {
+      agent.session.append('canvas/layout-change', change)
+    })
     this.sync(agent.session, prepared.cache)
     return structuredClone(layout)
   }
@@ -426,35 +448,70 @@ export class CanvasService extends TypertRemoteService {
       actor: access.actor,
       source: access.source,
       sessionId: String(agent.session.id),
-      ...(cache.state.canvas === null ? {} : { canvasId: cache.state.canvas.id }),
+      resource: this.authorizationResource(cache, permission),
       ...(access.requestId === undefined ? {} : { requestId: access.requestId }),
       ...(access.correlationId === undefined ? {} : { correlationId: access.correlationId }),
     })
     if (!decision.allowed) {
-      throw new CanvasServiceError(
-        `Canvas permission "${permission}" denied for ${access.actor.kind} actor`,
-        'CANVAS_PERMISSION_DENIED',
-      )
+      if (decision.reason === 'policy-unavailable') {
+        throw new CanvasServiceError('Canvas authorization policy is unavailable', 'CANVAS_AUTHORIZATION_FAILED')
+      }
+      throw new CanvasServiceError(`Canvas permission "${permission}" denied`, 'CANVAS_PERMISSION_DENIED')
     }
   }
 
-  private browserAccess(agent: Agent): CanvasAccessContext {
-    return {
-      actor: { kind: 'human', id: String(agent.id) },
-      source: 'browser-remote',
+  private authorizationResource(cache: CanvasCache, permission: CanvasPermission): CanvasAuthorizationResource {
+    const canvas = cache.state.canvas
+    if (canvas === null) return { kind: 'session' }
+    if (permission === 'canvas.layout.write' && canvas.workflow !== null) {
+      return { kind: 'layout', canvasId: canvas.id, workflowId: canvas.workflow.id }
     }
+    if ((permission === 'canvas.run' || permission === 'canvas.cancel') && canvas.run !== null) {
+      return { kind: 'run', canvasId: canvas.id, runId: canvas.run.id }
+    }
+    if (permission === 'canvas.variant.create' && canvas.currentVariantId !== undefined) {
+      return { kind: 'variant', canvasId: canvas.id, variantId: canvas.currentVariantId }
+    }
+    if ((permission === 'canvas.edit' || permission === 'canvas.workflow.restore') && canvas.workflow !== null) {
+      return { kind: 'workflow', canvasId: canvas.id, workflowId: canvas.workflow.id }
+    }
+    return { kind: 'canvas', canvasId: canvas.id }
+  }
+
+  private browserAccess(agent: Agent): CanvasAccessContext {
+    return canvasBrowserAccess(String(agent.id))
   }
 
   private resolveAccess(agent: Agent, access?: CanvasAccessContext): CanvasAccessContext {
     try {
-      return canonicalCanvasAccessContext(access ?? {
-        actor: { kind: 'agent', id: String(agent.id) },
-        source: 'host',
-      })
+      const canonical = canonicalCanvasAccessContext(access ?? canvasHostAgentAccess(String(agent.id)))
+      assertCanvasAccessProvenance(canonical, String(agent.id))
+      return canonical
     } catch (error) {
       const message = error instanceof Error ? error.message : 'invalid Canvas access context'
       throw new CanvasServiceError(message, 'CANVAS_INVALID_ACCESS_CONTEXT')
     }
+  }
+
+  private canBrowserReadProjection(sessionId: string | undefined): boolean {
+    if (sessionId === undefined) {
+      if (this.ctx.get('canvasAuthorization') !== undefined || this.authorizationMode === 'required-external') return false
+      return this.fallbackAuthorization.authorize({
+        permission: 'canvas.read',
+        actor: { kind: 'human', id: 'single-user-browser' },
+        source: 'browser-remote',
+        sessionId: 'detached-session',
+        resource: { kind: 'session' },
+      }).allowed
+    }
+    const access = canvasBrowserAccess(sessionId)
+    return this.authorize({
+      permission: 'canvas.read',
+      actor: access.actor,
+      source: access.source,
+      sessionId,
+      resource: { kind: 'session' },
+    }).allowed
   }
 
   private featurePolicy(): CanvasFeatureService | undefined {
@@ -476,6 +533,15 @@ export class CanvasService extends TypertRemoteService {
       if (error instanceof CanvasSensitiveDataError) {
         throw new CanvasServiceError(error.message, 'CANVAS_SENSITIVE_DATA')
       }
+      throw error
+    }
+  }
+
+  private assertDurableAuditSafe(canvas: CanvasSnapshot | null): void {
+    try {
+      assertCanvasDurableAuditSafe(canvas)
+    } catch (error) {
+      if (error instanceof Error) throw new CanvasServiceError(error.message, 'CANVAS_SENSITIVE_DATA')
       throw error
     }
   }
@@ -570,6 +636,7 @@ export class CanvasService extends TypertRemoteService {
     operation: CanvasOperation,
     canvas: CanvasSnapshot | null,
   ): CanvasSnapshot | null {
+    this.assertDurableAuditSafe(canvas)
     const change: CanvasChange = {
       kind: 'canvas/change',
       version: CANVAS_CHANGE_VERSION,
@@ -583,7 +650,9 @@ export class CanvasService extends TypertRemoteService {
     // fold state, then append; only the committed Session event advances cache.
     const staged = cloneCanvasFoldState(cache.state)
     applyCanvasChange(staged, change)
-    agent.session.append('canvas/change', change)
+    withCanvasWritePermit(agent.session, 'canvas/change', change, () => {
+      agent.session.append('canvas/change', change)
+    })
     this.sync(agent.session, cache)
     return this.view(cache)
   }
