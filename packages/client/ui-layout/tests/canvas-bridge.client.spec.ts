@@ -40,6 +40,12 @@ describe('Infinite Canvas bridge contract', () => {
     expect(isCanvasBridgeMessage({
       channel: CANVAS_BRIDGE_CHANNEL,
       version: CANVAS_BRIDGE_VERSION,
+      type: 'canvas:ready',
+      payload: { app: 42 },
+    })).toBe(false)
+    expect(isCanvasBridgeMessage({
+      channel: CANVAS_BRIDGE_CHANNEL,
+      version: CANVAS_BRIDGE_VERSION,
       type: 'canvas:error',
       payload: {},
     })).toBe(false)
