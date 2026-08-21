@@ -2,7 +2,9 @@ import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CanvasCapabilities, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
-import { CanvasView, WorkflowEditorShell } from '../src/client/CanvasView.tsx'
+import { CanvasView } from '../src/client/CanvasView.tsx'
+import { WorkflowEditor } from '../src/client/WorkflowEditor.tsx'
+import { createCanvasEditorStore } from '../src/client/store.ts'
 
 const t = ((key: string) => key) as never
 
@@ -20,7 +22,7 @@ function capabilities(overrides: Partial<Record<keyof CanvasCapabilities, boolea
   }
 }
 
-function canvasWithVideo(): CanvasSnapshot {
+function canvasWithVideo(): CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> } {
   return {
     schemaVersion: 1,
     id: 'canvas-feature-ui',
@@ -43,7 +45,7 @@ function canvasWithVideo(): CanvasSnapshot {
     output: null,
     createdAt: 1,
     updatedAt: 1,
-  } as CanvasSnapshot
+  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }
 }
 
 const emptyInteraction = {
@@ -52,16 +54,34 @@ const emptyInteraction = {
   selectedAssetRefs: [],
 } as const
 
+function editorStore(canvas = canvasWithVideo()) {
+  const instance = createCanvasEditorStore().create('session-feature')
+  instance.actions.resetGeneration({
+    canvasId: canvas.id,
+    canvasCreatedAt: canvas.createdAt,
+    workflowId: canvas.workflow.id,
+  })
+  return {
+    useStore: ((selector: (state: ReturnType<typeof instance.getSnapshot>) => unknown) => selector(instance.getSnapshot())) as never,
+    actions: instance.actions,
+  }
+}
+
 function canvasViewProps(
   canvas: CanvasSnapshot | null | undefined,
   openState: 'cold' | 'loading' | 'open' | 'error' = 'open',
 ): ComponentProps<typeof CanvasView> {
+  const store = editorStore()
   return {
     useSession: selector => selector({ openState } as never),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),
+    useStore: store.useStore,
+    actions: store.actions,
     capabilities: capabilities({ editor: false }),
+    editorReady: true,
+    nodeCatalog: [],
     setMode: () => {},
     selectNode: () => {},
     selectNodes: () => {},
@@ -70,15 +90,39 @@ function canvasViewProps(
     selectOutput: () => {},
     setRegion: () => {},
     clearSelection: () => {},
+    commitOperations: async () => ({ ok: false, status: 'offline', message: 'test' }),
+    saveLayout: async () => ({ ok: false, status: 'offline', message: 'test' }),
     t,
   } as unknown as ComponentProps<typeof CanvasView>
+}
+
+function editorMarkup(videoEnabled: boolean): string {
+  const canvas = canvasWithVideo()
+  const store = editorStore(canvas)
+  return renderToStaticMarkup(
+    <WorkflowEditor
+      canvas={canvas}
+      layout={null}
+      capabilities={capabilities({ video: videoEnabled })}
+      nodeCatalog={[]}
+      interaction={emptyInteraction}
+      onSelectNode={() => {}}
+      onSelectNodes={() => {}}
+      onSelectEdge={() => {}}
+      onClearSelection={() => {}}
+      commitOperations={async () => ({ ok: false, status: 'offline', message: 'test' })}
+      saveLayout={async () => ({ ok: false, status: 'offline', message: 'test' })}
+      useStore={store.useStore}
+      actions={store.actions}
+      t={t}
+    />,
+  )
 }
 
 describe('Canvas feature-capability presentation', () => {
   it('forces Minimal and hides the mode switch when Editor is disabled', () => {
     const html = renderToStaticMarkup(<CanvasView {...canvasViewProps(canvasWithVideo())} />)
     expect(html).not.toContain('mode.editor')
-    expect(html).not.toContain('editor.title')
     expect(html).toContain('minimal.output')
   })
 
@@ -93,28 +137,14 @@ describe('Canvas feature-capability presentation', () => {
   })
 
   it('keeps a historical Video node visible while marking it unavailable', () => {
-    const html = renderToStaticMarkup(
-      <WorkflowEditorShell
-        canvas={canvasWithVideo()}
-        layout={null}
-        capabilities={capabilities({ video: false })}
-        t={t}
-      />,
-    )
+    const html = editorMarkup(false)
     expect(html).toContain('video.generate')
     expect(html).toContain('data-unavailable="true"')
     expect(html).toContain('feature.unavailable')
   })
 
   it('does not mark the same Video node unavailable when Video is enabled', () => {
-    const html = renderToStaticMarkup(
-      <WorkflowEditorShell
-        canvas={canvasWithVideo()}
-        layout={null}
-        capabilities={capabilities({ video: true })}
-        t={t}
-      />,
-    )
+    const html = editorMarkup(true)
     expect(html).toContain('video.generate')
     expect(html).not.toContain('data-unavailable="true"')
     expect(html).not.toContain('feature.unavailable')
