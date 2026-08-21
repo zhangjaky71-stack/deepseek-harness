@@ -63,13 +63,13 @@ export function apply(ctx: ClientContext): void {
   // Session leaving the client catalog or a plugin/HMR replacement.
   ctx.effect(() => {
     const prune = () => {
-      const snapshot = ctx.sessions.getListSnapshot()
-      const live = new Set<SessionId>(snapshot.items.map(item => item.sessionId))
+      const snapshot = ctx.sessions.list.getSnapshot()
+      const live = new Set<SessionId>(snapshot.ids)
       if (snapshot.current !== undefined) live.add(snapshot.current)
       modes.prune(live)
       interactions.prune(live)
     }
-    const off = ctx.sessions.subscribe(prune)
+    const off = ctx.sessions.list.subscribe(prune)
     prune()
     return () => {
       off()
