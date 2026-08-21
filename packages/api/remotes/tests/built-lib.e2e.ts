@@ -61,7 +61,7 @@ describe.skipIf(!requiredArtifacts)('Goal and Canvas Remote built LIB chain', ()
       const { default: GoalService } = await import(urls.goal)
       const { TYPERT: GOAL_TYPERT } = await import(urls.goalTypert)
       const { default: TypertRegistry } = await import(urls.registryHost)
-      const { Session, SessionId } = await import(urls.session)
+      const { default: SessionStore, SessionId } = await import(urls.session)
 
       const routes = []
       const host = new Context()
@@ -75,6 +75,7 @@ describe.skipIf(!requiredArtifacts)('Goal and Canvas Remote built LIB chain', ()
       })
       await host.plugin({ inject: connectionHost.inject, apply: connectionHost.apply })
       await host.plugin(TypertRegistry)
+      await host.plugin(SessionStore)
       await host.plugin(AgentRegistry)
       await host.plugin(TypertRemoteService)
       await host.plugin(GoalService)
@@ -83,7 +84,7 @@ describe.skipIf(!requiredArtifacts)('Goal and Canvas Remote built LIB chain', ()
       host.typert.register(CANVAS_TYPERT)
 
       const makeAgent = rawId => {
-        const session = new Session(SessionId(rawId))
+        const session = host.sessions.create(SessionId(rawId))
         return {
           id: session.id,
           options: {},
