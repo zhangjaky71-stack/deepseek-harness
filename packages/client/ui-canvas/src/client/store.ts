@@ -1,10 +1,18 @@
 /** Session-scoped editor presentation store. Semantic workflow state stays in Session Projection. */
 
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
+import type { CanvasId, MediaWorkflowId } from '@deepseek-ai/dsh-canvas/client'
 import type { CanvasSaveStatus } from '../types.ts'
 import type { CanvasClipboard, CanvasEditorCommand, CanvasNodeDraft } from './draft.ts'
 
 const HISTORY_LIMIT = 100
+
+/** Browser-local owner identity for transient editor state. */
+export interface CanvasEditorOwner {
+  readonly canvasId: CanvasId
+  readonly canvasCreatedAt: number
+  readonly workflowId: MediaWorkflowId
+}
 
 /** Revision fence carried with one undo/redo entry. */
 export interface CanvasEditorHistoryEntry {
@@ -14,6 +22,7 @@ export interface CanvasEditorHistoryEntry {
 
 /** Presentation-only Editor state surviving view remounts for one Session. */
 export interface CanvasEditorState {
+  readonly owner: CanvasEditorOwner | null
   readonly saveStatus: CanvasSaveStatus
   readonly draft: CanvasNodeDraft | null
   readonly undo: readonly CanvasEditorHistoryEntry[]
@@ -23,6 +32,7 @@ export interface CanvasEditorState {
 }
 
 type CanvasEditorActions = {
+  resetGeneration: (draft: CanvasEditorState, owner: CanvasEditorOwner | null) => void
   setSaveStatus: (draft: CanvasEditorState, status: CanvasSaveStatus) => void
   setDraft: (draft: CanvasEditorState, value: CanvasNodeDraft | null) => void
   setDraftName: (draft: CanvasEditorState, value: string) => void
@@ -38,10 +48,11 @@ type CanvasEditorActions = {
   clearLocalPositions: (draft: CanvasEditorState) => void
 }
 
-/** Create the session-scoped Editor store handle declared by the Canvas view entry. */
+/** Create the session-scoped Editor store handle declared by the Canvas surface entry. */
 export function createCanvasEditorStore(): EngineStoreHandle<CanvasEditorState, CanvasEditorActions> {
   return defineStore({
     init: (): CanvasEditorState => ({
+      owner: null,
       saveStatus: 'saved',
       draft: null,
       undo: [],
@@ -50,6 +61,16 @@ export function createCanvasEditorStore(): EngineStoreHandle<CanvasEditorState, 
       localPositions: {},
     }),
     actions: {
+      // Clipboard is intentionally retained across generations: it is an explicit
+      // copy payload, unlike drafts/history/layout state that belong to one document.
+      resetGeneration: (d, owner) => {
+        d.owner = owner
+        d.saveStatus = 'saved'
+        d.draft = null
+        d.undo = []
+        d.redo = []
+        d.localPositions = {}
+      },
       setSaveStatus: (d, status: CanvasSaveStatus) => { d.saveStatus = status },
       setDraft: (d, value: CanvasNodeDraft | null) => { d.draft = value },
       setDraftName: (d, value: string) => {
