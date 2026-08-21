@@ -29,6 +29,8 @@ export interface CanvasPresentation {
 }
 export interface CanvasInteractionAnchor {
   readonly canvasId: CanvasId
+  /** Canvas creation timestamp is a browser-local generation fence even when ids are reused. */
+  readonly canvasCreatedAt: number
   readonly workflowId: MediaWorkflowId
   readonly workflowRevision: number
 }
@@ -58,6 +60,8 @@ export interface CanvasInteractionActions {
 }
 export interface CanvasViewInjected extends CanvasInteractionActions {
   readonly capabilities: CanvasCapabilities
+  /** False when the Host enables Editor but its client-safe node catalog is unavailable. */
+  readonly editorReady: boolean
   readonly nodeCatalog: readonly CanvasNodeCatalogEntry[]
   readonly hooks: {
     readonly mode: SnapshotStore<CanvasMode>
