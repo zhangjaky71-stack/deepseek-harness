@@ -24,7 +24,7 @@ The strict fold tracks Canvas and Run identities across the entire Session. A Ru
 
 Current `canvas/change` and `canvas/layout-change` writes are package-owned. `CanvasService` executes the append under a process-local one-shot write permit; the Canvas invariant consumes the exact matching permit during Session precommit. A structurally valid current event appended by an alternate Host path is therefore rejected before publication.
 
-This fence prevents accidental authorization bypasses and architecture drift inside trusted Host code. It is not a sandbox against malicious code already executing in the same process. Historical events loaded before the invariant is mounted remain replayable without a current-write permit. Production compositions that rely on mechanical direct-append rejection must mount the Canvas invariant companion; lightweight compositions without it still rely on CanvasService as the current writer.
+This fence prevents accidental authorization bypasses and architecture drift inside trusted Host code. It is not a sandbox against malicious code already executing in the same process. Historical events loaded before the invariant is mounted remain replayable without a current-write permit. The shipped `dsh-base` composition mounts both `@deepseek-ai/dsh-invariants` and `@deepseek-ai/dsh-canvas/invariant`, so ordinary product profiles enforce the permit mechanically; lightweight custom compositions that omit the companion still rely on CanvasService as the current writer.
 
 ## Host authorization
 
@@ -75,7 +75,11 @@ Layout state remains a separate durable stream. `CanvasService.saveLayout()` req
 
 Browser mutation wrappers create trusted `human:host-browser + browser-remote` access on the Host; Browser payloads do not supply their own actor/source. The resolved Session id remains the authorization target and is not promoted into a user principal. Mutations return small receipts. Current Canvas/layout values arrive through Session Projection, so there is deliberately no second `getCurrent` RPC.
 
-Run history remains bounded and derived from `canvas/change`, never a second durable database. `listRuns()` and `getRun()` require `canvas.history.read` and return durable references/metadata only.
+The current Remote namespace exposes only implemented behavior: workflow edit/replace, output selection, layout save, clear, and bounded `listRuns`/`getRun`. Future run/cancel/variant/restore operations are not registered until their owning nodes implement them. Under weak SRC reflection the Host validates business DTO shape before authorization/dispatch instead of relying on generated schemas being present.
+
+Run history remains bounded and derived from `canvas/change`, never a second durable database. Each history entry carries its durable `canvasId`; `listRuns()` requires that `canvasId`, while `getRun()` requires `canvasId + runId`. Authorization is performed against that requested generation/resource, so permission to a newly created Canvas cannot expose an older Canvas generation from the same Session. The rebuildable index uses the N03 strict fold and then applies new Session events incrementally; Canvas fold state and the History index are batch-staged and published together.
+
+Remote failures are explicit. The Typert Gateway preserves only declared `TypertBusinessFailure`, lookup-policy failures, and cancellation. Ordinary exceptions become the fixed `internal / Remote request failed` envelope. Canvas Remote wrappers convert only allowlisted `HarnessError` codes to fixed public messages, so Host resource ids, policy diagnostics, and raw internal/provider error text do not become Browser error messages.
 
 `CanvasInteractionContext` is request-local rather than Canvas durable state. `CanvasInteractionService` stages a Browser selection against the exact ordinary prompt RPC id; `CanvasInteractionBridge` uses the same Host-minted Browser principal, validates Canvas identity/revision/assets, binds the selection to the admitted user message, and injects the precise context through the normal logged Agent message path. Selection/focus itself is ephemeral.
 
@@ -99,7 +103,7 @@ None from this package's persistence, authorization, or projection machinery.
 
 - The built-in policy is actor-kind based and intended for the current single-user deployment. Workspace ownership, tenant ACLs, and authenticated human identity are future Host policy concerns behind `ctx.canvasAuthorization`.
 - The current Browser principal is Host-minted but not authenticated per-user identity. Live authorization still carries the exact target Session separately; identity-dependent detached reads fail closed because the generic detached projection read context does not currently carry that Session target.
-- The package-local write permit prevents accidental alternate current writers only when the Canvas invariant companion is mounted; it is not a malicious same-process-code sandbox.
+- The package-local write permit prevents accidental alternate current writers only when the Canvas invariant companion is mounted; it is not a malicious same-process-code sandbox. The shipped base profile mounts that companion; custom compositions must do the same if they require the mechanical fence.
 - Sensitive-value signatures are defense in depth, not a general-purpose DLP engine for arbitrary user text.
 - Provider execution, retry/cancel reconciliation, physical asset stores, and authorized binary routes remain owned by later workplan nodes.
 - Repository-pinned lockfile/module-graph/generated Typert artifacts must be regenerated and validated on the final rc.8-compatible workspace before release acceptance.
