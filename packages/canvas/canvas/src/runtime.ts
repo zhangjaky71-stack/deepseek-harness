@@ -4,9 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertBusinessFailure, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { CANVAS_CHANGE_VERSION } from './migration.ts'
 import {
   CanvasId,
@@ -43,7 +42,7 @@ import {
 } from './layout.ts'
 import type { CanvasLayoutChange } from './layout.ts'
 import { registerCanvasProjections } from './projection.ts'
-import { getCanvasRunHistory, listCanvasRunHistory } from './history.ts'
+import { CanvasRunHistoryIndex } from './history.ts'
 import type { CanvasFeatureService } from './feature-service.ts'
 import type { CanvasFeatureName } from './feature-types.ts'
 import { withCanvasWritePermit } from './write-authority.ts'
@@ -85,8 +84,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** Error returned by CanvasService before a mutation reaches the Session commit point. */
-export class CanvasServiceError extends HarnessError {
-  // oxlint-disable-next-line typescript/no-useless-constructor -- narrows HarnessError's string code
+export class CanvasServiceError extends TypertBusinessFailure {
   constructor(message: string, code: CanvasServiceErrorCode) {
     super(message, code)
   }
@@ -94,6 +92,7 @@ export class CanvasServiceError extends HarnessError {
 
 interface CanvasCache {
   readonly state: CanvasFoldState
+  readonly history: CanvasRunHistoryIndex
   observedSeq: number
 }
 
@@ -118,6 +117,81 @@ function cloneEdge(edge: MediaWorkflowEdge): MediaWorkflowEdge {
 
 function invalidEdit(message: string): never {
   throw new CanvasServiceError(message, 'CANVAS_INVALID_EDIT')
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === null || prototype === Object.prototype
+}
+
+function editString(value: unknown, subject: string): string {
+  if (typeof value !== 'string' || value.length === 0) invalidEdit(`${subject} must be a non-empty string`)
+  return value
+}
+
+function editRecord(value: unknown, subject: string): Record<string, unknown> {
+  if (!isPlainRecord(value)) invalidEdit(`${subject} must be a plain object`)
+  return value
+}
+
+/**
+ * Validate the SRC-mode Host boundary before any feature/plugin can inspect a
+ * workflow edit. Generated Typert schemas remain an earlier, stricter boundary
+ * when available; this guard makes source-mode behavior fail loud as well.
+ */
+function workflowEditOperations(value: unknown): readonly WorkflowEditOperation[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    invalidEdit('Canvas workflow edit requires at least one operation')
+  }
+  for (const [index, candidate] of value.entries()) {
+    const operation = editRecord(candidate, `Canvas workflow edit operation ${index}`)
+    const op = editString(operation.op, `Canvas workflow edit operation ${index}.op`)
+    switch (op) {
+      case 'add-node': {
+        const node = editRecord(operation.node, `Canvas workflow edit operation ${index}.node`)
+        editString(node.id, `Canvas workflow edit operation ${index}.node.id`)
+        editString(node.type, `Canvas workflow edit operation ${index}.node.type`)
+        editRecord(node.config, `Canvas workflow edit operation ${index}.node.config`)
+        break
+      }
+      case 'remove-node':
+        editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
+        break
+      case 'replace-node-config':
+        editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
+        editRecord(operation.config, `Canvas workflow edit operation ${index}.config`)
+        break
+      case 'rename-node':
+        editString(operation.nodeId, `Canvas workflow edit operation ${index}.nodeId`)
+        editString(operation.name, `Canvas workflow edit operation ${index}.name`)
+        break
+      case 'connect': {
+        const edge = editRecord(operation.edge, `Canvas workflow edit operation ${index}.edge`)
+        for (const field of ['id', 'sourceNodeId', 'sourcePort', 'targetNodeId', 'targetPort'] as const) {
+          editString(edge[field], `Canvas workflow edit operation ${index}.edge.${field}`)
+        }
+        break
+      }
+      case 'disconnect':
+        editString(operation.edgeId, `Canvas workflow edit operation ${index}.edgeId`)
+        break
+      case 'set-output-nodes':
+        if (!Array.isArray(operation.nodeIds)) {
+          invalidEdit(`Canvas workflow edit operation ${index}.nodeIds must be an array`)
+        }
+        for (const [nodeIndex, nodeId] of operation.nodeIds.entries()) {
+          editString(nodeId, `Canvas workflow edit operation ${index}.nodeIds[${nodeIndex}]`)
+        }
+        break
+      case 'rename-workflow':
+        editString(operation.name, `Canvas workflow edit operation ${index}.name`)
+        break
+      default:
+        invalidEdit(`Canvas workflow edit operation ${index}.op is unsupported`)
+    }
+  }
+  return value as readonly WorkflowEditOperation[]
 }
 
 function nodeIndex(nodes: readonly MediaWorkflowNode[], nodeId: MediaWorkflowNode['id']): number {
@@ -171,7 +245,6 @@ function normalizeExternalAuthorizationDecision(value: unknown): CanvasAuthoriza
 }
 
 function applyWorkflowOperations(current: MediaWorkflow, operations: readonly WorkflowEditOperation[]): MediaWorkflow {
-  if (operations.length === 0) invalidEdit('Canvas workflow edit requires at least one operation')
   let name = current.name
   const nodes = current.nodes.map(cloneNode)
   const edges = current.edges.map(cloneEdge)
@@ -217,8 +290,6 @@ function applyWorkflowOperations(current: MediaWorkflow, operations: readonly Wo
       case 'rename-workflow':
         name = operation.name
         break
-      default:
-        operation satisfies never
     }
   }
 
@@ -340,8 +411,9 @@ export class CanvasService extends TypertRemoteService {
     features?.assertEnabled('canvas')
     this.assertBrowserEditorEnabled(prepared.access, features)
     const current = this.expectCurrentWorkflow(prepared.cache, ref)
-    features?.assertWorkflowEditable(current.workflow, operations)
-    const workflow = applyWorkflowOperations(current.workflow, operations)
+    const validatedOperations = workflowEditOperations(operations)
+    features?.assertWorkflowEditable(current.workflow, validatedOperations)
+    const workflow = applyWorkflowOperations(current.workflow, validatedOperations)
     this.assertWorkflowAuditSafe(workflow)
     return this.commitWorkflow(agent, prepared, current, 'workflow-edit', workflow)
   }
@@ -422,16 +494,26 @@ export class CanvasService extends TypertRemoteService {
     return structuredClone(layout)
   }
 
-  listRuns(agent: Agent, request: ListCanvasRunsRequest = {}, access?: CanvasAccessContext): CanvasRunHistoryPage {
-    this.prepare(agent, 'canvas.history.read', access)
+  listRuns(agent: Agent, request: ListCanvasRunsRequest, access?: CanvasAccessContext): CanvasRunHistoryPage {
+    const prepared = this.prepare(
+      agent,
+      'canvas.history.read',
+      access,
+      { kind: 'canvas', canvasId: request.canvasId },
+    )
     this.assertFeature('history')
-    return listCanvasRunHistory(agent.session.events, request)
+    return prepared.cache.history.list(request)
   }
 
   getRun(agent: Agent, request: GetCanvasRunRequest, access?: CanvasAccessContext): CanvasRunHistoryEntry | null {
-    this.prepare(agent, 'canvas.history.read', access)
+    const prepared = this.prepare(
+      agent,
+      'canvas.history.read',
+      access,
+      { kind: 'run', canvasId: request.canvasId, runId: request.runId },
+    )
     this.assertFeature('history')
-    return getCanvasRunHistory(agent.session.events, request.runId)
+    return prepared.cache.history.get(request)
   }
 
   clear(agent: Agent, ref: WorkflowRef, access?: CanvasAccessContext): void {
@@ -502,12 +584,17 @@ export class CanvasService extends TypertRemoteService {
     return this.getRun(agent, request, this.browserAccess(agent))
   }
 
-  private prepare(agent: Agent, permission: CanvasPermission, access?: CanvasAccessContext): PreparedCanvasAccess {
+  private prepare(
+    agent: Agent,
+    permission: CanvasPermission,
+    access?: CanvasAccessContext,
+    resource?: CanvasAuthorizationResource,
+  ): PreparedCanvasAccess {
     this.assertLive(agent)
     const cache = this.cache(agent.session)
     this.sync(agent.session, cache)
     const canonical = this.resolveAccess(agent, access)
-    this.assertAuthorized(agent, cache, canonical, permission)
+    this.assertAuthorized(agent, cache, canonical, permission, resource)
     return { cache, access: canonical }
   }
 
@@ -698,8 +785,12 @@ export class CanvasService extends TypertRemoteService {
     let cache = this.caches.get(session)
     if (cache !== undefined) return cache
     const state = emptyCanvasFoldState()
-    for (const event of session.events) applyCanvasEvent(state, event)
-    cache = { state, observedSeq: session.seq }
+    const history = new CanvasRunHistoryIndex()
+    for (const event of session.events) {
+      applyCanvasEvent(state, event)
+      history.apply(event)
+    }
+    cache = { state, history, observedSeq: session.seq }
     this.caches.set(session, cache)
     return cache
   }
@@ -707,6 +798,7 @@ export class CanvasService extends TypertRemoteService {
   private sync(session: Session, cache: CanvasCache): void {
     for (const event of session.events.slice(cache.observedSeq)) {
       applyCanvasEvent(cache.state, event)
+      cache.history.apply(event)
       cache.observedSeq += 1
     }
   }
