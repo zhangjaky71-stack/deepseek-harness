@@ -81,6 +81,8 @@ variant
 layout
 ```
 
+Actor identity 与 target Session/resource 是两个不同概念。尤其 Browser principal 不能用 SessionId 充当用户身份；SessionId 单独进入 `sessionId`/`resource`，供 ownership/tenant policy 判断目标资源。
+
 resource scope 的目的不是让 Domain 持有 ACL，而是给外部 Host policy 足够资源 identity，避免 N17/N19/N21 再破坏 N04 API。
 
 ## 5. Authorization Mode 与 Fail-closed
@@ -109,10 +111,10 @@ raw policy/identity backend error
 
 | source | actor contract |
 |---|---|
-| `browser-remote` | `human`，id = exact target Agent/Session surrogate |
+| `browser-remote` | Host 铸造的固定单用户 Browser principal：`human:host-browser`；target Session 单独进入 authorization request |
 | `agent-tool` | `agent`，id = exact target Agent id |
 | `system-reconciler` | `system` |
-| `asset-route` | 当前 Host-bound human Session surrogate；正式 identity layer 后替换 principal source |
+| `asset-route` | 与 Browser Remote 相同的 Host-minted Browser principal；正式 identity layer 后替换 principal source |
 | `host` | exact target Agent，或显式 system actor |
 
 Host-owned constructors：
@@ -124,7 +126,9 @@ canvasAgentToolAccess()
 canvasSystemAccess()
 ```
 
-Browser payload、Tool argument、Provider callback payload 都不能自由声明 stronger actor/source。
+`canvasBrowserAccess()` 的 Session 参数只证明 Host 已解析目标 Session，并用于后续 Authorization target；它不会把 SessionId 转换成 human id。Browser payload、Tool argument、Provider callback payload 都不能自由声明 stronger actor/source。
+
+未来接入 authenticated human identity 时，只替换 Browser principal source；`CanvasPermission`、`sessionId` 与 typed resource contract 不需要重做。
 
 ## 7. Audit Identifier Protocol
 
@@ -178,7 +182,7 @@ raw provider failure
 → CanvasRunError durable
 ```
 
-`assertCanvasDurableAuditSafe()` 至少检查当前 Workflow、Run error code/message 和安全 asset display metadata。N23 structured logging 可以拥有更多诊断，但仍必须 redacted，且 raw provider payload/credential 不进入 Session。
+`assertCanvasDurableAuditSafe()` 至少检查当前 Workflow、Run error code/message、image/video durable object id 与安全 display metadata。N23 structured logging 可以拥有更多诊断，但仍必须 redacted，且 raw provider payload/credential 不进入 Session。
 
 ### 8.3 Threat-model Boundary
 
@@ -208,11 +212,9 @@ CanvasService
 → commit
 ```
 
-没有 permit 的 direct current append 即使结构完全合法，也必须 fail before log publication。
+没有 permit 的 direct current append 即使结构完全合法，也必须在**挂载 Canvas invariant companion 的组合中** fail before log publication。
 
-历史 replay 不要求 current permit，保证旧 Session 可读。
-
-该 permit 防 accidental alternate Host writer，不是 same-process malicious-code sandbox。
+历史 replay 不要求 current permit，保证旧 Session 可读。该 permit 防 accidental alternate Host writer，不是 same-process malicious-code sandbox；轻量组合若不挂 invariant，仍依赖 CanvasService 作为 current writer 的正确性边界。
 
 ## 10. Browser Projection Read Security
 
@@ -228,10 +230,10 @@ Canvas Host policy                 canvas.read
 
 Canvas 为 `canvas` 与 `canvasLayout` 注册 read guard：
 
-- live snapshot/change frame 带 exact Session id 做 Host read decision；
+- live snapshot/change frame 带 exact target Session id，并使用同一个 Host-minted `human:host-browser` principal 做 Host read decision；
 - deny/guard throw fail closed，key 不出站；
 - internal cell/checkpoint 不删除，read deny 不改写历史；
-- detached cache/history 没有可验证 live identity 时，不虚构 principal；external/required identity-dependent policy 下 fail closed。
+- detached cache/history 当前没有可验证 target Session context 时，不虚构 Session/resource；external/required identity-dependent policy 下 fail closed。
 
 Session Projection 的 read guard 本身是通用 seam，但不定义通用 ACL；只有拥有真实 Host read policy 的 domain 才应注册。
 
@@ -246,8 +248,10 @@ Canvas：
 - `packages/canvas/canvas/src/runtime.ts`
 - `packages/canvas/canvas/src/invariant.ts`
 - `packages/canvas/canvas/src/projection.ts`
+- `packages/canvas/canvas/src/interaction-bridge.ts`
 - `packages/canvas/canvas/tests/authorization.spec.ts`
 - `packages/canvas/canvas/tests/invariant.spec.ts`
+- `packages/canvas/canvas/tests/interaction-bridge.spec.ts`
 
 Session Projection cross-package seam：
 
@@ -261,7 +265,9 @@ Session Projection cross-package seam：
 - [ ] read allow / edit deny，Host commit 前拒绝。
 - [ ] agent run allow / human run deny。
 - [ ] initial variant 额外要求 `canvas.variant.create`。
-- [ ] browser/system、agent-tool/human、agent-tool/other-agent、reconciler/human provenance spoof 拒绝。
+- [ ] browser/system、伪造 browser human、agent-tool/human、agent-tool/other-agent、reconciler/human provenance spoof 拒绝。
+- [ ] Remote / Projection / Interaction Browser 路径使用同一 Host-minted Browser principal。
+- [ ] Agent 与 Session id 不相等时，Browser/Agent provenance 仍按各自 contract 工作。
 - [ ] current CanvasService + invariant write permit 正常提交。
 - [ ] direct current `canvas/change` 无 permit 拒绝。
 - [ ] direct current `canvas/layout-change` 无 permit 拒绝。
@@ -269,7 +275,7 @@ Session Projection cross-package seam：
 - [ ] required-external 缺失 fail closed，Session seq 不变。
 - [ ] projection `canvas.read` deny 时 `canvas` / `canvasLayout` 不出现在 browser snapshot。
 - [ ] projection guard throw fail closed。
-- [ ] detached view 不虚构 Session identity。
+- [ ] detached view 不虚构 Session identity/resource。
 - [ ] projection read guard dispose 后解除影响，证明 HMR-safe。
 - [ ] `X-API-Key`、data URL base64、Bearer credential、PEM private key 拒绝。
 - [ ] `maxTokens/tokenLimit` 不误杀。
@@ -282,9 +288,9 @@ Session Projection cross-package seam：
 N04 只有同时满足以下条件才可 `ACCEPTED`：
 
 1. UI visibility 不是唯一权限控制。
-2. current durable writer 不能机械绕过 Host authorization path。
-3. actor/source provenance 可验证，不能由 Browser/Tool 自报 stronger identity。
-4. Browser Projection 与 Host current read 使用一致的 `canvas.read` security semantics。
+2. current durable writer 不能机械绕过 Host authorization path（最终生产组合必须挂载 invariant companion）。
+3. actor/source provenance 可验证，不能由 Browser/Tool 自报 stronger identity；Session resource 与 human principal 不混用。
+4. Browser Projection、Remote、Interaction 与 Host current read 使用一致的 Browser principal / `canvas.read` security semantics。
 5. 所有 current Canvas durable payload 都不允许 Host/Provider credential、binary、raw provider diagnostic。
 6. external authorization 可配置 fail-closed，并且 backend exception 不泄漏。
 7. Run/Asset/Tool/History 后续可复用 resource-aware seam，不需要另起授权体系。
@@ -294,7 +300,8 @@ N04 只有同时满足以下条件才可 `ACCEPTED`：
 
 以下是明确 follow-up，不属于 N04 验收阻塞：
 
-- 正式 human identity、workspace ownership、tenant ACL。
+- 正式 authenticated human identity、workspace ownership、tenant ACL。
+- detached projection read 携带明确 Session target 的通用 carrier API（当前 identity-dependent policy fail closed）。
 - N15 quota/cost approval。
 - N16/N22 新 background/callback source 的最终 vocabulary。
 - N23 完整 logging/telemetry redaction pipeline。
