@@ -24,7 +24,7 @@ Durable value 统一走 `stored JSON → migrateStoredX() → current structural
 
 当前 `canvas/change` 与 `canvas/layout-change` 是 package-owned writer。`CanvasService` 只在一个 process-local、one-shot write permit 内执行 append；Canvas invariant 在 Session precommit 消费与 Event 完全匹配的 permit。其它 Host 路径即使构造出结构合法的 current event，也会在发布前被拒绝。
 
-这个 fence 用来阻止 trusted Host code 的误绕过与架构漂移，不是针对已经在同进程执行的恶意代码的 sandbox。Invariant 挂载前载入的历史 Event 仍可 replay，不要求 current-write permit。依赖机械 direct-append 拒绝能力的生产组合必须挂载 Canvas invariant companion；轻量组合若未挂载，仍以 CanvasService 作为 current writer 的正确性边界。
+这个 fence 用来阻止 trusted Host code 的误绕过与架构漂移，不是针对已经在同进程执行的恶意代码的 sandbox。Invariant 挂载前载入的历史 Event 仍可 replay，不要求 current-write permit。Shipped `dsh-base` 现在会同时挂载 `@deepseek-ai/dsh-invariants` 与 `@deepseek-ai/dsh-canvas/invariant`，因此普通产品 profile 会机械执行这条 permit fence；自定义轻量组合若省略 companion，则仍以 CanvasService 作为 current writer 的正确性边界。
 
 ## Host Authorization
 
@@ -75,7 +75,11 @@ Layout State 继续使用独立 durable stream。`CanvasService.saveLayout()` �
 
 Browser mutation wrapper 在 Host 上创建可信 `human:host-browser + browser-remote` access；Browser payload 不提供自己的 actor/source。已解析 Session id 始终只是 Authorization target，不会升级为 user principal。Mutation 返回小 receipt；当前 Canvas/Layout 通过 Session Projection 到达 Browser，因此没有第二条 `getCurrent` RPC。
 
-Run History 继续是由 `canvas/change` 派生的 bounded view，而不是第二套 durable database。`listRuns()` 与 `getRun()` 要求 `canvas.history.read`，只返回 durable reference/metadata。
+当前 Remote namespace 只暴露已经实现的能力：Workflow edit/replace、Output selection、Layout save、clear，以及 bounded `listRuns`/`getRun`。后续 Run/Cancel/Variant/Restore 在各自 owning node 实现之前不会提前注册。弱 SRC reflection 下，Host 会在 authorization/dispatch 前校验业务 DTO shape，不依赖 generated schema 一定存在。
+
+Run History 仍然只由 `canvas/change` 派生，不是第二套 durable database。每条 History entry 都带 durable `canvasId`；`listRuns()` 必须带该 `canvasId`，`getRun()` 必须带 `canvasId + runId`。Authorization 针对请求中的 generation/resource 执行，因此新建 Canvas 的权限不能读取同一 Session 中已 clear 的旧 generation。Rebuildable index 先复用 N03 strict Fold，再增量应用新 Session Event；Canvas Fold 与 History Index 对同一 batch 会先 staged，全部成功后一起发布。
+
+Remote failure 是显式边界。Typert Gateway 只保留声明过的 `TypertBusinessFailure`、lookup-policy failure 与 cancellation；普通异常统一折叠成固定 `internal / Remote request failed`。Canvas Remote wrapper 只把 allowlist 中的 `HarnessError` code 映射成固定 public message，因此 Host resource id、policy diagnostic、raw internal/provider error text 不会成为 Browser error message。
 
 `CanvasInteractionContext` 是 request-local state，不是 Canvas durable state。`CanvasInteractionService` 将 Browser selection 绑定到精确 ordinary prompt RPC id；`CanvasInteractionBridge` 使用相同 Host-minted Browser principal，校验 Canvas identity/revision/asset，并绑定到实际 admitted user message，然后通过正常、可记录的 Agent message path 注入模型上下文。Selection/focus 本身保持 ephemeral。
 
@@ -99,7 +103,7 @@ Canvas Domain/Authorization/Projection 本身不直接面向模型。N18 Agent T
 
 - 内建 Policy 仍然只是面向当前单用户部署的 actor-kind policy。Workspace ownership、tenant ACL 与 authenticated human identity 属于未来 Host policy，并继续位于 `ctx.canvasAuthorization` 后面。
 - 当前 Browser principal 由 Host 铸造，但还不是真正逐用户 authenticated identity。Live Authorization 会另外携带 exact target Session；identity-dependent detached read 因 generic detached projection read context 当前没有 Session target 而 fail closed。
-- Package-local write permit 只有在 Canvas invariant companion 挂载时才机械阻止 alternate current writer；它不是恶意 same-process code sandbox。
+- Package-local write permit 只有在 Canvas invariant companion 挂载时才机械阻止 alternate current writer；它不是恶意 same-process code sandbox。Shipped base profile 已挂该 companion；要求机械 fence 的自定义 composition 也必须挂载。
 - Sensitive-value signature 是 defense in depth，不是面向任意用户文本的通用 DLP engine。
 - Provider Execution、Retry/Cancel Reconciliation、物理 Asset Store 与 Authorized Binary Route 仍由后续 Workplan Node 实现。
 - 发布验收前，仍需在最终 rc.8-compatible workspace 重新生成并验证 repository-pinned lockfile/module-graph/Typert generated artifact。
