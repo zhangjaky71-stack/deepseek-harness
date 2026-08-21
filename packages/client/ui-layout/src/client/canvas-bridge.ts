@@ -46,12 +46,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function isReadyPayload(value: unknown): value is CanvasBridgeReadyMessage['payload'] {
+  return value === undefined
+    || (isRecord(value) && (value.app === undefined || typeof value.app === 'string'))
+}
+
 export function isCanvasBridgeMessage(value: unknown): value is CanvasBridgeMessage {
   if (!isRecord(value)) return false
   if (value.channel !== CANVAS_BRIDGE_CHANNEL || value.version !== CANVAS_BRIDGE_VERSION) return false
 
   if (value.type === 'canvas:ready') {
-    return value.payload === undefined || isRecord(value.payload)
+    return isReadyPayload(value.payload)
   }
 
   if (value.type === 'canvas:error') {
