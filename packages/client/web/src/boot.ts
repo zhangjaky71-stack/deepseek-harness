@@ -1,14 +1,13 @@
 /**
- * Web boot kernel. It owns the rc.7-compatible module bootstrap, Cordis Loader,
- * and a framework-free boot page. React root ownership belongs to the dynamic
- * ui-renderer plugin, which receives the mount point only after the graph settles.
+ * Web boot kernel. It owns only the module system, Cordis Loader, and a
+ * framework-free boot page. The dynamic UI renderer receives the mount
+ * point after every client entry activates.
+ * @module @deepseek-ai/dsh-client-web/src/boot
  */
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import * as ModulesClient from '@deepseek-ai/dsh-client-modules/client'
-import {
-  ClientModuleSystem, parseBootManifest,
-  type BootManifest, type ClientModuleSystemOptions, type DshWindow,
+import type {
+  BootManifest, ClientModuleCreateOptions, ClientModuleSystem, DshWindow,
 } from '@deepseek-ai/dsh-client-modules/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { BootPage } from './boot-page.ts'
@@ -16,9 +15,10 @@ import { getStaticModules } from './seed.ts'
 import { STATE_LABELS } from './loader-status.ts'
 import './base.css'
 
-export type BootSeams = Pick<ClientModuleSystemOptions, 'loadBundle'>
-const MODULES_ID = '@deepseek-ai/dsh-client-modules'
+/** Module transport hook replaced by jsdom tests. */
+export type BootSeams = Pick<ClientModuleCreateOptions, 'loadBundle'>
 
+/** Browser boot entry consumed by `apps/web`. */
 export class AppWebEntry {
   private readonly container: HTMLElement
   private readonly seams: BootSeams | undefined
@@ -27,22 +27,35 @@ export class AppWebEntry {
   private modules!: ClientModuleSystem
   private manifest!: BootManifest
 
+  /**
+   * Draw the boot page; {@link run} starts the loader.
+   * @param container - Application mount point.
+   * @param seams - Optional module transport replacement.
+   */
   constructor(container: HTMLElement, seams?: BootSeams) {
     this.container = container
     this.seams = seams
     this.page = new BootPage(container)
   }
 
+  /**
+   * Load and activate every client entry, then hand the mount point to the
+   * UI renderer. Plugin failures remain visible on the boot page.
+   * @returns Resolves after application mount or failure rendering.
+   */
   async run(): Promise<void> {
     try {
-      this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
-      this.modules = new ClientModuleSystem({
-        modules: this.manifest.modules,
+      const win = globalThis as DshWindow
+      const moduleLoader = win.__ModuleLoader__
+      if (moduleLoader === undefined) {
+        throw new Error('web boot: window.__ModuleLoader__ bootstrap facade is missing')
+      }
+      this.modules = moduleLoader.create({
+        boot: win.__DSH_BOOT__,
         staticModules: getStaticModules(),
         ...this.seams,
       })
-      this.modules.registerStatic(MODULES_ID, ModulesClient)
-      ;(globalThis as DshWindow).__DSH_MODULES__ = this.modules
+      this.manifest = this.modules.manifest
 
       const prefetching = this.prefetchImmediateTier()
       const ctx = new Context()
@@ -55,6 +68,7 @@ export class AppWebEntry {
     }
   }
 
+  /** Dispose the client plugin tree and whichever page owns the mount point. */
   async dispose(): Promise<void> {
     const ctx = this.ctx
     this.ctx = undefined
@@ -62,48 +76,52 @@ export class AppWebEntry {
     this.page.dispose()
   }
 
+  /** Mount through a dependency fiber so replacing uiRenderer remounts the application. */
   private async mountApp(ctx: Context): Promise<void> {
     if (ctx.get('uiRenderer') === undefined) {
       throw new Error('web boot: uiRenderer service missing after client graph activation')
     }
-    // Bind the mount to a dependency fiber so a future renderer replacement
-    // unmounts the old React root before the new service remounts it.
     const mounted = ctx.inject(['uiRenderer'], (scope) => {
       scope.effect(() => scope.uiRenderer.mount(this.container), 'web boot: application mount')
     })
     await mounted
   }
 
+  /** Prefetch stage-one bundles; their import path owns any eventual failure. */
   private async prefetchImmediateTier(): Promise<void> {
     await Promise.all(this.manifest.plugins
       .filter(row => row.immediately)
-      .map(row => this.modules.prefetch(row.id).catch(() => {
-        // The create/import path owns the eventual loud failure.
+      .map(row => this.modules.prefetch(row.id).catch((_prefetchError: unknown) => {
+        // Prefetch only starts transport early; the Loader import retries and reports this bundle failure.
       })))
   }
 
+  /** Mount the Loader, create all graph entries, await quiescence, and audit activation. */
   private async runPluginBoot(ctx: Context, prefetching: Promise<void>): Promise<void> {
     await ctx.plugin(Loader)
     const loader = ctx.loader
     loader.internal = this.modules as never
+
     ctx.on('internal/status', (fiber) => {
       const entry = fiber.entry
       if (entry === undefined || entry.fiber === undefined) return
       this.page.setState(entry.options.name, STATE_LABELS[entry.fiber.state])
     })
 
-    await prefetching
-    const rows = [MODULES_ID, ...this.manifest.plugins.map(row => row.id).filter(id => id !== MODULES_ID)]
+    const rows = this.manifest.plugins.map(row => row.id)
     this.page.setTotal(rows.length)
+    await prefetching
     await Promise.all(rows.map(async (name) => {
       this.page.setState(name, 'loading')
       const id = await loader.create({ name })
       if (loader.resolve(id).fiber === undefined) this.page.setState(name, 'failed')
     }))
+
     await loader.await()
     this.assertEntriesActive(ctx)
   }
 
+  /** Reject entries that failed import/apply or still wait on missing services. */
   private assertEntriesActive(ctx: Context): void {
     const failures: string[] = []
     for (const entry of ctx.loader.entries()) {
