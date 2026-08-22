@@ -5,6 +5,7 @@
     const SCALE_OPTIONS = ['auto', '60', '65', '70', '75', '80', '85', '90', '95', '100', '115', '125', '140'];
     const HARNESS_BRIDGE_CHANNEL = 'deepseek-harness:infinite-canvas';
     const HARNESS_BRIDGE_VERSION = 1;
+    let harnessHostOrigin = '';
 
     function currentTheme(){
         return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'light';
@@ -74,27 +75,77 @@
         }
     }
 
+    function isHarnessEnvelope(data, type){
+        return data && typeof data === 'object'
+            && data.channel === HARNESS_BRIDGE_CHANNEL
+            && data.version === HARNESS_BRIDGE_VERSION
+            && data.type === type;
+    }
+
     function isHarnessHostInit(event){
         const data = event.data;
         return isFramed()
             && event.source === window.parent
-            && data && typeof data === 'object'
-            && data.channel === HARNESS_BRIDGE_CHANNEL
-            && data.version === HARNESS_BRIDGE_VERSION
-            && data.type === 'host:init'
+            && event.origin !== location.origin
+            && isHarnessEnvelope(data, 'host:init')
             && data.payload?.host === 'deepseek-harness';
+    }
+
+    function isHarnessHostCommand(event){
+        return isFramed()
+            && event.source === window.parent
+            && event.origin !== location.origin
+            && isHarnessEnvelope(event.data, 'host:command')
+            && event.data.payload?.command;
     }
 
     function replyHarnessReady(event){
         const target = event.source;
         if(!target || typeof target.postMessage !== 'function') return;
         const targetOrigin = event.origin && event.origin !== 'null' ? event.origin : '*';
+        harnessHostOrigin = targetOrigin;
         target.postMessage({
             channel: HARNESS_BRIDGE_CHANNEL,
             version: HARNESS_BRIDGE_VERSION,
             type: 'canvas:ready',
             payload: { app: 'infinite-canvas' },
         }, targetOrigin);
+    }
+
+    function replyHarnessCommandResult(payload, fallbackOrigin=''){
+        if(!isFramed() || !window.parent?.postMessage) return;
+        const targetOrigin = harnessHostOrigin || fallbackOrigin || '*';
+        window.parent.postMessage({
+            channel: HARNESS_BRIDGE_CHANNEL,
+            version: HARNESS_BRIDGE_VERSION,
+            type: 'canvas:command-result',
+            payload,
+        }, targetOrigin);
+    }
+
+    function routeHarnessCommand(event){
+        harnessHostOrigin = event.origin && event.origin !== 'null' ? event.origin : harnessHostOrigin;
+        const commandId = String(event.data?.payload?.command?.commandId || '');
+        const frame = document.getElementById('frame-canvas');
+        if(!frame?.contentWindow){
+            replyHarnessCommandResult({commandId, ok:false, error:'Infinite Canvas frame is unavailable.'}, event.origin);
+            return;
+        }
+        let pathname = '';
+        try { pathname = frame.contentWindow.location.pathname || ''; } catch(e) {}
+        if(pathname !== '/static/canvas.html'){
+            replyHarnessCommandResult({commandId, ok:false, error:'Open a classic canvas before sending an Agent Canvas command.'}, event.origin);
+            return;
+        }
+        frame.contentWindow.postMessage(event.data, location.origin);
+    }
+
+    function relayHarnessCommandResult(event){
+        const frame = document.getElementById('frame-canvas');
+        if(!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== location.origin) return false;
+        if(!isHarnessEnvelope(event.data, 'canvas:command-result')) return false;
+        replyHarnessCommandResult(event.data.payload);
+        return true;
     }
 
     function normalizeScaleMode(mode){
@@ -284,6 +335,8 @@
     });
     window.addEventListener('message', event => {
         if(isHarnessHostInit(event)) replyHarnessReady(event);
+        if(isHarnessHostCommand(event)) routeHarnessCommand(event);
+        if(relayHarnessCommandResult(event)) return;
         if(event.data?.type === 'studio-theme') applyTheme(event.data.theme);
         if(event.data?.type === 'studio-ui-scale') {
             const incomingScale = normalizeExternalScale(event.data.scale);
