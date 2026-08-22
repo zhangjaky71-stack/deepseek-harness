@@ -10,26 +10,38 @@ export interface NodeInspectorProps {
   readonly node: MediaWorkflowNode | undefined
   readonly draft: CanvasNodeDraft | null
   readonly saveStatus: CanvasSaveStatus
+  readonly readOnlyReason?: 'definition-missing' | 'feature-disabled'
   readonly onNameChange: (value: string) => void
   readonly onConfigChange: (value: string) => void
+  readonly onBlur: () => void
   readonly t: TranslateNS<'canvas'>
 }
 
 /** Inspector edits one narrow Draft rather than cloning the workflow. */
-export function NodeInspector({ node, draft, saveStatus, onNameChange, onConfigChange, t }: NodeInspectorProps) {
-  if (node === undefined || draft === null || draft.nodeId !== node.id) {
+export function NodeInspector({ node, draft, saveStatus, readOnlyReason, onNameChange, onConfigChange, onBlur, t }: NodeInspectorProps) {
+  if (node === undefined) {
+    return <section className={css.inspector}><h4>{t('editor.inspector')}</h4><p>{t('editor.inspectorEmpty')}</p></section>
+  }
+  if (readOnlyReason !== undefined) {
+    return <section className={css.inspector} aria-label={t('editor.inspector')} data-read-only="true">
+      <div className={css.panelHeader}><h4>{t('editor.inspector')}</h4><code>{node.type}@{node.nodeVersion ?? 1}</code></div>
+      <p>{t(readOnlyReason === 'definition-missing' ? 'editor.nodeDefinitionMissing' : 'editor.nodeFeatureDisabled')}</p>
+      <small>{t('editor.nodeReadOnly')}</small>
+    </section>
+  }
+  if (draft === null || draft.nodeId !== node.id) {
     return <section className={css.inspector}><h4>{t('editor.inspector')}</h4><p>{t('editor.inspectorEmpty')}</p></section>
   }
   return (
     <section className={css.inspector} aria-label={t('editor.inspector')}>
-      <div className={css.panelHeader}><h4>{t('editor.inspector')}</h4><code>{node.type}</code></div>
+      <div className={css.panelHeader}><h4>{t('editor.inspector')}</h4><code>{node.type}@{node.nodeVersion ?? 1}</code></div>
       <label className={css.field}>
         <span>{t('editor.nodeName')}</span>
-        <input value={draft.nameText} disabled={saveStatus === 'saving'} onChange={event => { onNameChange(event.target.value) }} />
+        <input value={draft.nameText} disabled={saveStatus === 'saving'} onBlur={onBlur} onChange={event => { onNameChange(event.target.value) }} />
       </label>
       <label className={css.field}>
         <span>{t('editor.nodeConfig')}</span>
-        <textarea rows={12} value={draft.configText} disabled={saveStatus === 'saving'} onChange={event => { onConfigChange(event.target.value) }} />
+        <textarea rows={12} value={draft.configText} disabled={saveStatus === 'saving'} onBlur={onBlur} onChange={event => { onConfigChange(event.target.value) }} />
       </label>
       <small>{t('editor.autosaveHint')}</small>
     </section>
