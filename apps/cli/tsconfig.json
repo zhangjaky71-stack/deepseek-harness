@@ -51,6 +51,9 @@
       "path": "../../packages/core/tools"
     },
     {
+      "path": "../../packages/canvas/tool-canvas"
+    },
+    {
       "path": "../../packages/util/launch-environment"
     },
     {

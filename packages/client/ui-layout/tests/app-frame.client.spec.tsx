@@ -76,6 +76,7 @@ function mountFrame() {
     } as SessionListState
     return sel(sessionState)
   }) as never
+  const useCanvasCommands = ((sel: (commands: ReadonlyMap<string, never>) => unknown) => sel(new Map())) as never
   const workspaceState: WorkspaceListState = {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
     baselinesReady: baselinesReady.current, recentWorkspaceId: undefined,
@@ -86,6 +87,7 @@ function mountFrame() {
       actions={instance.actions}
       renderSlot={renderSlot}
       useSessions={useSessions}
+      useCanvasCommands={useCanvasCommands}
       useWorkspaces={((sel: (s: WorkspaceListState) => unknown) => sel(workspaceState)) as never}
       SessionProvider={SessionProviderStub}
     />

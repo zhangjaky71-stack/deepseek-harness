@@ -5,6 +5,9 @@
     const SCALE_OPTIONS = ['auto', '60', '65', '70', '75', '80', '85', '90', '95', '100', '115', '125', '140'];
     const HARNESS_BRIDGE_CHANNEL = 'deepseek-harness:infinite-canvas';
     const HARNESS_BRIDGE_VERSION = 1;
+    let harnessHostOrigin = '';
+    const harnessCanvasCommandResults = new Map();
+    const pendingHarnessCanvasCommands = [];
 
     function currentTheme(){
         return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'light';
@@ -74,27 +77,225 @@
         }
     }
 
+    function isHarnessEnvelope(data, type){
+        return data && typeof data === 'object'
+            && data.channel === HARNESS_BRIDGE_CHANNEL
+            && data.version === HARNESS_BRIDGE_VERSION
+            && data.type === type;
+    }
+
+    function validHarnessGenerateCommand(command){
+        if(!command || typeof command !== 'object') return false;
+        if(typeof command.commandId !== 'string' || !command.commandId) return false;
+        if(command.action !== 'generate') return false;
+        if(typeof command.prompt !== 'string' || !command.prompt.trim()) return false;
+        if(command.model !== undefined && typeof command.model !== 'string') return false;
+        const target = command.target;
+        return !!target && typeof target === 'object'
+            && (target.kind === 'active'
+                || (target.kind === 'node' && typeof target.nodeId === 'string' && !!target.nodeId));
+    }
+
     function isHarnessHostInit(event){
         const data = event.data;
         return isFramed()
             && event.source === window.parent
-            && data && typeof data === 'object'
-            && data.channel === HARNESS_BRIDGE_CHANNEL
-            && data.version === HARNESS_BRIDGE_VERSION
-            && data.type === 'host:init'
+            && event.origin !== location.origin
+            && isHarnessEnvelope(data, 'host:init')
             && data.payload?.host === 'deepseek-harness';
+    }
+
+    function isHarnessHostCommand(event){
+        return isFramed()
+            && event.source === window.parent
+            && event.origin !== location.origin
+            && isHarnessEnvelope(event.data, 'host:command')
+            && validHarnessGenerateCommand(event.data.payload?.command);
+    }
+
+    function isInnerHarnessCommand(event){
+        return isFramed()
+            && event.source === window.parent
+            && event.origin === location.origin
+            && location.pathname === '/static/canvas.html'
+            && isHarnessEnvelope(event.data, 'host:command')
+            && validHarnessGenerateCommand(event.data.payload?.command);
     }
 
     function replyHarnessReady(event){
         const target = event.source;
         if(!target || typeof target.postMessage !== 'function') return;
         const targetOrigin = event.origin && event.origin !== 'null' ? event.origin : '*';
+        harnessHostOrigin = targetOrigin;
         target.postMessage({
             channel: HARNESS_BRIDGE_CHANNEL,
             version: HARNESS_BRIDGE_VERSION,
             type: 'canvas:ready',
             payload: { app: 'infinite-canvas' },
         }, targetOrigin);
+    }
+
+    function harnessCommandResultMessage(payload){
+        return {
+            channel: HARNESS_BRIDGE_CHANNEL,
+            version: HARNESS_BRIDGE_VERSION,
+            type: 'canvas:command-result',
+            payload,
+        };
+    }
+
+    function replyHarnessCommandResult(payload, fallbackOrigin=''){
+        if(!isFramed() || !window.parent?.postMessage) return;
+        const targetOrigin = harnessHostOrigin || fallbackOrigin || '*';
+        window.parent.postMessage(harnessCommandResultMessage(payload), targetOrigin);
+    }
+
+    function replyInnerHarnessCommandResult(payload){
+        if(!isFramed() || !window.parent?.postMessage) return;
+        window.parent.postMessage(harnessCommandResultMessage(payload), location.origin);
+    }
+
+    function routeHarnessCommand(event){
+        harnessHostOrigin = event.origin && event.origin !== 'null' ? event.origin : harnessHostOrigin;
+        const commandId = String(event.data?.payload?.command?.commandId || '');
+        const frame = document.getElementById('frame-canvas');
+        if(!frame?.contentWindow){
+            replyHarnessCommandResult({commandId, ok:false, error:'Infinite Canvas frame is unavailable.'}, event.origin);
+            return;
+        }
+        let pathname = '';
+        try { pathname = frame.contentWindow.location.pathname || ''; } catch(e) {}
+        if(pathname !== '/static/canvas.html'){
+            replyHarnessCommandResult({commandId, ok:false, error:'Open a classic canvas before sending an Agent Canvas command.'}, event.origin);
+            return;
+        }
+        frame.contentWindow.postMessage(event.data, location.origin);
+    }
+
+    function relayHarnessCommandResult(event){
+        const frame = document.getElementById('frame-canvas');
+        if(!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== location.origin) return false;
+        if(!isHarnessEnvelope(event.data, 'canvas:command-result')) return false;
+        replyHarnessCommandResult(event.data.payload);
+        return true;
+    }
+
+    function harnessCanvasRuntimeReady(){
+        return location.pathname === '/static/canvas.html'
+            && typeof addPromptNode === 'function'
+            && typeof addGeneratorNode === 'function'
+            && typeof runCanvasGenerate === 'function'
+            && typeof syncGeneratorInputs === 'function'
+            && typeof scheduleSave === 'function'
+            && typeof render === 'function'
+            && typeof uid === 'function'
+            && typeof nodes !== 'undefined'
+            && typeof connections !== 'undefined';
+    }
+
+    function selectedHarnessGenerator(){
+        if(typeof selected === 'undefined') return null;
+        for(const id of selected){
+            const node = nodes.find(item => item.id === id);
+            if(node?.type === 'generator') return node;
+        }
+        return null;
+    }
+
+    function connectedPromptForHarnessGenerator(generator){
+        const incoming = connections.filter(connection => connection.to === generator.id);
+        for(const connection of incoming){
+            const node = nodes.find(item => item.id === connection.from);
+            if(node?.type === 'prompt') return node;
+        }
+        return null;
+    }
+
+    function ensureHarnessPrompt(generator, prompt){
+        let promptNode = connectedPromptForHarnessGenerator(generator);
+        if(!promptNode){
+            promptNode = addPromptNode({x:generator.x - 340, y:generator.y});
+            if(!promptNode) throw new Error('Canvas is not ready to create a prompt node.');
+            connections.push({id:uid('c'), from:promptNode.id, to:generator.id});
+        }
+        promptNode.text = prompt;
+        return promptNode;
+    }
+
+    function resolveHarnessGenerator(command){
+        if(command.target.kind === 'node'){
+            const node = nodes.find(item => item.id === command.target.nodeId);
+            if(!node) throw new Error(`Canvas node ${command.target.nodeId} was not found.`);
+            if(node.type !== 'generator') throw new Error('Phase 1 Agent generation targets an image generator node.');
+            return node;
+        }
+        const active = selectedHarnessGenerator();
+        if(active) return active;
+        const point = typeof defaultPoint === 'function' ? defaultPoint(120, 0) : undefined;
+        const created = addGeneratorNode(point);
+        if(!created) throw new Error('Canvas is not ready to create an image generator node.');
+        return created;
+    }
+
+    async function executeHarnessCanvasCommand(data){
+        const command = data?.payload?.command;
+        if(!validHarnessGenerateCommand(command)) return;
+        const cached = harnessCanvasCommandResults.get(command.commandId);
+        if(cached){
+            replyInnerHarnessCommandResult(cached);
+            return;
+        }
+        let result;
+        try {
+            if(!harnessCanvasRuntimeReady()) throw new Error('Classic Canvas workflow runtime is not ready.');
+            const generator = resolveHarnessGenerator(command);
+            if(generator.running) throw new Error('The target Canvas generator is already running.');
+            ensureHarnessPrompt(generator, command.prompt.trim());
+            if(command.model !== undefined && command.model.trim()) generator.model = command.model.trim();
+            if(typeof selected !== 'undefined'){
+                selected.clear();
+                selected.add(generator.id);
+            }
+            syncGeneratorInputs();
+            render();
+            scheduleSave();
+            await runCanvasGenerate(generator.id);
+            if(generator.runStatus === 'failed') {
+                throw new Error(generator.runError || 'Canvas generation failed.');
+            }
+            result = {commandId:command.commandId, ok:true, nodeId:generator.id};
+        } catch(error) {
+            result = {
+                commandId:command.commandId,
+                ok:false,
+                error:error instanceof Error ? error.message : String(error),
+            };
+        }
+        harnessCanvasCommandResults.set(command.commandId, result);
+        replyInnerHarnessCommandResult(result);
+    }
+
+    function acceptInnerHarnessCommand(event){
+        const data = event.data;
+        if(document.readyState === 'loading' || !harnessCanvasRuntimeReady()){
+            pendingHarnessCanvasCommands.push(data);
+            return;
+        }
+        void executeHarnessCanvasCommand(data);
+    }
+
+    function flushPendingHarnessCanvasCommands(){
+        if(!harnessCanvasRuntimeReady()){
+            while(pendingHarnessCanvasCommands.length){
+                const data = pendingHarnessCanvasCommands.shift();
+                const commandId = String(data?.payload?.command?.commandId || '');
+                replyInnerHarnessCommandResult({commandId, ok:false, error:'Classic Canvas workflow runtime did not become ready.'});
+            }
+            return;
+        }
+        while(pendingHarnessCanvasCommands.length){
+            void executeHarnessCanvasCommand(pendingHarnessCanvasCommands.shift());
+        }
     }
 
     function normalizeScaleMode(mode){
@@ -281,9 +482,13 @@
     document.addEventListener('DOMContentLoaded', () => {
         applyTheme(currentTheme());
         applyScale(currentScaleMode());
+        flushPendingHarnessCanvasCommands();
     });
     window.addEventListener('message', event => {
         if(isHarnessHostInit(event)) replyHarnessReady(event);
+        if(isHarnessHostCommand(event)) routeHarnessCommand(event);
+        if(isInnerHarnessCommand(event)) acceptInnerHarnessCommand(event);
+        if(relayHarnessCommandResult(event)) return;
         if(event.data?.type === 'studio-theme') applyTheme(event.data.theme);
         if(event.data?.type === 'studio-ui-scale') {
             const incomingScale = normalizeExternalScale(event.data.scale);
