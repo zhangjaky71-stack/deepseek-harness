@@ -1,99 +1,89 @@
-# N18 — Agent Canvas Tools、Command Bus、Intent Semantics 与 Canvas Read/Inspect（rc.8 Revision）
+# N18 — Agent Tools / Intent / Command Bus（0.1.1-rc.2 Revision）
 
-## 1. 节点目标
+Status: `PLANNED`
 
-让 Harness Agent 通过稳定、低上下文开销的工具控制同一个 Canvas，并让 Agent Tool、Browser UI Action、Slash Command 收敛到同一 Domain command semantics，而不是形成三套业务逻辑。
+## 1. 目标
 
-## 2. 前置依赖
+让 Agent、普通 Conversation自然语言意图、Slash/Command和 Browser Editor最终使用同一 Canvas command/run semantics，并完整支持参考图片，不建立第二聊天/上传/Provider通道。
+
+## 2. 依赖
 
 `N08, N11.5, N16, N17`
 
-## 3. 本节点范围
+## 3. 统一 command semantics
 
-Agent-facing tools：
+建议高层意图覆盖：
 
-```text
-canvas_read
-canvas_inspect
-canvas_generate
-canvas_write_workflow
-canvas_edit_workflow
-canvas_run
-canvas_cancel
-```
+- read current Canvas/workflow/run/output；
+- generate image/video；
+- edit image/region；
+- create/replace/update workflow；
+- run full/partial workflow；
+- select/restore variant；
+- cancel/retry run。
 
-Domain command semantics：
+不同入口可以有不同 UX，但最终 Host command/request DTO必须收敛到 CanvasService/N15/N16，而不是各自实现业务规则。
 
-```text
-canvas.create / canvas.open / canvas.set-mode(presentation only)
-workflow.create / workflow.update / workflow.validate / workflow.run / workflow.cancel / workflow.retry
-node.create / node.update / node.delete / node.run
-asset.attach / asset.unlink / asset.inspect / output.select
-```
+## 4. Official command image envelope
 
-具体 tool 名可以少于 Domain command 数量；Tool 是 Agent 入口，不是 Domain API 本身。
-
-## 4. 明确不在本节点处理
-
-- Tool 不直接 Provider/Attachment/Jobs/Session append。
-- Browser 不监听 tool text 解析 Canvas state。
-- 不把完整大型 Workflow 默认塞入模型上下文。
-- Agent Teams experimental API 不成为 Canvas V1 必需依赖。
-
-## 5. 目标架构
+0.1.1-rc.2 Slash Command plane已经能显式声明 image acceptance并携带完整 submission envelope。Canvas Slash/command integration必须复用：
 
 ```text
-Agent Tool ──────┐
-UI Action ───────┼──► Canvas Domain Command / CanvasService
-Slash Command ───┘               │
-                                  ├─ durable Canvas Event/Projection
-                                  └─ Run Service / N12-N16
+Composer text + attached images
+→ official command claim/envelope
+→ official Attachment admission
+→ stable image refs
+→ Canvas intent/command
 ```
 
-Browser 最终通过 Projection/Event 看到结果，不因为“Agent 调了 tool”而走旁路。
-
-## 6. Intent semantics
+不能再设计：
 
 ```text
-“修改/调整/改成”       → edit current workflow
-“重新生成/再生成一次” → same workflow, new run
-“再来一版/另一个方案” → create Variant
-“从头做/新建”         → new workflow/root variant
+CanvasSlashCommand(imagesBase64: ...)
 ```
 
-Interaction Context 的 selection/focused asset 作为当前 turn 指代辅助；stale revision 先 read。
+作为平行 upload path。
 
-## 7. 实施步骤
+## 5. Agent Tool
 
-1. `canvas_read` 返回摘要而不是全部 DAG。
-2. `canvas_inspect` 获取定点 node/asset/full detail。
-3. generate 使用 Host registry/template 生成合法 workflow。
-4. write/edit 使用 workflowRevision CAS。
-5. tool execution 使用统一 actor/audit identity。
-6. run/cancel 走 N15/N16，不直调 Provider。
-7. tool result 保持短：revision/runId/asset ids/status。
-8. Command handler 与 Browser Remote 复用 Domain operation 层。
-9. Canvas Event Protocol 作为 Agent/Browser 状态收敛契约。
+Agent Tool输入是 semantic DTO：目标 Canvas/workflow、operation、generation requirements、stable asset refs/selection anchors。Tool不直接带 Provider credential，不直接调用 generation SDK。
 
-## 8. rc.8 Compatibility
+Tool成功语义必须明确区分：
 
-- 继续使用 Harness 当前 Agent preset/tool composition；不 patch core model transport。
-- DeepSeek reasoning transport 修复由官方 runtime 负责，Canvas Tool 不复制 reasoning state。
-- Client dynamic plugin 只负责 UI/context，不持有 Agent tool authority。
+- command accepted/mutation committed；
+- run admitted/created；
+- asynchronous media generation terminal completed。
 
-## 9. 测试要求
+不能把“queued”冒充“图片已生成”。
 
-- [ ] Agent generate → Canvas output。
-- [ ] Browser edit 后 Agent read 可见。
-- [ ] selected asset + “这张”正确。
-- [ ] stale edit 重新 read。
-- [ ] Tool 不直接 Provider。
-- [ ] UI 和 Agent 对同一 workflow update 得到相同 revision semantics。
-- [ ] tool result 不含 binary/credential/超大 workflow。
+## 6. Natural-language interaction context
 
-## 10. 验收标准
+N08 exact-turn context给 Agent提供 selected node/asset/region。Agent instructions优先解释 concrete selection；没有 selection就不得虚构“这个”指向最近某对象。
 
-- [ ] Agent 与 Browser 共享同一 Domain。
-- [ ] Tool/UI/Slash Command 没有互相分叉的核心业务语义。
-- [ ] 自然语言连续创作稳定。
-- [ ] Canvas 状态由 Session Projection/Event 收敛。
+Region意图映射为 Canvas image-edit workflow/command，不调用已删除的 generic `read_image_region`。
+
+## 7. Browser/Agent parity
+
+Browser点击“运行”和 Agent说“运行这个工作流”都必须经过同一 N15。Browser拖节点和 Agent“把模型换成X”都通过同一 semantic mutation/CAS。
+
+## 8. Image reference flow
+
+- Composer images：official envelope/admission → stable attachment-backed refs；
+- Canvas selected image：N08 stable Canvas asset ref；
+- Provider input：N15 availability/authorization → N14/N20 adapter；
+-不在Tool text里塞base64/provider URL。
+
+## 9. Tests
+
+- Agent generate image creates same run semantics as Browser；
+- Slash command with reference images consumes whole envelope or visibly refuses，不丢图片；
+- non-image accepting command不能吞掉图片；
+- selected asset/region natural-language intent正确绑定；
+- all run paths hit N15；
+- permission/feature/quota/approval errors一致；
+- command accepted vs run completed状态区分；
+- no second upload/Provider path。
+
+## 10. 验收
+
+至少完成 Browser + Agent Tool + Slash/command 三条REAL路径对同一 Session Canvas行为的等价性测试后 ACCEPTED。
