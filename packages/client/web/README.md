@@ -2,19 +2,19 @@
 
 English | [中文](README.zh.md)
 
-Web shell kernel: `new AppWebEntry(el, seams?).run()` mounts the whole client through the two-stage boot (web2). Stage one (module face): build the client module system (`@deepseek-ai/dsh-client-modules`) over the host-pushed entry graph (`window.__DSH_BOOT__`) and prefetch the `immediately` tier in parallel — bundle execution registers factories only. Stage two (plugin face): mount the vendored cordis Loader with the module system injected through its `internal` contract, create one loader entry per graph row plus the shell-own app-shell assembly entry (tree.import materializes each module), and gate AppRoot on the settle (loader quiesced + every entry fiber ACTIVE → full UI in one switch). Composition is entirely the host graph's: the roster and the immediately tier live in the composing app; the shell makes zero composition decisions.
+Web boot kernel: `new AppWebEntry(el, seams?).run()` mounts the client through two stages. The module stage consumes the Host-installed `window.__ModuleLoader__` facade and calls `create()` with `window.__DSH_BOOT__`, the shell's static module seed, and any test transport override. The facade adopts parser-preloaded registrations, constructs the client module system, exposes its parsed manifest, and switches from queue mode to live registration. The kernel then prefetches the manifest's `immediately` tier.
 
-Shell self-sufficiency (web2 hard rule): the kernel value-imports no plugin package — the boot status store and signals are hand-rolled here (`loader-status.ts`), so the loading page works while (and especially when) plugins fail. The app-shell assembly (`@deepseek-ai/dsh-client-app-shell`, a shell-owned pseudo entry with no npm package behind it) is the only module registered through `registerStatic`; it inject-waits on slots/sessions/layout like any plugin.
+The plugin stage mounts the vendored Cordis Loader, injects that module system through the Loader's `internal` interface, creates every graph entry uniformly, waits for quiescence, and audits that every entry reached ACTIVE. Only after that audit does the kernel hand the existing mount point to the dynamic UI renderer through `ctx.uiRenderer.mount(container)`. React root creation, hydration, slot rendering, application assembly, and browser-title projection therefore belong to [`@deepseek-ai/dsh-client-ui-renderer`](../ui-renderer/README.md), not to the Web kernel.
 
-`PLATFORM_MODULES` (src/platform.ts) is the single source of truth for shared modules: seed-table keys, tsdown client externals, and the Vite alias set are its projections.
+The boot page is framework-free plain DOM with package-local CSS. It remains usable while client bundles are loading and when plugin activation fails. The UI renderer hydrates the marked boot DOM before switching to the assembled application, preserving the handoff without a second shell-owned React root. A missing `uiRenderer` after the graph settles is treated as a loud boot failure rather than an unbounded dependency wait.
 
-The optional override parameter `seams` forwards the module system's `loadBundle` transport override (`BootSeams`) for environments where external `<script>` execution cannot reach the page context; ordinary browser callers omit it.
+`PLATFORM_MODULES` (`src/platform.ts`) remains the private composition's source of truth for shell-seeded shared module identities and the current client-bundle external baseline. The rc.8 bootstrap protocol additionally parser-preloads the modules and runtime bundles before the Vite shell. This branch deliberately keeps the existing private static-seed compatibility surface while the wider rc.8 build-system synchronization remains pending; it does not claim the repository has already adopted every upstream static/dynamic external split.
 
-The shell owns browser-title projection. With a selected session carrying a durable title, it renders `<session title> — <existing HTML title>` and reacts to later title revisions; no selection or a selected untitled session preserves the existing title, and shell unmount restores it. The existing HTML title remains the configurable product suffix.
+The optional `seams` parameter forwards the module system's `loadBundle` transport override (`BootSeams`) for environments where external `<script>` execution cannot reach the page context; ordinary browser callers omit it.
 
 ## Model Experience
 
-None, as the entry shell boots the browser plugin tree; nothing here reaches a model request.
+None, as the boot kernel only starts the browser plugin tree; nothing here reaches a model request.
 
 #### KV Cache effect
 
@@ -22,5 +22,5 @@ None; this package neither assembles nor sends a provider request.
 
 ## Known Limitations and Deferred Work
 
-- **One-shot rendering by design** — the UI waits for the boot settle; a single entry failure keeps the loading page with a loud per-entry report, no partial availability (progressive rendering returns with its own project).
-- **Narrow-window shell behavior lacks an assembled walkthrough** — ui-layout implements the concession chain, but this package has no shell-level narrow-viewport acceptance case.
+- **The application waits for the full roster** — one failed entry keeps the framework-free boot page visible with a loud report; partial UI availability is not supported.
+- **The private static-module seed is still broader than the official rc.8 final tree** — renderer/root ownership and the HTML bootstrap protocol are aligned, while the remaining build/external partition must be validated as part of the repository-wide rc.8 synchronization rather than silently rewritten here.
