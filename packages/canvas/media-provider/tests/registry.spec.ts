@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
 import { MediaModelId, MediaProviderId } from '../src/brand.ts'
 import { MediaModelResolutionError } from '../src/resolver.ts'
 import { disposeContexts, model, provider, ref, registryHarness } from './model-fixture.ts'
@@ -30,7 +31,7 @@ describe('MediaModelRegistry', () => {
     const p = provider('plugin-provider')
     const fiber = ctx.plugin({
       inject: ['mediaModels'],
-      apply(pluginCtx) {
+      apply(pluginCtx: Context) {
         pluginCtx.mediaModels.register(p, [model(p.id, 'plugin-model')])
       },
     })
