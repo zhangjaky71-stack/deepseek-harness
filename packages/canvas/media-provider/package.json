@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-media-provider",
   "description": "Media Provider/model capability registry, requirement resolver, and runtime adapter seam for Canvas workflows",
-  "version": "0.1.0-rc.7",
+  "version": "0.1.1-rc.2",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

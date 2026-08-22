@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-media-workflow",
   "description": "Media workflow node registry, DAG validation, partial scheduling, execution dispatch, and deterministic cache fingerprints",
-  "version": "0.1.0-rc.7",
+  "version": "0.1.1-rc.2",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",
