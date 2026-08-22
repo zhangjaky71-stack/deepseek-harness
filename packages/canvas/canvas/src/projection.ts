@@ -15,6 +15,13 @@ import {
 import { decodeCanvasSnapshot } from './migration.ts'
 import type { CanvasSnapshot, CurrentCanvasLayoutSnapshot } from './types.ts'
 
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    canvas: CanvasSnapshot | null
+    canvasLayout: CanvasLayoutFoldState
+  }
+}
+
 const canvasProjectionSchema = z.custom<CanvasSnapshot | null>((value) => {
   if (value === null) return true
   try {
@@ -34,6 +41,20 @@ const layoutProjectionSchema = z.custom<CurrentCanvasLayoutSnapshot | null>((val
     return false
   }
 }, { message: 'invalid current Canvas layout projection value' })
+
+const layoutStateSchema = z.custom<CanvasLayoutFoldState>((value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const state = value as CanvasLayoutFoldState
+  if (state.canvasId !== null && (typeof state.canvasId !== 'string' || state.canvasId.length === 0)) return false
+  if (state.workflowId !== null && (typeof state.workflowId !== 'string' || state.workflowId.length === 0)) return false
+  if (state.layout === null) return true
+  try {
+    assertCurrentCanvasLayoutSnapshot(state.layout)
+    return state.canvasId === state.layout.canvasId && state.workflowId === state.layout.workflowId
+  } catch {
+    return false
+  }
+}, { message: 'invalid Canvas layout projection state' })
 
 /** Host-side browser visibility decision over the already-computed value. */
 export type CanvasProjectionReadGate = (sessionId: string | undefined, value: unknown) => boolean
@@ -63,21 +84,25 @@ export function applyCanvasLayoutProjection(
 export function registerCanvasProjections(ctx: Context, canRead?: CanvasProjectionReadGate): void {
   ctx.sessionProjections.register<'canvas', CanvasSnapshot | null>({
     key: 'canvas',
-    owner: '@deepseek-ai/dsh-canvas:canvas',
-    schema: canvasProjectionSchema,
+    stateSchema: canvasProjectionSchema,
     init: () => null,
     apply: (state: CanvasSnapshot | null, event: SessionEvent) => applyCanvasProjection(state, event),
-    view: (state: CanvasSnapshot | null) => state,
+    wire: {
+      viewSchema: canvasProjectionSchema,
+      view: (state: CanvasSnapshot | null) => state,
+    },
     stateVersion: 1,
   })
   ctx.sessionProjections.register<'canvasLayout', CanvasLayoutFoldState>({
     key: 'canvasLayout',
-    owner: '@deepseek-ai/dsh-canvas:canvasLayout',
-    schema: layoutProjectionSchema,
+    stateSchema: layoutStateSchema,
     init: emptyCanvasLayoutFoldState,
     apply: (state: CanvasLayoutFoldState, event: SessionEvent) => applyCanvasLayoutProjection(state, event),
-    view: (state: CanvasLayoutFoldState) => state.layout,
-    // Internal state now carries Canvas generation identity and normalized layout revision.
+    wire: {
+      viewSchema: layoutProjectionSchema,
+      view: (state: CanvasLayoutFoldState) => state.layout,
+    },
+    // Internal state carries Canvas generation identity and normalized layout revision.
     stateVersion: 2,
   })
   if (canRead !== undefined) {
