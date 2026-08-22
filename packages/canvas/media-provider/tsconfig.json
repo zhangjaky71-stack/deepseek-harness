@@ -8,6 +8,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../util/brand" },
+    { "path": "../canvas" },
     { "path": "../media-workflow" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
