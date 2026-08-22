@@ -1,92 +1,62 @@
-# @deepseek-ai/dsh-media-workflow
+# `@deepseek-ai/dsh-media-workflow`
 
 English | [中文](README.zh.md)
 
-`dsh-media-workflow` owns the versioned semantic node-definition registry and the Browser-independent media DAG engine shared by Validator, Editor adapters, later Provider executors, and Agent summaries. It does not own Canvas durability, Session events, Browser rendering, Provider SDKs, model selection, admission policy, Job lifecycle, retry, or durable Run state.
+Browser-independent media workflow definitions and execution engine for Canvas V2.2. Current integration baseline: Harness `dsh@0.1.1-rc.2`.
 
-## Registry contract
+## Responsibilities
 
-The default export is `MediaNodeRegistry`, mounted as `ctx.mediaNodes`. Definitions are keyed by `(type, version)` and registration is effect-scoped to the calling plugin fiber. Registering the same key twice fails; unloading/HMR of the registrant removes exactly the definition that fiber installed. Registry consumers therefore see one live source of node metadata rather than copying switch statements into each subsystem.
+This package owns two related but separate process-level capabilities:
 
-The registry owns a process-local monotonic mutation `revision`. `snapshot()` returns `{ revision, definitions }` from one synchronous read, with definitions in stable type/version order. Every successful registration and exact unregistration advances the revision once; validation and duplicate-registration failures do not. The revision belongs to the current Registry instance and is rebuildable, not durable Session state or a cross-restart generation number.
+- **Media Node Registry** — exact `(type, version)` definitions, ports, config schemas, lifecycle metadata, feature requirements and executor metadata.
+- **Workflow Engine** — deterministic validation, partial-run planning, immutable run snapshots, execution fingerprints, optional cache seams, executor dispatch and cancellation checks.
 
-A `MediaNodeDefinition` declares semantic `type`/`version`, stable display metadata, typed named ports, a Zod config schema/default, execution metadata (`capability`, optional deployment `feature`, `deterministic`, `supportsPartialRun`), intrinsic lifecycle, and stable UI identifiers. The registry deliberately stores no React component, Provider client, secret, concrete model id, mutable deployment state, or binary media. Schema objects remain plugin-owned metadata by reference; the remaining definition data is frozen when registered.
+It does not own Session persistence, Browser graph rendering, Provider model selection, Provider SDKs, credentials, image/video binary storage, quota, cost or approval.
 
-`parseConfig()` resolves the exact node version and applies that definition's schema/defaults. `assertCreatable()` rejects definitions that must stay readable but cannot be newly authored. `assertExecutable()` enforces intrinsic lifecycle only. Deployment feature checks, permission, model/provider availability, quota, and concurrency are later admission inputs rather than N10/N12 registry state.
+## Open-world registry
 
-The Host `canvasFeatures.listNodes()` seam projects one client-safe `{ revision, entries }` catalog from the Registry snapshot. Runtime schemas/functions remain Host-only. A Browser consumer preserves the returned Host revision with the entries it loaded; it must not fabricate a local revision or maintain a second node-registry authority.
+Node types are open-world extension identifiers. Core registration does not enforce a built-in node-type whitelist. Historical custom nodes remain valid durable workflow data when their plugin is absent; current authoring/execution then reports an unavailable exact definition.
 
-## DAG validation and scheduling
+Registry snapshots are immutable and carry a process-local monotonic revision. Registration/unregistration advances the revision exactly once; restart may begin again at zero. The revision is discovery/HMR state, not a Session durable generation.
 
-`@deepseek-ai/dsh-media-workflow/engine` exposes the N12 execution library. `validateMediaWorkflow()` and `assertValidMediaWorkflow()` consume the active exact-version Registry and check duplicate/dangling structure, output identities, config schemas, intrinsic executability, source/target ports, port types, input multiplicity, required inputs, cycles, and output reachability. Topological order is deterministic: ties are ordered by stable node id rather than caller array order.
+Browser consumers receive only a client-safe catalog projection. Runtime validators/functions/credentials never cross that boundary.
 
-`planMediaWorkflowExecution()` supports four explicit scopes. `all` schedules the complete DAG. `selected` schedules the selected targets plus their complete upstream closure. `from-node` schedules the seed plus descendants; any incoming edge from an unscheduled producer becomes a required boundary. `downstream` excludes the seed nodes and treats their outgoing values as boundaries. Partial scheduling never silently runs an omitted upstream node, and any scheduled definition with `supportsPartialRun=false` rejects the plan.
+## Exact version rule
 
-Boundary values are keyed by stable edge id. Missing boundary data fails before that node executor runs. Values are checked against the target port type. Executor input arrays within one target port are ordered by edge id, making multi-input behavior independent from workflow array ordering.
+Every definition/executor lookup uses `(node.type, node.nodeVersion ?? 1)`. A historical `foo@1` node must never borrow ports/config/execution metadata from the currently installed `foo@2` definition.
 
-## Immutable execution and executor registry
+## Workflow engine
 
-`MediaWorkflowEngine.prepare()` validates the workflow, normalizes every config through its exact Definition, fills the exact node version, detaches caller-owned arrays/objects, and recursively freezes the resulting workflow snapshot before execution begins. Later edits to the live Canvas workflow cannot mutate the running snapshot.
+The engine validates graph structure and exact definitions, then produces a deterministic plan for full or partial execution. Supported scheduling semantics include full runs and explicit selected/from-node/downstream scopes with boundary inputs.
 
-`MediaNodeExecutorRegistry` is an open-world exact `(type, version)` table with duplicate rejection and an idempotent registration disposer. It is deliberately a pure registry rather than a new shipped Cordis service: N12 has no Provider implementation that needs a process-wide executor service yet. N14 can own the process composition it needs while custom executors already participate without adding a switch to the engine.
+A run snapshot is immutable. Later Browser edits or registry HMR do not mutate an already admitted run.
 
-The engine executes scheduled nodes sequentially in deterministic topological order. An executor receives the immutable workflow snapshot, exact Definition, inputs, node fingerprint, optional already-resolved execution identity, and optional `AbortSignal`. N12 never selects a model or Provider. N13 may later turn a resolved provider/model choice into the stable execution-identity key supplied to N12; Provider routing and credentials belong to N14.
+## Asset boundary under `0.1.1-rc.2`
 
-Executor results are validated against exact output ports, required outputs, runtime value kinds, and non-empty content/provenance fingerprints. Results are detached and recursively frozen before they reach downstream nodes or cache storage. Cache hits are validated through the same path before reuse.
+Workflow semantic values may carry stable Canvas image/video AssetRefs. The engine does not own Harness Attachment image normalization or `RequestImageAttachment` derivation.
 
-## Fingerprints and deterministic cache
+Request-image bytes, transform-cache paths, temporary Provider URLs and remote Files upload identities must not enter workflow snapshots or semantic fingerprints. Fingerprints are based on stable semantic inputs/content identities and the exact media execution identity resolved by N13.
 
-Each `MediaNodeExecutionFingerprint` is SHA-256 over exact node type/version, normalized config, the optional resolved execution-identity key, and graph-identified upstream/content fingerprints. Incoming contributions include edge id, source node/port, target port, and the producer-provided content fingerprint, normalized by edge id. This keeps fingerprints stable under array reordering while preserving graph assignment and asset/content provenance.
+## Model/provider boundary
 
-Automatic cache reuse is permitted only when the exact Definition declares `deterministic=true`. Generative/non-deterministic nodes never auto-read or auto-write the cache even when their inputs repeat. `MemoryMediaNodeExecutionCache` is an explicit process-local implementation for tests or deployments that choose ephemeral reuse; it detaches values on both writes and reads.
+This package describes node execution requirements; it does not select the generation model/provider. N13 resolves media-generation requirements, N14 invokes Provider adapters, N15 performs governance and N16 owns durable run lifecycle.
 
-## Runtime event and cancellation seams
+Harness Chat LLM model routing remains a different domain.
 
-A run may provide a `WorkflowEventSink`. The engine publishes in-band `node-started`, `node-cache-hit`, and `node-completed` runtime facts. These are provider-neutral runtime events, not Session events. N16 may adapt them into its durable Run/Job lifecycle; N12 itself never appends Canvas/Session state.
+## Browser/editor relationship
 
-An optional `AbortSignal` is checked before planning/execution steps and again after cache/executor awaits. This prevents an executor that ignores its signal from being reported as a successful N12 node after cancellation was observed. Durable cancel races, terminal-state winner rules, Provider cancellation, retry, and reconciliation remain N16 responsibilities.
+`ui-canvas` obtains exact version catalog metadata through the Host client-safe node catalog and uses it for Node Library, ports and Inspector behavior. Missing definitions make historical nodes read-only/unavailable; the Browser never creates a second registry.
 
-## Port vocabulary and built-ins
+## Validation and cache rules
 
-The semantic port vocabulary is `text`, `image`, `video`, `image-list`, `video-list`, and `mask`. Port metadata records name, type, requiredness, optional multiplicity, and optional human-readable description.
+Fresh executor outputs and cache hits must pass the same semantic output validation. Layout coordinates, Browser selection and request transport state do not affect semantic fingerprints.
 
-`@deepseek-ai/dsh-media-workflow/builtins` registers seven V1 semantic node kinds on its own Cordis fiber:
+## Upgrade/revalidation
 
-| Type | Key ports | Execution metadata |
-|---|---|---|
-| `asset.input@1` | image/video outputs | deterministic source |
-| `prompt@1` | text output | deterministic source |
-| `image.generate@1` | prompt + optional image-list references → image-list | `text-to-image` |
-| `image.edit@1` | image + prompt + optional mask → image | `image-edit` |
-| `video.generate@1` | prompt → video | `text-to-video`, requires N09 `video` feature at admission |
-| `video.image-to-video@1` | image + optional prompt → video | `image-to-video`, requires N09 `video` feature at admission |
-| `output@1` | image-list/video-list inputs | deterministic sink |
+The N10 registry and N12 engine implementations are largely retained during the 0.1.1-rc.2 migration. Revalidation focuses on:
 
-The definitions remain registered and readable even when a deployment feature is disabled, preserving historical workflow rendering/migration. Later authoring/admission layers decide whether a currently registered node may be created or run.
+- the latest client package/domain graph for the catalog projection;
+- stable Attachment-backed asset values without request-image leakage;
+- built package/runtime-closure gates after upstream synchronization.
 
-## Composition
-
-The shipped `dsh-base` mounts `@deepseek-ai/dsh-media-workflow` for `ctx.mediaNodes` and `@deepseek-ai/dsh-media-workflow/builtins` for V1 Definition registration. N12 adds no new shipped process service. The `./engine` export is a pure execution library constructed by later orchestration with the Registry, an Executor Registry, and an optional cache.
-
-Definition metadata and engine cache are not Session state. HMR/unload may replace active Definitions/Executors without appending Canvas events. Historical Workflow values stay durable in Canvas/Session; N16 later owns durable Run lifecycle around an immutable N12 workflow snapshot.
-
-## Model Experience
-
-None directly. The package registers no model-facing tool and contributes no prompt text. N18 may use the same Definition catalog to summarize nodes and advertise currently available capabilities, but N12 does not add model-visible input.
-
-#### Token effect
-
-Zero direct tokens.
-
-#### KV Cache effect
-
-None.
-
-## Known Limitations and Deferred Work
-
-- **No model resolver** — N13 maps semantic requirements or explicit model selection to a concrete compatible model and supplies the resolved identity used by later execution/admission.
-- **No Provider adapter** — N14 turns N12 executor calls into Provider, Python/local, or remote-workflow execution and owns provider error normalization/cancellation handles.
-- **No admission/governance** — N15 owns authorization, feature checks, asset availability, provider availability, concurrency, quota/cost, approval, and idempotency admission before a costly task starts.
-- **No durable Run/Job lifecycle** — N16 owns Canvas Run state, Jobs, retry/backoff, cancel races, idempotency, restart reconciliation, and terminal milestones.
-- **No persistent media cache/store** — N12 only defines deterministic fingerprint/cache seams; N17/N21 own asset storage and later persistence policy.
-- **Registry revision is not durable** — it identifies mutation order only within the current Registry instance; a Host restart rebuilds the registry.
+See workplans N10 and N12 plus `UPSTREAM-0.1.1-RC2-BASELINE.md`.
