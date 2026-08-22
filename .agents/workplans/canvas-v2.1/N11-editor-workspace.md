@@ -1,146 +1,89 @@
-# N11 — Workflow Editor、Draft、Auto-save、Undo/Redo、Copy/Paste 与 Layout（rc.8 Revision）
+# N11 — Workflow Editor Workspace（0.1.1-rc.2 Revision）
 
-Status: `REVIEW`
+Status: `REVIEW / REVALIDATE`
 
-Remediation branch: `fix/canvas-n11-v2.2-editor-workspace`
+## 1. 目标
 
-Historical branch `agent/canvas-n11-editor-workspace` is not a continuation base: relative to the N10 remediation head it is 206 commits behind and 0 ahead.
+在 `ui-canvas` 内提供人工可编辑 Workflow DAG：Node Library、画布、连接、Inspector、Draft/CAS、Undo/Redo、Copy/Paste/Delete、layout persistence 和 validation diagnostics，同时保持 Host Session Projection/CanvasService 为 semantic authority。
 
-## 1. 节点目标
-
-完成真正可用的人工 Workflow 编辑器，并保证所有 semantic edits 最终以 atomic operations 进入 CanvasService；Editor 同时必须消费 Host authoritative Node Catalog，支持 open-world plugin nodes。
-
-N11 的 Browser authority 边界固定为：Session Projection 是 Workflow 真源；Browser Store 只保存 narrow Draft、命令历史、Clipboard 与瞬态 Layout presentation state，不保留长期 Workflow 副本。
-
-## 2. 前置依赖
+## 2. 依赖
 
 `N06, N07, N10`
 
-## 3. 本节点范围
+## 3. Durable vs presentation
 
-- renderer-neutral graph adapter / XYFlow seam。
-- NodeLibrary、Inspector、ValidationPanel、MediaStage seam。
-- Local Draft、450ms debounce + blur、SaveStatus。
-- workflowRevision CAS + atomic operations[] transaction。
-- Undo/Redo command stack。
-- Copy/Paste/Select All/Delete。
-- node drag layout persistence。
-- port-level connect/disconnect authoring。
-- Host Node Catalog client projection。
-- exact `(node.type, node.nodeVersion ?? 1)` catalog resolution。
-- unavailable historical custom node 的 read-only degradation。
+Durable/authoritative：
 
-## 4. 明确不在本节点处理
+- Workflow nodes/edges/config；
+- workflowRevision；
+- durable layout/layoutRevision；
+- stable asset refs。
 
-- 不把 graph-library JSON 保存进 Domain。
-- 不在 Browser 维护长期 Workflow authority。
-- 不由 current workflow 猜“可创建节点全集”。
-- 不静态复制 Host MediaNodeRegistry。
-- `lifecycle.executable=false` 属于 N10/N12 run admission，不被 N11 错当成 Editor read-only policy。
-- 当前 V1 `rename-node` 无法精确表达 optional `name` 从有值恢复为字段缺失；该 exact clear/restore Host-wire 扩展作为明确 follow-up，不用 Browser 私有状态伪造。
+Browser presentation-only：
 
-## 5. 代码位置
+- selected nodes/edges；
+- dirty Draft；
+- save status；
+- undo/redo command history；
+- clipboard；
+- transient drag positions before layout save；
+- viewport/zoom unless explicitly persisted later。
 
-- `packages/client/ui-canvas/src/client/WorkflowEditor.tsx`
-- `packages/client/ui-canvas/src/client/{draft,store,adapters,catalog}.ts`
-- `packages/client/ui-canvas/src/client/{NodeLibrary,NodeInspector,ConnectionPanel,ValidationPanel}.tsx`
-- `packages/client/ui-canvas/tests/**`
-- client-safe node catalog service/Remote 由 N10 提供，N11 只消费。
+## 4. Node Definition authority
 
-## 6. 核心接口 / 行为契约
+Editor只能从 Host catalog exact `(type,nodeVersion ?? 1)` 解析 ports/config/lifecycle/feature。不能 type-only 命中最新版本。
 
-```text
-Host Session Projection (Workflow authority)
-          ↓
-renderer-neutral graph adapter
-          ↓
-Graph Renderer Node/Edge + narrow local Draft
-          ↓ semantic operations[] + exact workflowRevision CAS
-CanvasService
-```
+历史 node：
 
-Undo/Redo 是新的合法 mutation，不改历史 Event，也不在 Browser 保存 Workflow snapshot。
+- exact definition missing → visible, read-only diagnostic；
+- required feature disabled → visible, read-only/currently unavailable；
+- Definition present + creatable/current feature enabled → Node Library可创建。
 
-Node Library / Inspector / Connection authoring：
+## 5. Draft save
 
-```text
-Host MediaNodeRegistry
-  → client-safe { revision, entries }
-  → exact type+version lookup
-  → NodeLibrary / Inspector / ConnectionPanel
-```
+Node Inspector修改先进入 narrow Draft；450ms debounce 或 blur走同一 save path，必须去重并使用 expected `workflowRevision` CAS。
 
-缺失精确 Definition 或依赖 Feature 关闭的历史 Node 仍显示，但 Inspector 为只读、其 Port 不参与新连线。`executable=false` 本身只影响运行，不自动禁止编辑。
+成功后由新 Session Projection确认 authoritative state；失败时保留 dirty Draft并显示 `conflict/offline/save-failed`，不能假装已保存。
 
-Layout 与 semantic Workflow revision 分离：pointer move 只修改 local position，pointer-up 才以 `layoutRevision` CAS 保存 `canvas/layout-change`，不推进 `workflowRevision`。
+## 6. Undo/Redo
 
-## 7. 实施步骤 / 当前状态
+Undo/Redo提交正常 Host operations并产生正常 workflowRevision，不在 Browser恢复整份旧 Workflow snapshot。
 
-1. [x] workflowToGraph renderer-neutral projection；保留 node identity/type/version，不保存 renderer JSON。
-2. [x] Inspector local Draft + exact workflowRevision CAS。
-3. [x] operations[] 单 Remote transaction。
-4. [x] Saved/Saving/Conflict/Offline/Save failed。
-5. [x] Undo/Redo/Delete/Copy/Paste/Select All。
-6. [x] Paste 生成新 NodeId/EdgeId。
-7. [x] drag local，drag-end `saveLayout`，不改 workflowRevision。
-8. [x] port-level connect/disconnect 映射 semantic edge operations；selected edge Delete 使用 `disconnect`。
-9. [x] Node Library 改为 Host catalog 驱动，不从 Workflow 反推全集。
-10. [x] unavailable custom node 显示 placeholder/read-only Inspector diagnostics。
-11. [x] Catalog metadata 按 `(type, nodeVersion ?? 1)` 精确解析，禁止 v1 silently 使用同 type v2 ports。
-12. [x] 450ms debounce 与 blur 共用同一 save path，并按 Draft identity 去重 in-flight commit。
-13. [x] Remote failure 保留 dirty Draft，并发布 offline/save-failed，不假装 Saved。
-14. [ ] Optional node-name exact clear/Undo：需要 Host wire 能表达字段缺失；当前 V1 contract 暂不具备。
+历史 `name?: string` 的“原本无 name”问题仍需精确 Host mutation semantics 才能完全恢复字段缺失。实现不得发送已知会被 Host source validation拒绝的空字符串来伪造 absence。若当前 wire 未提供 clear-name，应在 UI/command history中显式限制并记录 follow-up。
 
-## 8. rc.8 Compatibility
+## 7. Copy/Paste/Delete
 
-- store/slot/listener 必须是 client plugin lifecycle safe。
-- Browser metadata 不从 Host-only registry package 运行时代码静态 import。
-- `render-service`/`ui-layout` 不持有 editor draft。
-- business component 不自建外部订阅；生产组件只使用 framework 提供的 `useStore`。jsdom 测试可直接把真实 store observable 绑定到 React 以驱动组件。
-- generation/workflow replacement 会清理 generation-bound Draft/Undo/Redo/local positions；Clipboard 作为显式 Copy payload 可跨 generation 保留。
+- Paste生成全新 node/edge ids；
+- unavailable/unknown definition 不得通过 Paste绕过 Node Library authoring policy；
+- Delete可删除历史 unavailable node；
+- multi-operation paste/delete应原子提交。
 
-## 9. 测试要求
+## 8. Connections
 
-Focused test code 已覆盖下列行为；由于当前 GitHub Actions runner 在 step allocation 前失败/排队，下面的 `[x]` 表示“测试已编写并进入分支”，不是“CI 已执行通过”。
+Connection authoring使用 exact version port metadata和 semantic type compatibility。缺失 definition/feature-disabled node的新增连接被禁用，但已有历史 edge仍显示并可诊断/删除。
 
-- [x] 每字符输入不产生 Session revision：连续输入 449ms 不调用 Host，450ms 后仅一次 commit。
-- [x] blur/debounce 一次合法 edit：blur 立即 commit，pending debounce 对同 Draft 不重复提交。
-- [x] copy/paste/delete atomic。
-- [x] Undo/Redo revision-fenced command stack；每次接受后使用新 revision。
-- [x] layout projection/merge 与 semantic Workflow 分离。
-- [x] port authoring 使用 exact type+version Definition；selected edge Delete 产生 disconnect。
-- [x] network/offline failure 不假装 Saved，Draft 保持 dirty。
-- [x] custom plugin catalog entry 可进入 Node Library，Feature-disabled/deprecated/non-creatable entry 不进入。
-- [x] exact historical Definition 缺失时 Node 保持可见且 Inspector read-only。
-- [x] 同 type v1/v2 catalog 不串 Definition/Port。
-- [ ] exact node-name field-absence Undo，需要 Host wire follow-up 后补 Host+Browser roundtrip test。
+## 9. 0.1.1-rc.2 新集成要求
 
-## 10. 验收标准
+- latest `ui-renderer` owns React bindings；Editor不得依赖 legacy `web-react` ownership；
+- Canvas current workflow来自最新 Projection wire view；
+- image fields/output preview持 stable attachment-backed refs，不读取 request-image cache identity；
+- Settings/feature使用N09 latest shared-mirror/current capability contract；
+- latest Client package/domain gates必须通过。
 
-- [x] 基本 DAG semantic editing path 已实现：add/config/name/paste/delete/connect/disconnect/selection/layout。
-- [x] semantic state 只来自 Session Projection，layout 单独持久化并有独立 revision。
-- [x] UI semantic edit 全部映射 Domain operations，不直接改 Projection。
-- [x] Node Library 不维护第二份 Host registry。
-- [x] historical unavailable plugin node 不会因缺 Definition 被删除或错误绑定到别的版本。
-- [ ] optional node-name exact clear/Undo 仍需 Host contract 扩展。
+## 10. 测试
 
-## 11. Definition of Done
+- exact type+version catalog；
+- missing/feature-disabled read-only；
+- blur+debounce one commit；
+- offline/conflict Draft preservation；
+- Undo/Redo revision fences；
+- Copy/Paste fresh ids + unavailable paste block；
+- Delete atomic；
+- Connection exact ports；
+- drag-end layout revision without workflowRevision；
+- session switch/HMR cleanup；
+- REAL Editor under latest renderer/layout/Projection。
 
-- [x] focused unit/component tests 已编写。
-- [x] README 双语 authority/autosave/catalog 契约已同步。
-- [ ] typecheck/lint/build：等待 repository runner 实际执行，不宣称通过。
-- [ ] REAL composition/editor smoke test：等待 repository runner 实际执行，不宣称通过。
-- [x] 当前已知 N11 draft blocker 已明确：optional node-name exact clear/restore Host-wire follow-up。
-- [ ] exact-head CI 可执行并验证后才能从 `REVIEW` 升级为 accepted。
+## 11. 验收
 
-## 12. 风险与禁止项
-
-禁止在 UI store 保留长期 Workflow 副本；只允许 Draft/presentation state。
-
-禁止按 `type` 单键选择任意已安装 Definition；历史 Node 必须按 `(type, nodeVersion ?? 1)` 精确解析。
-
-禁止在 exact Definition 缺失时静默升级、删除、重写历史 Node，也禁止从当前 Workflow 猜 Node Library 全集。
-
-禁止把 renderer JSON、Viewport library state 或 local command stack 写成 Canvas semantic Workflow state。
-
-禁止把空字符串冒充 optional `name` 字段缺失的精确 Undo 语义；在 Host wire 支持之前该 case 必须明确保留为 follow-up。
+PR #39 的 semantic Editor设计保留。完成 N05/N07/N09/N11.5 新 seam迁移并执行 focused/REAL tests 后再 ACCEPTED。
