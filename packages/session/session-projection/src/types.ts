@@ -22,3 +22,19 @@ export interface SessionProjectionMap {}
  * Values must be plain JSON so the projection cache can persist them.
  */
 export interface SessionProjectionStateMap {}
+
+/**
+ * Framework-owned live visibility envelope. Baseline `values` remain ordinary
+ * `SessionProjectionMap` values; only live push frames use this wrapper when a
+ * read guard or capability lifecycle changes without advancing Session seq.
+ */
+export type SessionProjectionControlEnvelope = {
+  readonly __dshSessionProjectionV1: {
+    readonly generation: number
+    readonly present: false
+  } | {
+    readonly generation: number
+    readonly present: true
+    readonly value: unknown
+  }
+}
