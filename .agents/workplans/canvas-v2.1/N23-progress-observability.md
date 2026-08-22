@@ -1,64 +1,57 @@
-# N23 — 实时 Progress、Observability、Metrics 与诊断链路（rc.8 Revision）
+# N23 — Progress / Observability / Traceability（0.1.1-rc.2 Revision）
 
-## 1. 节点目标
+Status: `PLANNED`
 
-让用户看到真实运行阶段，让工程师能从 Session 一路追踪到 WorkflowRun、NodeRun、Provider request，同时保证 dynamic client subscription/disposal 和 reconnect 正确。
+## 1. 目标
 
-## 2. 前置依赖
+建立从 Session/Canvas command到 Workflow Run、Node attempt、Provider operation和最终 stable asset的可追踪链路，同时不以高频progress event污染durable Session log。
+
+## 2. 依赖
 
 `N16, N20, N22`
 
-## 3. 本节点范围
+## 3. Trace hierarchy
 
-- `canvas/run-progress` ephemeral event。
-- Remote/client event forwarding allowlist。
-- ui-canvas progress store。
-- structured logs / trace / metrics。
-- correlation/request references。
-
-## 4. 核心关联链
+推荐稳定关联：
 
 ```text
 sessionId
-  → canvasId
-  → workflowId + workflowRevision
-  → workflowRunId
-  → nodeRunId
-  → providerRequestId/providerTaskId
-  → correlationId/requestId
+→ canvasId / workflowRef
+→ runId / attempt
+→ nodeId / nodeAttempt
+→ resolved provider/model execution identity
+→ provider operation id
+→ stable image attachmentId or video assetId
 ```
 
-高基数 ID 用于 log/trace，不作为普通 metrics label。
+Request-image `variantId`可以作为debug/request telemetry，但不是Canvas semantic output identity。
 
-## 5. Durable vs Ephemeral
+## 4. Progress ownership
 
-Progress 是 ephemeral，不每个百分点写 Session。terminal Run state 必须 durable。
+- coarse lifecycle/terminal state可durable；
+-高频百分比/token/poll ticks走live observable/telemetry channel；
+- Browser refresh通过durable Run + provider reconciliation恢复，不依赖错过的live ticks。
 
-Provider 没真实百分比时显示 phase/spinner，不制造假数字。
+## 5. Logging safety
 
-## 6. 实施步骤
+禁止记录：credential、Authorization header、signed provider URL、raw image/video bytes/base64、DeepSeek Files bearer data、完整敏感prompt如果现有Harness logging policy不允许。
 
-1. progress DTO 显式包含 session/canvas/workflowRun/nodeRun 关联字段。
-2. event forwarding allowlist。
-3. ui-canvas dynamic plugin 订阅；session switch/dispose 后清理。
-4. terminal Projection 到达后移除 transient progress。
-5. structured logging 统一字段。
-6. telemetry 覆盖 queue/provider/asset/retry/failure/cancel/interrupted。
-7. UI error 只显示安全 reference。
+稳定error code优先；provider raw diagnostic做bounded/redacted映射。
 
-## 7. 测试要求
+## 6. Metrics
 
-- [ ] 断线丢 progress 不影响 authoritative Run。
-- [ ] reconnect 后通过 Projection/Run query 收敛。
-- [ ] terminal 后 progress 清理。
-- [ ] 无真实百分比不显示伪数字。
-- [ ] session switch 不串 progress。
-- [ ] ui-canvas dispose 无遗留 subscription。
-- [ ] 日志不泄漏 credential/raw provider payload。
+可度量：admission latency、queue wait、provider start/terminal latency、materialization latency、cache hit、retry count、cancel outcome、cost estimate vs observed usage（如safe）、orphan/reconciliation count。
 
-## 8. 验收标准
+## 7. Tests
 
-- [ ] 用户能理解当前阶段。
-- [ ] 工程师能从 session 定位到 provider request。
-- [ ] Progress 不造成 Session 膨胀。
-- [ ] dynamic client lifecycle 安全。
+- end-to-end trace correlation；
+- progress does not advance workflowRevision；
+- refresh can reconstruct without live ticks；
+- secret/url/binary redaction；
+- duplicate callback produces one terminal semantic record；
+- image output links stable attachment id；
+- video output links stable video id。
+
+## 8. 验收
+
+至少 image/video各一条真实或高保真运行能从Agent/Browser intent追踪到stable output，且日志/Session不存在敏感transport数据。
