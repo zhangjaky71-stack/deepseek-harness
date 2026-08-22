@@ -7,9 +7,9 @@ import CanvasService, {
   CanvasRunId,
   type CanvasAuthorizationDecision,
   type CanvasAuthorizationRequest,
-  type CanvasId,
   type CanvasSnapshot,
 } from '@deepseek-ai/dsh-canvas'
+import type { CanvasId } from '@deepseek-ai/dsh-canvas/types'
 import { describe, expect, it } from 'vitest'
 import {
   baseWorkflow,
