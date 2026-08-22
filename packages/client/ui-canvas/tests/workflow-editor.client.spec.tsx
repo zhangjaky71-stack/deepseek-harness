@@ -12,7 +12,7 @@ import type {
   MediaWorkflow,
   WorkflowNodeId,
 } from '@deepseek-ai/dsh-canvas/client'
-import { WorkflowEditor } from '../src/client/WorkflowEditor.tsx'
+import { WorkflowEditor, type WorkflowEditorProps } from '../src/client/WorkflowEditor.tsx'
 import { createCanvasEditorStore } from '../src/client/store.ts'
 
 const t = ((key: string) => key) as never
@@ -72,7 +72,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function renderEditor(commitOperations: (...args: any[]) => Promise<any>) {
+function renderEditor(commitOperations: WorkflowEditorProps['commitOperations']) {
   const instance = createCanvasEditorStore().create('session-autosave')
   instance.actions.resetGeneration({ canvasId: canvas.id, canvasCreatedAt: canvas.createdAt, workflowId: workflow.id })
   const useStore = (<T,>(selector: (state: ReturnType<typeof instance.getSnapshot>) => T): T => {
@@ -90,7 +90,7 @@ function renderEditor(commitOperations: (...args: any[]) => Promise<any>) {
       onSelectNodes={() => {}}
       onSelectEdge={() => {}}
       onClearSelection={() => {}}
-      commitOperations={commitOperations as never}
+      commitOperations={commitOperations}
       saveLayout={async () => ({ ok: true, layoutRevision: 1 })}
       useStore={useStore}
       actions={instance.actions}
