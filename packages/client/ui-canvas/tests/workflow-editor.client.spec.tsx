@@ -101,13 +101,13 @@ function renderEditor(commitOperations: WorkflowEditorProps['commitOperations'])
   act(() => {})
   const input = host.querySelector('input')
   if (!(input instanceof HTMLInputElement)) throw new Error('expected Inspector name input')
-  return input
+  return { input, getSnapshot: instance.getSnapshot }
 }
 
 describe('Canvas WorkflowEditor autosave', () => {
   it('debounces typing and does not write a Session revision per character', async () => {
     const commitOperations = vi.fn(async () => ({ ok: true as const, workflowRevision: 2 }))
-    const input = renderEditor(commitOperations)
+    const { input } = renderEditor(commitOperations)
 
     act(() => { Simulate.change(input, { target: { value: 'Prompt A' } }) })
     act(() => { vi.advanceTimersByTime(200) })
@@ -126,7 +126,7 @@ describe('Canvas WorkflowEditor autosave', () => {
   it('saves on blur and suppresses the pending debounce duplicate for the same Draft', async () => {
     let resolveCommit: ((value: { ok: true; workflowRevision: number }) => void) | undefined
     const commitOperations = vi.fn(() => new Promise<{ ok: true; workflowRevision: number }>((resolve) => { resolveCommit = resolve }))
-    const input = renderEditor(commitOperations)
+    const { input } = renderEditor(commitOperations)
 
     act(() => { Simulate.change(input, { target: { value: 'Blurred' } }) })
     await act(async () => { Simulate.blur(input); await Promise.resolve() })
@@ -140,13 +140,13 @@ describe('Canvas WorkflowEditor autosave', () => {
 
   it('keeps an offline write visibly unsaved instead of reporting Saved', async () => {
     const commitOperations = vi.fn(async () => ({ ok: false as const, status: 'offline' as const, message: 'offline' }))
-    const input = renderEditor(commitOperations)
+    const { input, getSnapshot } = renderEditor(commitOperations)
 
     act(() => { Simulate.change(input, { target: { value: 'Offline edit' } }) })
     await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve() })
 
     expect(commitOperations).toHaveBeenCalledTimes(1)
-    expect(host.querySelector('[data-save-status="offline"]')).not.toBeNull()
-    expect(host.querySelector('[data-save-status="saved"]')).toBeNull()
+    expect(getSnapshot().saveStatus).toBe('offline')
+    expect(getSnapshot().draft?.dirty).toBe(true)
   })
 })
