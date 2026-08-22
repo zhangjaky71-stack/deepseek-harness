@@ -1,6 +1,7 @@
 /** Host CanvasService: Session-native Canvas/layout writes, bounded history, Host authorization, feature policy, and Typert exports. */
 
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -13,8 +14,14 @@ import {
   assertCanvasSnapshot,
   assertMediaWorkflow,
   createCanvasSnapshot,
+  isCanvasRunTerminal,
 } from './domain.ts'
-import { applyCanvasEvent, emptyCanvasFoldState } from './fold.ts'
+import {
+  applyCanvasChange,
+  applyCanvasEvent,
+  cloneCanvasFoldState,
+  emptyCanvasFoldState,
+} from './fold.ts'
 import type { CanvasFoldState } from './fold.ts'
 import type { CanvasChange, CanvasOperation } from './events.ts'
 import {
@@ -72,10 +79,6 @@ declare module '@deepseek-ai/cordis' {
 
 /** Error returned by CanvasService before a mutation reaches the Session commit point. */
 export class CanvasServiceError extends HarnessError {
-  /**
-   * @param message - human-readable rejection reason that never contains credential values.
-   * @param code - stable machine-readable Canvas service code.
-   */
   // oxlint-disable-next-line typescript/no-useless-constructor -- narrows HarnessError's string code
   constructor(message: string, code: CanvasServiceErrorCode) {
     super(message, code)
@@ -189,16 +192,11 @@ function applyWorkflowOperations(current: MediaWorkflow, operations: readonly Wo
 
 /** Session-backed Canvas write/query service (`ctx.canvas`) and Typert namespace `canvas`. */
 export class CanvasService extends TypertRemoteService {
-  static inject = ['agents']
+  static inject = ['agents', 'sessions']
 
   private readonly caches = new WeakMap<Session, CanvasCache>()
   private readonly fallbackAuthorization: CanvasAuthorizationPolicy
 
-  /**
-   * Create the Canvas Host service and register optional Session projection units.
-   * @param ctx - Cordis context with the live Agent registry.
-   * @param config - fallback single-user authorization policy used when no `canvasAuthorization` service is mounted.
-   */
   constructor(ctx: Context, config: CanvasServiceConfig = {}) {
     super(ctx, 'canvas')
     this.fallbackAuthorization = new CanvasAuthorizationPolicy(config.authorization)
@@ -207,34 +205,15 @@ export class CanvasService extends TypertRemoteService {
     })
   }
 
-  /**
-   * Evaluate one Canvas permission through the mounted Host authorization service or the fallback policy.
-   * @param request - actor/source/permission request; credential material is not accepted by this shape.
-   * @returns allow/deny decision without mutating Canvas state.
-   */
   authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
     return this.ctx.get('canvasAuthorization')?.authorize(request) ?? this.fallbackAuthorization.authorize(request)
   }
 
-  /**
-   * Read the authoritative current Canvas for one live agent. Reads remain available when a feature is disabled
-   * so historical workflows can still be decoded and inspected.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached current snapshot, or `null` before create/after clear.
-   */
   get(agent: Agent, access?: CanvasAccessContext): CanvasSnapshot | null {
     const prepared = this.prepare(agent, 'canvas.read', access)
     return this.view(prepared.cache)
   }
 
-  /**
-   * Create the session's first/current Canvas with an initial semantic workflow.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param request - initial workflow and optional variant identity.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached committed Canvas snapshot.
-   */
   create(agent: Agent, request: CreateCanvasRequest, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     const features = this.featurePolicy()
@@ -242,7 +221,10 @@ export class CanvasService extends TypertRemoteService {
     const workflow = cloneWorkflow(request.workflow)
     assertMediaWorkflow(workflow)
     features?.assertWorkflowCreatable(workflow)
-    if (request.currentVariantId !== undefined) features?.assertEnabled('variants')
+    if (request.currentVariantId !== undefined) {
+      features?.assertEnabled('variants')
+      this.assertAuthorized(agent, prepared.cache, prepared.access, 'canvas.variant.create')
+    }
     this.assertWorkflowAuditSafe(workflow)
     if (prepared.cache.state.canvas !== null) {
       throw new CanvasServiceError(`Canvas "${prepared.cache.state.canvas.id}" already exists`, 'CANVAS_ALREADY_EXISTS')
@@ -259,14 +241,6 @@ export class CanvasService extends TypertRemoteService {
     return committed
   }
 
-  /**
-   * Replace the complete semantic workflow while preserving its stable workflow identity.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param ref - expected current workflow identity/revision.
-   * @param workflow - complete replacement workflow with the same workflow id.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached committed Canvas snapshot.
-   */
   replaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     const features = this.featurePolicy()
@@ -286,14 +260,6 @@ export class CanvasService extends TypertRemoteService {
     return this.commitWorkflow(agent, prepared, current, 'workflow-replace', replacement)
   }
 
-  /**
-   * Apply an ordered operation batch atomically to the current semantic workflow.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param ref - expected current workflow identity/revision.
-   * @param operations - ordered semantic edits; the whole final workflow validates before append.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached committed Canvas snapshot.
-   */
   editWorkflow(
     agent: Agent,
     ref: WorkflowRef,
@@ -311,13 +277,6 @@ export class CanvasService extends TypertRemoteService {
     return this.commitWorkflow(agent, prepared, current, 'workflow-edit', workflow)
   }
 
-  /**
-   * Select one already-durable output candidate without rerunning a provider.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param request - current output run identity and candidate index.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached committed Canvas snapshot, or the unchanged snapshot when already primary.
-   */
   selectOutput(agent: Agent, request: SelectCanvasOutputRequest, access?: CanvasAccessContext): CanvasSnapshot {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
@@ -342,13 +301,6 @@ export class CanvasService extends TypertRemoteService {
     return committed
   }
 
-  /**
-   * Persist editor node positions/viewport independently from semantic workflow revisions.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param request - layout for the current workflow identity.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached committed layout snapshot.
-   */
   saveLayout(agent: Agent, request: SaveCanvasLayoutRequest, access?: CanvasAccessContext): CanvasLayoutSnapshot {
     const prepared = this.prepare(agent, 'canvas.layout.write', access)
     this.assertFeature('editor')
@@ -384,26 +336,12 @@ export class CanvasService extends TypertRemoteService {
     return structuredClone(layout)
   }
 
-  /**
-   * List newest-first run history derived from this Session log.
-   * @param agent - exact live Agent whose Session owns the Canvas history.
-   * @param request - bounded cursor page request.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached bounded page.
-   */
   listRuns(agent: Agent, request: ListCanvasRunsRequest = {}, access?: CanvasAccessContext): CanvasRunHistoryPage {
     this.prepare(agent, 'canvas.history.read', access)
     this.assertFeature('history')
     return listCanvasRunHistory(agent.session.events, request)
   }
 
-  /**
-   * Read one run-history entry by durable run id.
-   * @param agent - exact live Agent whose Session owns the Canvas history.
-   * @param request - exact run id.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
-   * @returns detached entry or null when absent.
-   */
   getRun(agent: Agent, request: GetCanvasRunRequest, access?: CanvasAccessContext): CanvasRunHistoryEntry | null {
     this.prepare(agent, 'canvas.history.read', access)
     this.assertFeature('history')
@@ -411,23 +349,19 @@ export class CanvasService extends TypertRemoteService {
   }
 
   /**
-   * Clear the current Canvas while retaining its append-only Session history and independent layout history.
-   * @param agent - exact live Agent whose Session owns the Canvas.
-   * @param canvasId - identity of the Canvas expected to be current.
-   * @param access - optional explicit actor/source; defaults to the owning Agent through the Host service.
+   * Clear the current Canvas using the same workflow CAS fence as semantic edits.
+   * A non-terminal run must be cancelled/interrupted and durably terminal before clear.
    */
-  clear(agent: Agent, canvasId: CanvasSnapshot['id'], access?: CanvasAccessContext): void {
+  clear(agent: Agent, ref: WorkflowRef, access?: CanvasAccessContext): void {
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
-    const current = prepared.cache.state.canvas
-    if (current === null) throw new CanvasServiceError('no current Canvas', 'CANVAS_NOT_FOUND')
-    if (current.id !== canvasId) {
-      throw new CanvasServiceError(`Canvas "${canvasId}" is not current`, 'CANVAS_NOT_FOUND')
+    const current = this.expectCurrentWorkflow(prepared.cache, ref)
+    if (current.run !== null && !isCanvasRunTerminal(current.run.status)) {
+      throw new CanvasServiceError('Canvas cannot be cleared while its current run is non-terminal', 'CANVAS_INVALID_EDIT')
     }
     this.commit(agent, prepared.cache, prepared.access, 'clear', null)
   }
 
-  /** Browser Remote edit; actor/source are fixed by the Host wrapper, not caller-provided. */
   @Remote('editWorkflow')
   remoteExportEditWorkflow(
     agent: Agent,
@@ -437,13 +371,11 @@ export class CanvasService extends TypertRemoteService {
     return { ref: this.workflowRef(this.editWorkflow(agent, ref, operations, this.browserAccess(agent))) }
   }
 
-  /** Browser Remote full workflow replacement. */
   @Remote('replaceWorkflow')
   remoteExportReplaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow): CanvasWorkflowMutationReceipt {
     return { ref: this.workflowRef(this.replaceWorkflow(agent, ref, workflow, this.browserAccess(agent))) }
   }
 
-  /** Browser Remote primary-output selection. */
   @Remote('selectOutput')
   remoteExportSelectOutput(agent: Agent, request: SelectCanvasOutputRequest): CanvasOutputSelectionReceipt {
     const canvas = this.selectOutput(agent, request, this.browserAccess(agent))
@@ -452,27 +384,23 @@ export class CanvasService extends TypertRemoteService {
     return { runId: output.runId, primaryAssetIndex: output.primaryAssetIndex }
   }
 
-  /** Browser Remote editor-layout save. */
   @Remote('saveLayout')
   remoteExportSaveLayout(agent: Agent, request: SaveCanvasLayoutRequest): CanvasLayoutMutationReceipt {
     const layout = this.saveLayout(agent, request, this.browserAccess(agent))
     return { workflowId: layout.workflowId, updatedAt: layout.updatedAt }
   }
 
-  /** Browser Remote clear tombstone. */
   @Remote('clear')
-  remoteExportClear(agent: Agent, canvasId: CanvasSnapshot['id']): CanvasClearReceipt {
-    this.clear(agent, canvasId, this.browserAccess(agent))
-    return { canvasId }
+  remoteExportClear(agent: Agent, ref: WorkflowRef): CanvasClearReceipt {
+    this.clear(agent, ref, this.browserAccess(agent))
+    return { canvasId: ref.canvasId }
   }
 
-  /** Browser Remote bounded run-history page. */
   @Remote('listRuns')
   remoteExportListRuns(agent: Agent, request: ListCanvasRunsRequest): CanvasRunHistoryPage {
     return this.listRuns(agent, request, this.browserAccess(agent))
   }
 
-  /** Browser Remote exact run-history query. */
   @Remote('getRun')
   remoteExportGetRun(agent: Agent, request: GetCanvasRunRequest): CanvasRunHistoryEntry | null {
     return this.getRun(agent, request, this.browserAccess(agent))
@@ -483,22 +411,31 @@ export class CanvasService extends TypertRemoteService {
     const cache = this.cache(agent.session)
     this.sync(agent.session, cache)
     const canonical = this.resolveAccess(agent, access)
+    this.assertAuthorized(agent, cache, canonical, permission)
+    return { cache, access: canonical }
+  }
+
+  private assertAuthorized(
+    agent: Agent,
+    cache: CanvasCache,
+    access: CanvasAccessContext,
+    permission: CanvasPermission,
+  ): void {
     const decision = this.authorize({
       permission,
-      actor: canonical.actor,
-      source: canonical.source,
+      actor: access.actor,
+      source: access.source,
       sessionId: String(agent.session.id),
       ...(cache.state.canvas === null ? {} : { canvasId: cache.state.canvas.id }),
-      ...(canonical.requestId === undefined ? {} : { requestId: canonical.requestId }),
-      ...(canonical.correlationId === undefined ? {} : { correlationId: canonical.correlationId }),
+      ...(access.requestId === undefined ? {} : { requestId: access.requestId }),
+      ...(access.correlationId === undefined ? {} : { correlationId: access.correlationId }),
     })
     if (!decision.allowed) {
       throw new CanvasServiceError(
-        `Canvas permission "${permission}" denied for ${canonical.actor.kind} actor`,
+        `Canvas permission "${permission}" denied for ${access.actor.kind} actor`,
         'CANVAS_PERMISSION_DENIED',
       )
     }
-    return { cache, access: canonical }
   }
 
   private browserAccess(agent: Agent): CanvasAccessContext {
@@ -557,7 +494,16 @@ export class CanvasService extends TypertRemoteService {
     if (current === null) throw new CanvasServiceError('no current Canvas', 'CANVAS_NOT_FOUND')
     /* v8 ignore next -- every CanvasService create and strict Canvas fold requires an initial workflow. */
     if (current.workflow === null) throw new Error(`Canvas "${current.id}" cache lacks a workflow`)
-    if (ref.canvasId !== current.id || ref.workflowId !== current.workflow.id || ref.workflowRevision !== current.workflowRevision) {
+    if (ref.canvasId !== current.id) {
+      throw new CanvasServiceError(`Canvas "${ref.canvasId}" is not current`, 'CANVAS_NOT_FOUND')
+    }
+    if (ref.workflowId !== current.workflow.id) {
+      throw new CanvasServiceError(
+        `workflow "${ref.workflowId}" does not match current workflow "${current.workflow.id}"`,
+        'CANVAS_WORKFLOW_ID_MISMATCH',
+      )
+    }
+    if (ref.workflowRevision !== current.workflowRevision) {
       throw new CanvasServiceError(
         `stale Canvas workflow ref revision ${ref.workflowRevision}; current revision is ${current.workflowRevision}`,
         'CANVAS_STALE_WORKFLOW_REVISION',
@@ -569,6 +515,10 @@ export class CanvasService extends TypertRemoteService {
   private assertLive(agent: Agent): void {
     if (this.ctx.agents.get(agent.id) !== agent) {
       throw new CanvasServiceError(`agent "${agent.id}" is not live in this registry`, 'CANVAS_AGENT_NOT_LIVE')
+    }
+    const sessions = this.ctx.get('sessions')
+    if (sessions?.get(agent.session.id) !== agent.session) {
+      throw new CanvasServiceError(`session "${agent.session.id}" is not live in this store`, 'CANVAS_AGENT_NOT_LIVE')
     }
   }
 
@@ -596,6 +546,7 @@ export class CanvasService extends TypertRemoteService {
     operation: 'workflow-edit' | 'workflow-replace',
     workflow: MediaWorkflow,
   ): CanvasSnapshot {
+    if (isDeepStrictEqual(workflow, current.workflow)) return this.viewRequired(prepared.cache)
     const canvas: CanvasSnapshot = {
       ...current,
       workflowRevision: current.workflowRevision + 1,
@@ -626,6 +577,12 @@ export class CanvasService extends TypertRemoteService {
       canvas,
       meta: canvasChangeMeta(access),
     }
+
+    // CanvasService owns its own transition correctness even when the optional
+    // package invariant companion is not mounted. Preflight against a detached
+    // fold state, then append; only the committed Session event advances cache.
+    const staged = cloneCanvasFoldState(cache.state)
+    applyCanvasChange(staged, change)
     agent.session.append('canvas/change', change)
     this.sync(agent.session, cache)
     return this.view(cache)

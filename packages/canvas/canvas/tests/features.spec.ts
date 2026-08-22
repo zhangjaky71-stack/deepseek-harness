@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import CanvasService, {
   CanvasFeatureError,
   CanvasVariantId,
@@ -17,7 +17,7 @@ import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 function videoWorkflow(): MediaWorkflow {
@@ -36,8 +36,8 @@ function videoWorkflow(): MediaWorkflow {
   })
 }
 
-function stubAgent(rawId: string): Agent {
-  const session = Session.create(SessionId(rawId))
+function stubAgent(ctx: Context, rawId: string): Agent {
+  const session = ctx.sessions.create(SessionId(rawId))
   const inbox = new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
   return {
     id: session.id,
@@ -59,9 +59,10 @@ function stubAgent(rawId: string): Agent {
 async function canvasHarness() {
   const ctx = new Context()
   contexts.push(ctx)
+  await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(CanvasService)
-  const agent = stubAgent(`canvas-feature-${Math.random()}`)
+  const agent = stubAgent(ctx, `canvas-feature-${Math.random()}`)
   ctx.agents.register(agent)
   return { ctx, agent }
 }
@@ -160,7 +161,7 @@ describe('Canvas deployment feature policy', () => {
     })
 
     expect(ctx.canvas.get(agent)).toEqual(created)
-    expect(() => ctx.canvas.clear(agent, created.id)).toThrow(
+    expect(() => ctx.canvas.clear(agent, workflowRef(created))).toThrow(
       expect.objectContaining<Partial<CanvasFeatureError>>({ feature: 'canvas' }),
     )
     expect(() => ctx.canvas.listRuns(agent)).toThrow(

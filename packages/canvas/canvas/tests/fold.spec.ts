@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CanvasId,
   CanvasMigrationError,
+  CanvasRunId,
   WorkflowNodeId,
   applyCanvasChange,
   cloneCanvasFoldState,
@@ -9,7 +10,12 @@ import {
   emptyCanvasFoldState,
 } from '@deepseek-ai/dsh-canvas'
 import type { CanvasChange } from '@deepseek-ai/dsh-canvas'
-import { createChange, runCompleteChange, runStartChange } from './canvas-fixtures.ts'
+import {
+  createChange,
+  runCompleteChange,
+  runStartChange,
+  runUpdateChange,
+} from './canvas-fixtures.ts'
 
 describe('Canvas durable fold', () => {
   it('ignores unrelated values and decodes only exact current Canvas envelopes', () => {
@@ -21,7 +27,7 @@ describe('Canvas durable fold', () => {
     expect(() => decodeCanvasChange({ ...change, meta: {} })).toThrow(CanvasMigrationError)
   })
 
-  it('applies create, workflow edit, run start/complete, output select, and clear transitions', () => {
+  it('applies create, workflow edit, run start/update, output select, and clear transitions', () => {
     const state = emptyCanvasFoldState()
     const created = createChange()
     applyCanvasChange(state, created)
@@ -42,18 +48,18 @@ describe('Canvas durable fold', () => {
     const afterEdit = state.canvas
     if (afterEdit === null) throw new Error('expected edited Canvas')
 
-    const started = runStartChange(afterEdit)
-    applyCanvasChange(state, started)
+    applyCanvasChange(state, runStartChange(afterEdit))
+    const queued = state.canvas
+    if (queued === null) throw new Error('expected queued Canvas')
+    applyCanvasChange(state, runUpdateChange(queued, 'running'))
     const running = state.canvas
     if (running === null) throw new Error('expected running Canvas')
-
-    const completed = runCompleteChange(running)
-    applyCanvasChange(state, completed)
+    applyCanvasChange(state, runUpdateChange(running, 'completed'))
     const done = state.canvas
-    if (done === null || done.output === null) throw new Error('expected completed Canvas')
+    if (done === null || done.output === null) throw new Error('expected completed Canvas output')
 
     const selected: CanvasChange = {
-      ...completed,
+      ...created,
       operation: 'output-select',
       canvas: {
         ...done,
@@ -73,6 +79,32 @@ describe('Canvas durable fold', () => {
     })
     expect(state.canvas).toBeNull()
   })
+
+  it('keeps historical run-complete replay compatible while current vocabulary uses run-update', () => {
+    const state = emptyCanvasFoldState()
+    applyCanvasChange(state, createChange())
+    const created = state.canvas
+    if (created === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(created))
+    const started = state.canvas
+    if (started === null) throw new Error('expected run')
+    expect(() => applyCanvasChange(state, runCompleteChange(started))).not.toThrow()
+    expect(state.canvas?.run?.status).toBe('completed')
+  })
+
+  it.each(['failed', 'cancelled', 'interrupted'] as const)(
+    'accepts %s as a durable terminal run state',
+    (status) => {
+      const state = emptyCanvasFoldState()
+      applyCanvasChange(state, createChange())
+      if (state.canvas === null) throw new Error('expected Canvas')
+      applyCanvasChange(state, runStartChange(state.canvas))
+      if (state.canvas === null) throw new Error('expected run')
+      applyCanvasChange(state, runUpdateChange(state.canvas, status))
+      expect(state.canvas?.run?.status).toBe(status)
+      expect(state.canvas?.run?.finishedAt).toBeDefined()
+    },
+  )
 
   it('rejects duplicate/reused Canvas ids and invalid full-snapshot transitions', () => {
     const state = emptyCanvasFoldState()
@@ -102,20 +134,66 @@ describe('Canvas durable fold', () => {
     )
   })
 
-  it('rejects run-start while a non-terminal run is current and accepts a new run after completion', () => {
+  it('rejects run-start while a non-terminal run is current and accepts a new unique run after completion', () => {
     const state = emptyCanvasFoldState()
     applyCanvasChange(state, createChange())
     const created = state.canvas
     if (created === null) throw new Error('expected created Canvas')
-    applyCanvasChange(state, runStartChange(created))
+    applyCanvasChange(state, runStartChange(created, CanvasRunId('run-1')))
     const running = state.canvas
     if (running === null) throw new Error('expected running Canvas')
-    expect(() => applyCanvasChange(state, runStartChange(running))).toThrow('non-terminal run')
+    expect(() => applyCanvasChange(state, runStartChange(running, CanvasRunId('run-2')))).toThrow('non-terminal run')
 
-    applyCanvasChange(state, runCompleteChange(running))
+    applyCanvasChange(state, runUpdateChange(running, 'completed'))
     const completed = state.canvas
     if (completed === null) throw new Error('expected completed Canvas')
-    expect(() => applyCanvasChange(state, runStartChange(completed))).not.toThrow()
+    expect(() => applyCanvasChange(state, runStartChange(completed, CanvasRunId('run-2')))).not.toThrow()
+  })
+
+  it('rejects reusing a run id anywhere in the Session, including after completion and clear/re-create', () => {
+    const state = emptyCanvasFoldState()
+    applyCanvasChange(state, createChange(CanvasId('canvas-a')))
+    const firstCanvas = state.canvas
+    if (firstCanvas === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(firstCanvas, CanvasRunId('run-reused')))
+    const firstRun = state.canvas
+    if (firstRun === null) throw new Error('expected run')
+    applyCanvasChange(state, runUpdateChange(firstRun, 'completed'))
+    applyCanvasChange(state, {
+      kind: 'canvas/change', version: 1, operation: 'clear', canvas: null, meta: { schemaVersion: 1 },
+    })
+    applyCanvasChange(state, createChange(CanvasId('canvas-b')))
+    const secondCanvas = state.canvas
+    if (secondCanvas === null) throw new Error('expected second Canvas')
+    expect(() => applyCanvasChange(state, runStartChange(secondCanvas, CanvasRunId('run-reused')))).toThrow(
+      'cannot be reused',
+    )
+  })
+
+  it('rejects clear until a non-terminal run reaches a durable terminal state', () => {
+    const state = emptyCanvasFoldState()
+    applyCanvasChange(state, createChange())
+    if (state.canvas === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(state.canvas))
+    const clear: CanvasChange = {
+      kind: 'canvas/change', version: 1, operation: 'clear', canvas: null, meta: { schemaVersion: 1 },
+    }
+    expect(() => applyCanvasChange(state, clear)).toThrow('current run to be terminal')
+    if (state.canvas === null) throw new Error('expected run')
+    applyCanvasChange(state, runUpdateChange(state.canvas, 'cancelled'))
+    expect(() => applyCanvasChange(state, clear)).not.toThrow()
+  })
+
+  it('rejects running -> queued lifecycle regression', () => {
+    const state = emptyCanvasFoldState()
+    applyCanvasChange(state, createChange())
+    if (state.canvas === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(state.canvas))
+    if (state.canvas === null) throw new Error('expected queued run')
+    applyCanvasChange(state, runUpdateChange(state.canvas, 'running'))
+    if (state.canvas === null || state.canvas.run === null) throw new Error('expected running run')
+    const invalid = runUpdateChange(state.canvas, 'queued')
+    expect(() => applyCanvasChange(state, invalid)).toThrow('back to queued')
   })
 
   it('rejects output selection that changes anything beyond primary index/updatedAt', () => {
@@ -126,7 +204,7 @@ describe('Canvas durable fold', () => {
     applyCanvasChange(state, runStartChange(created))
     const running = state.canvas
     if (running === null) throw new Error('expected running Canvas')
-    applyCanvasChange(state, runCompleteChange(running))
+    applyCanvasChange(state, runUpdateChange(running, 'completed'))
     const completed = state.canvas
     if (completed === null || completed.output === null) throw new Error('expected completed output')
 
@@ -148,12 +226,16 @@ describe('Canvas durable fold', () => {
     expect(() => applyCanvasChange(state, invalid)).toThrow('may only change the primary output index')
   })
 
-  it('clones the mutable replay id set without changing current snapshot identity', () => {
+  it('clones mutable replay id sets without changing current snapshot identity', () => {
     const state = emptyCanvasFoldState()
     applyCanvasChange(state, createChange())
+    if (state.canvas === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(state.canvas, CanvasRunId('run-a')))
     const cloned = cloneCanvasFoldState(state)
     cloned.seenCanvasIds.add(CanvasId('another'))
+    cloned.seenRunIds.add(CanvasRunId('run-b'))
     expect(state.seenCanvasIds.has(CanvasId('another'))).toBe(false)
+    expect(state.seenRunIds.has(CanvasRunId('run-b'))).toBe(false)
     expect(cloned.canvas).toBe(state.canvas)
   })
 

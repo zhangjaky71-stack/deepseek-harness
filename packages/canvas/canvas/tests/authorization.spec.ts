@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import CanvasService, {
   CanvasAuthorizationService,
   CanvasServiceError,
+  CanvasVariantId,
   WorkflowNodeId,
   decodeCanvasChange,
 } from '@deepseek-ai/dsh-canvas'
@@ -18,11 +19,10 @@ import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
 interface StubAgent {
   agent: Agent
-  session: Session
 }
 
-function stubAgent(rawId: string): StubAgent {
-  const session = Session.create(SessionId(rawId))
+function stubAgent(ctx: Context, rawId: string): StubAgent {
+  const session = ctx.sessions.create(SessionId(rawId))
   const inbox = new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
   const agent: Agent = {
     id: session.id,
@@ -39,17 +39,18 @@ function stubAgent(rawId: string): StubAgent {
     runMaintenance: task => task(new AbortController().signal),
     whenIdle() { return Promise.resolve() },
   }
-  return { agent, session }
+  return { agent }
 }
 
 async function harness(authorization?: CanvasAuthorizationConfig) {
   const ctx = new Context()
+  await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   if (authorization !== undefined) await ctx.plugin(CanvasAuthorizationService, authorization)
   await ctx.plugin(CanvasService)
-  const stub = stubAgent(`canvas-auth-${Math.random()}`)
+  const stub = stubAgent(ctx, `canvas-auth-${Math.random()}`)
   ctx.agents.register(stub.agent)
-  return { ctx, ...stub }
+  return { ctx, ...stub, session: stub.agent.session }
 }
 
 const humanAccess: CanvasAccessContext = {
@@ -83,7 +84,7 @@ describe('Canvas Host authorization and audit', () => {
       humanAccess,
     )).toThrow(expect.objectContaining<Partial<CanvasServiceError>>({ code: 'CANVAS_PERMISSION_DENIED' }))
     expect(session.seq).toBe(before)
-    expect(ctx.canvas.get(agent)).toEqual(created)
+    expect(ctx.canvas.get(agent, humanAccess)).toEqual(created)
   })
 
   it('supports configurable agent-run allow and human-run deny through one authorization seam', async () => {
@@ -95,6 +96,20 @@ describe('Canvas Host authorization and audit', () => {
       allowed: false,
       reason: 'actor-kind-not-allowed',
     })
+  })
+
+  it('requires canvas.variant.create in addition to canvas.edit for an initial variant', async () => {
+    const { ctx, agent, session } = await harness({
+      permissions: {
+        'canvas.edit': ['agent'],
+        'canvas.variant.create': ['human'],
+      },
+    })
+    expect(() => ctx.canvas.create(agent, {
+      workflow: baseWorkflow(),
+      currentVariantId: CanvasVariantId('variant-denied'),
+    })).toThrow(expect.objectContaining<Partial<CanvasServiceError>>({ code: 'CANVAS_PERMISSION_DENIED' }))
+    expect(session.seq).toBe(0)
   })
 
   it('records a system reconciler actor/source and request correlation in current audit metadata', async () => {
