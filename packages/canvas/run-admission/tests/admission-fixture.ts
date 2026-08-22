@@ -60,11 +60,17 @@ export function imageWorkflow(): MediaWorkflow {
 
 export function workflowWithUnscheduledVideo(): MediaWorkflow {
   const workflow = imageWorkflow()
+  const videoPromptId = WorkflowNodeId('video-prompt')
   return {
     ...workflow,
     nodes: [
       ...workflow.nodes,
+      { id: videoPromptId, type: 'prompt', nodeVersion: 1, config: { text: 'unused video' } },
       { id: videoNodeId, type: 'video.generate', nodeVersion: 1, config: {} },
+    ],
+    edges: [
+      ...workflow.edges,
+      { id: WorkflowEdgeId('e-video-prompt'), sourceNodeId: videoPromptId, sourcePort: 'text', targetNodeId: videoNodeId, targetPort: 'prompt' },
     ],
   }
 }
