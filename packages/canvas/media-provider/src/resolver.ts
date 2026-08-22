@@ -194,6 +194,12 @@ function resolveExact(
   return { provider, model }
 }
 
+function isPolicyResolutionRequest(
+  request: MediaModelResolutionRequest,
+): request is MediaModelPolicyResolutionRequest {
+  return request.selection.mode !== 'strict'
+}
+
 function validateCandidateOrder(index: CatalogIndex, request: MediaModelPolicyResolutionRequest): readonly MediaModelRef[] {
   const seen = new Set<string>()
   for (const ref of request.routing.candidateOrder) {
@@ -245,7 +251,7 @@ export function resolveMediaModel(
 ): MediaModelResolution {
   assertMediaModelRequirements(request.requirements)
   const index = indexSnapshot(snapshot)
-  if (request.selection.mode === 'strict') {
+  if (!isPolicyResolutionRequest(request)) {
     const exact = resolveExact(index, request.selection.preferred)
     if (exact === undefined) {
       throw new MediaModelResolutionError('MEDIA_MODEL_UNKNOWN_PREFERRED', `preferred media model ${refText(request.selection.preferred)} is not registered`)
