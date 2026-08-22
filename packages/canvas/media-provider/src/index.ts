@@ -1,6 +1,6 @@
 /**
- * Media Provider/model capability catalog and pure requirement resolver.
- * Provider network adapters arrive in N14; N13 owns only descriptors, availability, and model selection.
+ * Media Provider/model capability catalog, pure requirement resolver, and Provider runtime adapter seam.
+ * N14 adds runtime routing/execution while credentials and concrete cloud APIs remain adapter-owned.
  *
  * @module @deepseek-ai/dsh-media-provider
  */
@@ -19,4 +19,5 @@ export {
   assertMediaProviderDescriptor,
   normalizeMediaModelDescriptor,
 } from './model-registry.ts'
+export * from './runtime.ts'
 export { default } from './model-registry.ts'
