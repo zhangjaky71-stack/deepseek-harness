@@ -63,7 +63,7 @@ function findResolvedModel(context: MediaNodeExecutorContext, models: MediaModel
       `Provider-backed node ${context.definition.type}@${context.definition.version} requires a resolved execution identity`,
     )
   }
-  const model = models.listModels().find(candidate => candidate.executionIdentityKey === key)
+  const model = models.getModelByExecutionIdentity(key)
   if (model === undefined) {
     throw new MediaProviderError(
       'MEDIA_PROVIDER_MODEL_NOT_FOUND',
@@ -174,7 +174,6 @@ export function createMediaProviderNodeExecutor(
       assertRequestIdentity(request, model)
       const provider = dependencies.providers.require(model.providerId)
       const run = await runMediaProviderOperation(provider, request, context.signal)
-      // Validate Provider semantics before N17/N21 materialization can durably store any bytes.
       assertRawOutputs(binding, semantic, run)
       const materialized = await materializeOutputs(dependencies.materializer, semantic, run)
       return binding.buildResult(semantic, run, materialized)
