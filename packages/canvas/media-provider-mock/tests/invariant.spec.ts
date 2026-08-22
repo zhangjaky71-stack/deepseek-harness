@@ -5,7 +5,7 @@ import { apply, inject } from '../src/invariant.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 describe('media-provider-mock invariant companion', () => {
