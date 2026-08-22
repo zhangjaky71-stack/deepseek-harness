@@ -9,10 +9,10 @@ import type { CanvasSettingsSectionInjected } from '../src/client/CanvasSettings
 import type { CanvasViewInjected } from '../src/types.ts'
 import { apply, inject } from '../src/client/index.ts'
 
-const contexts: Context[] = []
+const fibers: Array<{ dispose(): unknown }> = []
 afterEach(async () => {
   vi.restoreAllMocks()
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (fibers.length > 0) await fibers.pop()!.dispose()
 })
 
 function capabilities(enabled: boolean): CanvasCapabilities {
@@ -33,12 +33,11 @@ async function harness(
   listNodes: () => Promise<unknown> = async () => ({ ok: true, value: { revision: 0, entries: [] } }),
 ) {
   const ctx = new Context()
-  contexts.push(ctx)
   const slots = new SlotRegistry(ctx)
   slots.register({
     name: 'root',
     children: { 'shell.main': { kind: 'single', scope: 'session' } },
-  }, () => null)
+  }, (_p: { renderSlot?: unknown }) => null)
   ctx.provide('sessions', {
     list: { getSnapshot: () => ({ ids: [], current: undefined }), subscribe: () => () => {} },
     binding: () => ({ session: {} }),
@@ -53,13 +52,13 @@ async function harness(
   ctx.provide('remote', { canvasFeatures: { get, listNodes } } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
   const fiber = ctx.plugin({ inject, apply })
+  fibers.push(fiber)
   await fiber.await()
   return { ctx, slots, fiber }
 }
 
 async function settingsHarness(get: () => Promise<unknown>) {
   const ctx = new Context()
-  contexts.push(ctx)
   const slots = new SlotRegistry(ctx)
   slots.register({
     name: 'root',
@@ -67,7 +66,7 @@ async function settingsHarness(get: () => Promise<unknown>) {
       'shell.main': { kind: 'single', scope: 'session' },
       'settings.section': { kind: 'list', scope: 'root' },
     },
-  }, () => null)
+  }, (_p: { renderSlot?: unknown }) => null)
   ctx.provide('sessions', {
     list: { getSnapshot: () => ({ ids: [], current: undefined }), subscribe: () => () => {} },
     binding: () => ({ session: {} }),
@@ -101,6 +100,7 @@ async function settingsHarness(get: () => Promise<unknown>) {
   } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
   const fiber = ctx.plugin({ inject, apply })
+  fibers.push(fiber)
   await fiber.await()
   return { ctx, slots, fiber, set, unset, scope }
 }
@@ -128,7 +128,7 @@ describe('ui-canvas Host capability gate', () => {
     expect(slots.entries('shell.main')).toHaveLength(0)
     const entry = slots.entries('settings.section')[0]
     expect(entry?.options).toMatchObject({ id: 'canvas', order: 20 })
-    const injected = (entry!.inject as () => CanvasSettingsSectionInjected)()
+    const injected = (entry!.inject as unknown as () => CanvasSettingsSectionInjected)()
     injected.setFeature('canvas', true)
     injected.resetFeature('editor')
     expect(set).toHaveBeenCalledWith('canvas', { enabled: true })
@@ -146,7 +146,7 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(true)
     expect(injected.nodeCatalog).toEqual([])
     expect(injected.nodeCatalogRevision).toBe(23)
@@ -161,7 +161,7 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(false)
     expect(injected.nodeCatalog).toEqual([])
     expect(injected.nodeCatalogRevision).toBeUndefined()

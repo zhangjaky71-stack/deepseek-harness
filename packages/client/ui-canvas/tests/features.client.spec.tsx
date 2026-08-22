@@ -45,7 +45,7 @@ function canvasWithVideo(): CanvasSnapshot & { workflow: NonNullable<CanvasSnaps
     output: null,
     createdAt: 1,
     updatedAt: 1,
-  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }
+  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }
 }
 
 const emptyInteraction = {
@@ -73,7 +73,7 @@ function canvasViewProps(
 ): ComponentProps<typeof CanvasView> {
   const store = editorStore()
   return {
-    useSession: selector => selector({ openState } as never),
+    useSession: (selector: (session: { openState: typeof openState }) => unknown) => selector({ openState }),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),

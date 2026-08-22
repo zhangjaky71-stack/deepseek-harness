@@ -10,7 +10,7 @@ const workflow = {
   edges: [], outputNodeIds: [],
 } as const
 
-function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
+function base(overrides: Record<string, unknown> = {}): CanvasSnapshot {
   return {
     schemaVersion: 1,
     id: 'canvas-view',
@@ -22,7 +22,7 @@ function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 describe('Canvas Minimal surface', () => {
@@ -58,7 +58,7 @@ describe('Canvas Minimal surface', () => {
   })
 
   it('renders only result/state presentation and no workflow topology', () => {
-    const html = renderToStaticMarkup(<MinimalCanvas canvas={base({})} t={t} />)
+    const html = renderToStaticMarkup(<MinimalCanvas canvas={base()} t={t} />)
     expect(html).toContain('data-canvas-state="READY"')
     expect(html).not.toContain('View workflow')
     expect(html).not.toContain('prompt')

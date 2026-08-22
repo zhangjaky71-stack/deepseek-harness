@@ -48,7 +48,7 @@ const canvas = {
   output: null,
   createdAt: 1,
   updatedAt: 1,
-} as CanvasSnapshot & { workflow: MediaWorkflow }
+} as unknown as CanvasSnapshot & { workflow: MediaWorkflow }
 const interaction = {
   anchor: { canvasId: canvas.id, canvasCreatedAt: canvas.createdAt, workflowId: workflow.id, workflowRevision: 1 },
   selectedNodeIds: ['prompt-1' as WorkflowNodeId],
@@ -109,9 +109,9 @@ describe('Canvas WorkflowEditor autosave', () => {
     const commitOperations = vi.fn(async () => ({ ok: true as const, workflowRevision: 2 }))
     const { input } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Prompt A' } }) })
+    act(() => { Simulate.change(input, { target: { value: 'Prompt A' } as unknown as EventTarget }) })
     act(() => { vi.advanceTimersByTime(200) })
-    act(() => { Simulate.change(input, { target: { value: 'Prompt AB' } }) })
+    act(() => { Simulate.change(input, { target: { value: 'Prompt AB' } as unknown as EventTarget }) })
     act(() => { vi.advanceTimersByTime(449) })
     expect(commitOperations).not.toHaveBeenCalled()
 
@@ -128,7 +128,7 @@ describe('Canvas WorkflowEditor autosave', () => {
     const commitOperations = vi.fn(() => new Promise<{ ok: true; workflowRevision: number }>((resolve) => { resolveCommit = resolve }))
     const { input } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Blurred' } }) })
+    act(() => { Simulate.change(input, { target: { value: 'Blurred' } as unknown as EventTarget }) })
     await act(async () => { Simulate.blur(input); await Promise.resolve() })
     expect(commitOperations).toHaveBeenCalledTimes(1)
 
@@ -142,7 +142,7 @@ describe('Canvas WorkflowEditor autosave', () => {
     const commitOperations = vi.fn(async () => ({ ok: false as const, status: 'offline' as const, message: 'offline' }))
     const { input, getSnapshot } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Offline edit' } }) })
+    act(() => { Simulate.change(input, { target: { value: 'Offline edit' } as unknown as EventTarget }) })
     await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve() })
 
     expect(commitOperations).toHaveBeenCalledTimes(1)

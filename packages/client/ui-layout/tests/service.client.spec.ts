@@ -11,6 +11,7 @@ import type { PanelActions } from '@deepseek-ai/dsh-client-ui-layout/src/client/
 function fakePanels(): PanelActions {
   return {
     setSidebar: vi.fn(),
+    setConversation: vi.fn(),
     setDetails: vi.fn(),
     toggleSidebar: vi.fn(),
     setNarrow: vi.fn(),
@@ -33,6 +34,7 @@ describe('LayoutController', () => {
     expect(panels.openDetails).toHaveBeenCalledTimes(1)
     expect(panels.closeDetails).toHaveBeenCalledTimes(1)
     expect(panels.setSidebar).not.toHaveBeenCalled()
+    expect(panels.setConversation).not.toHaveBeenCalled()
     expect(panels.setDetails).not.toHaveBeenCalled()
   })
 

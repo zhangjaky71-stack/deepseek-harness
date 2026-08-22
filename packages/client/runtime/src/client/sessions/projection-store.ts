@@ -123,7 +123,12 @@ export class ProjectionValueStore {
       const current = this.rows.get(key)
       this.clocks.set(key, { seq: baseline.asOfSeq, generation: 0 })
       this.rows.set(key, { value, seq: baseline.asOfSeq, generation: 0 })
-      if (current?.value !== value || current.seq !== baseline.asOfSeq || current.generation !== 0) this.changed(key)
+      if (
+        current === undefined
+        || current.value !== value
+        || current.seq !== baseline.asOfSeq
+        || current.generation !== 0
+      ) this.changed(key)
     }
     for (const key of new Set([...this.rows.keys(), ...this.clocks.keys()])) {
       if (Object.hasOwn(values, key)) continue
@@ -172,7 +177,12 @@ export class ProjectionValueStore {
     }
     const previous = this.rows.get(key)
     this.rows.set(key, { value: control.value, seq, generation: control.generation })
-    if (previous?.value !== control.value || previous.seq !== seq || previous.generation !== control.generation) this.changed(key)
+    if (
+      previous === undefined
+      || previous.value !== control.value
+      || previous.seq !== seq
+      || previous.generation !== control.generation
+    ) this.changed(key)
   }
 
   private changed(key: string): void {

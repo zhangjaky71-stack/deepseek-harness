@@ -109,13 +109,11 @@ describe('ui-canvas built client artifact', () => {
     expect(enabled.slots.entries('conversation.composer')).toHaveLength(enabled.beforeComposer)
     await enabled.fiber.dispose()
     expect(enabled.slots.entries('shell.main')).toHaveLength(0)
-    await enabled.ctx.dispose()
 
     const disabled = await composed(exports, false)
     expect(disabled.slots.entries('shell.main')).toHaveLength(0)
     expect(disabled.slots.entries('conversation.composer')).toHaveLength(disabled.beforeComposer)
     await disabled.fiber.dispose()
-    await disabled.ctx.dispose()
   })
 
   it.skipIf(code === undefined)('injects plugin-tagged CSS', async () => {
