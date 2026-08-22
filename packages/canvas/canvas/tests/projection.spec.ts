@@ -130,6 +130,7 @@ describe('Canvas Session projections and layout state', () => {
     const liveValues = first.values()
 
     const ctx = new Context()
+    await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(CanvasService)
