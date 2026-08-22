@@ -50,24 +50,26 @@ schema defaults
 Cordis CanvasFeatureService entry config (composition base)
    ↓
 Harness settings user document: namespace "canvas"
-   ↓  (sampled at Host activation; applies: restart)
+   ↓  (sampled once when CanvasFeatureService activates; applies: restart)
 ctx.canvasFeatures effective capability
    ├─ canvasFeatures Remote → Browser current-runtime exposure
    ├─ Canvas Host enforcement
    └─ future Agent Tool advertisement + execution recheck
 ```
 
+`CanvasFeatureService` 正式依赖 `settings` 服务。标准 `dsh-base` 在所有 profile 都挂载 settings；这个依赖确保 Cordis 不会先发布 base-only `canvasFeatures`，再因为 settings 晚到而半热更新。自定义轻量 Host 若不需要 deployment feature service，可以不挂 `CanvasFeatureService`；Canvas Domain 本身不因此获得 settings persistence ownership。
+
 Browser `settingsScope` 编辑的是下一次 activation 的 user layer，不是当前 runtime capability。UI hidden 不是安全控制；Host operation 仍必须检查 `ctx.canvasFeatures`。
 
 ## 7. 实施步骤
 
 1. `CanvasFeatureService` 保留现有 Schemastery Config 作为同一 schema/default contract。
-2. 通过 `ctx.inject(['settings'], ...)` 可选注册 `settingsNamespace('canvas')`；provider 不存在时继续只使用 composition config，不让 settings 成为轻量 composition 的硬依赖。
-3. `settings.register(..., { base: compositionConfig, applies: 'restart' })`，服务 activation 时采样 resolved value；document 后续修改不偷偷改变已发布 runtime capability。
-4. Settings provider dispose 时撤销 namespace 并回退 composition base；re-mount 时重新注册并采样自己的 user layer。
+2. 声明 `static inject = ['settings']`，只在 settings provider 已可用后激活 feature service；注册 `settingsNamespace('canvas')`。
+3. `settings.register(..., { base: compositionConfig, applies: 'restart' })`，服务 activation 时只采样一次 resolved value；document 后续修改只持久化，不改变已发布 runtime capability。
+4. feature-service/plugin dispose 时 namespace 随 owner fiber 释放；依赖 remount / Host restart 后重新注册并重新采样 durable user layer。
 5. `canvasFeatures.get()` 只暴露 effective capability，不暴露 raw base/user layer。
 6. CanvasService/Admission 对危险能力做 Host check；disabled 历史 Workflow 仍可读取，新增/执行被拒绝。
-7. `ui-canvas` 在 `settings.section` 注册 Canvas-owned 页面，通过 `ctx.settingsScope.bind({ namespace: 'canvas' })` 读写 Host user layer；不使用 localStorage。
+7. `ui-canvas` 可选集成 Settings UI：在 `settings.section` 注册 Canvas-owned 页面，通过 `ctx.settingsScope.bind({ namespace: 'canvas' })` 读写 Host user layer；Canvas 主产品面仍不把 ui-settings 当硬依赖。
 8. Settings 页面独立于 `canvas.enabled` 注册：当前 Canvas 被关闭时仍能修改下一次启动配置。
 9. Settings 页面明确展示“重启生效”、user override/继承状态、read-only/unavailable 状态。
 10. Browser 主产品面继续只认当前 Host `canvasFeatures` Remote；不得因为 settings checkbox 改变而伪造当前能力。
@@ -79,8 +81,8 @@ Browser `settingsScope` 编辑的是下一次 activation 的 user layer，不是
 - [ ] schema defaults + composition base + user layer 按优先级解析。
 - [ ] Canvas settings descriptor 为 `ns=canvas`、`applies=restart`，且无 secret 字段。
 - [ ] 当前 activation 中修改 settings 不改变 `ctx.canvasFeatures.capabilities`；remount 后读取新值。
-- [ ] settings provider / Canvas feature owner dispose 后 namespace 正确释放，可重新注册。
-- [ ] settings provider 缺失时 CanvasFeatureService 仍从 entry config 工作。
+- [ ] feature owner dispose 后 namespace 正确释放，可重新注册。
+- [ ] feature service 等待 settings 依赖，不存在 base-only → late-settings 的半热能力窗口。
 - [ ] `canvas.enabled=false` 时主 Canvas surface 不发布，但 Canvas Settings section 仍可见。
 - [ ] Browser Settings 写入走 `SettingsScope.set/unset`，不建立第二套 persistence。
 - [ ] video disabled 时 UI 不显示可创建视频节点。
@@ -109,6 +111,6 @@ Browser `settingsScope` 编辑的是下一次 activation 的 user layer，不是
 
 - 禁止把 feature flag、authorization、quota、provider credential 混成一个配置对象。
 - 禁止让 Browser checkbox 成为当前 capability authority。
-- 禁止因为 settings provider 不存在而让 Canvas Host 无法启动。
+- 禁止让 `CanvasFeatureService` 在 settings 尚未 ready 时先发布临时 capability。
 - 禁止 live settings edit 在没有完整 dynamic surface teardown/rebind 协议时半热更新 runtime policy。
 - 禁止手工伪造 pnpm lock / generated artifacts。
