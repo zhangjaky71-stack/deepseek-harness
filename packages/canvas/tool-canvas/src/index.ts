@@ -3,8 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CanvasCommandId } from './types.ts'
-import type { CanvasGenerateCommand } from './types.ts'
+import type { CanvasCommandId, CanvasGenerateCommand } from './types.ts'
 export type * from './types.ts'
 
 export const name = 'tool-canvas'
@@ -72,7 +71,7 @@ export function apply(ctx: Context): void {
       const prompt = normalizedRequired(args.prompt, 'prompt')
       const nodeId = normalizedOptional(args.nodeId)
       const model = normalizedOptional(args.model)
-      const commandId = CanvasCommandId(`canvas_${randomUUID()}`)
+      const commandId = `canvas_${randomUUID()}` as CanvasCommandId
       const command: CanvasGenerateCommand = {
         commandId,
         action: 'generate',
