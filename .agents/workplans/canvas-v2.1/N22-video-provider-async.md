@@ -1,122 +1,61 @@
-# N22 — 异步视频 Provider、Polling/Callback、Resume 与视频 V1
+# N22 — Async Video Provider / Polling / Callback / Resume（0.1.1-rc.2 Revision）
 
-> 项目：`zhangjaky71-stack/deepseek-harness`  
-> 基线：Canvas / Media Workflow V2.1 Production Hardening  
-> 文档性质：工程实施节点文档  
-> 使用方式：后续可以直接引用节点编号进行“实施 / Code Review / 验收 / 修复”。  
-> 总原则：具体 TypeScript API 签名以实施时仓库当前源码为准；职责边界、状态不变量和验收条件以本节点文档为准。
+Status: `PLANNED`
 
-## 1. 节点目标
+## 1. 目标
 
-实现 text-to-video/image-to-video 长任务，支持 Provider 异步 task、Polling 或 Callback，并完成视频 V1 产品链。
+实现真实/Mock异步Video Provider operation的start/poll/callback/cancel/resume，并与N15 permit、N16 durable Run/Job、N21 video materializer集成。
 
-## 2. 前置依赖
+## 2. 依赖
 
 `N15, N16, N21`
 
-依赖节点未验收时，不应把本节点公开 API 视为稳定。
+## 3. Async operation identity
 
-## 3. 本节点范围
+Provider operation id只作为Host runtime/reconciliation identity，不作为Browser bearer capability。Durable Run可以保存安全、必要、可重建的provider operation reference（若Provider resume要求），但绝不保存credential/signed temp URL。
 
-- text-to-video。
-- image-to-video。
-- providerTaskId。
-- polling/callback。
-- callback signature/replay protection。
-- duplicate/out-of-order callback。
-- cancel。
-- 视频 asset save。
+## 4. Start
 
-## 4. 明确不在本节点处理
+只有持有有效 N15 permit 的 N16 attempt可以start。Start成功/失败与 durable Run transition顺序必须明确，避免crash后既收费又没有可恢复 operation identity。
 
-- 不越级实现尚未到达的后续 Provider/UI/治理能力，除非为编译所需的最小 seam。
-- 不改变 V2.1 已冻结的核心不变量。
-- 不通过临时 Browser state、直接 Provider 调用或 Session 私有 hack 绕过前置架构。
+## 5. Poll/callback
 
-## 5. 预计代码位置
+- polling有backoff/timeout/cancel；
+- callback严格auth/verify/provider mapping；
+- poll与callback可能竞态，terminal settlement幂等；
+- duplicate/late callback不能创建第二output；
+- callback不直接写Browser或绕过N16。
 
-- `具体 video provider package`
-- `callback route integration`
-- `packages/canvas/canvas/src/reconciler.ts`
+## 6. Resume/restart
 
-实际开始实施时必须再次读取目标目录附近的 `AGENTS.md`，代码位置可依仓库当前结构小幅调整。
+进程重启后根据 durable Run/provider operation reference恢复：
 
-## 6. 核心接口 / 行为契约
+- 已terminal → 不重启Provider；
+- pending/running → resume/poll；
+- unknown operation → explicit interrupted/failed reconciliation；
+-不能silent start一个新收费operation冒充resume。
 
-Callback：
+## 7. Materialization
 
-```text
-verify signature
-→ providerTaskId ownership
-→ idempotency
-→ monotonic state transition
-→ save video
-→ commit terminal Canvas state
-```
+Provider terminal success只表示remote task完成。N21 video durable save成功后才能把Canvas output/run标记为最终成功。
 
-Content rejection 不允许 fallback 绕过安全策略。
+## 8. Latest Harness integration
 
-## 7. 实施步骤
+实现前重新读取 0.1.1-rc.2 最新 Jobs/cancellation/event packages，不冻结旧rc.8 API。N16 Run authority仍是业务真源。
 
-1. 实现真实或 Mock async create task。
-2. 实现 polling 或 callback（按目标 Provider）。
-3. callback 做签名和 replay protection。
-4. 重复 callback 幂等。
-5. out-of-order terminal→running 拒绝。
-6. 完成后先 VideoAssetStore save，再 Canvas completed。
-7. cancel 和 late completion race 按 N16 规则处理。
-8. 若 Provider 支持 resume，为未来 durable recovery 保存安全 task ref。
+## 9. Tests
 
-## 8. 工程约束
+- start/poll success/failure；
+- callback success/verification failure；
+- poll+callback race；
+- duplicate callback；
+- cancel before/during terminal；
+- restart resume；
+- missing provider operation；
+- video materialization failure；
+- no second Provider operation on recovery；
+- latest Jobs REAL integration。
 
-- 所有 durable state 只在 commit point 发布。
-- 产品可见 plugin 必须有符合仓库要求的 REAL composition coverage。
-- package 行为变化同步更新 README/JSDoc。
-- `src/types.ts` 保持 types-only；测试放 package-level `tests/`。
-- 新增 package 必须提供 `./invariant` 并正确接 aggregate/build 配置。
-- Registry/listener/subscription 必须证明 disposal/HMR 安全。
+## 10. 验收
 
-## 9. 测试要求
-
-- [ ] text-to-video。
-- [ ] image-to-video。
-- [ ] duplicate callback。
-- [ ] invalid signature。
-- [ ] out-of-order。
-- [ ] cancel。
-- [ ] Browser close Host continue。
-- [ ] Host restart V1 interrupted。
-
-## 10. 验收标准
-
-- [ ] 视频正式达到 V1 要求，不再是可选能力。
-- [ ] Minimal/Editor 都能播放结果。
-- [ ] History 可重新使用视频/来源图片。
-
-## 11. Definition of Done
-
-- [ ] 代码通过 typecheck/lint/build（按仓库对应命令）。
-- [ ] 本节点单元测试通过。
-- [ ] 必要 integration / REAL composition 测试通过。
-- [ ] README/JSDoc 与公开行为一致。
-- [ ] 没有未说明的架构偏差。
-- [ ] 提交/PR 描述包含测试证据与剩余限制。
-
-## 12. 风险与禁止项
-
-- 视频 Provider API/计费差异大；必须逐 Provider 做官方文档核验。
-
-## 13. 验收时应输出的结果
-
-后续如果用户要求“验收本节点”，应至少输出：
-
-1. 实际修改文件清单。
-2. 关键接口与设计是否符合本节点契约。
-3. 测试命令与结果。
-4. REAL composition/E2E 证据（如适用）。
-5. 未解决问题及严重度。
-6. `ACCEPTED / ACCEPTED WITH FOLLOW-UP / REJECTED` 结论。
-
-## 14. 实施指令示例
-
-后续可以直接说：`实施 N22`、`检查 N22`、`验收 N22` 或 `修复 N22 验收问题`。
+真实或高保真Mock async video provider在进程重启/重复回调/取消竞态下保持单一durable Run/output语义。
