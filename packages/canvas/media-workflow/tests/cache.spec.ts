@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkflowNodeId } from '@deepseek-ai/dsh-canvas'
-import {
-  MemoryMediaNodeExecutionCache,
-} from '../src/engine.ts'
+import { MemoryMediaNodeExecutionCache } from '../src/engine.ts'
 import type {
   MediaNodeExecutionCache,
   MediaNodeExecutionFingerprint,
   MediaNodeExecutorResult,
+  WorkflowRuntimeEvent,
 } from '../src/engine-types.ts'
 import type { MediaWorkflowExecutionError } from '../src/engine.ts'
 import {
@@ -22,16 +21,25 @@ import {
 afterEach(disposeContexts)
 
 describe('deterministic execution cache', () => {
-  it('reuses deterministic DAG results on a later run', async () => {
+  it('reuses deterministic DAG results and emits cache-hit runtime facts on a later run', async () => {
     const cache = new MemoryMediaNodeExecutionCache()
     const { executors, engine } = await engineHarness(undefined, cache)
     const calls: string[] = []
     registerTextExecutors(executors, calls)
     const first = await engine.run({ workflow: chain() })
-    const second = await engine.run({ workflow: chain() })
+    const events: WorkflowRuntimeEvent[] = []
+    const second = await engine.run({
+      workflow: chain(),
+      eventSink: { publish: event => { events.push(event) } },
+    })
     expect(first.nodes.get(WorkflowNodeId('a'))?.cacheHit).toBe(false)
     expect(second.nodes.get(WorkflowNodeId('a'))?.cacheHit).toBe(true)
     expect(calls).toEqual(['a', 'b', 'c'])
+    expect(events.map(event => event.kind)).toEqual([
+      'node-started', 'node-cache-hit', 'node-completed',
+      'node-started', 'node-cache-hit', 'node-completed',
+      'node-started', 'node-cache-hit', 'node-completed',
+    ])
   })
 
   it('never auto-caches a non-deterministic definition', async () => {
