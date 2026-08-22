@@ -1,110 +1,203 @@
-# Harness ↔ Canvas Dynamic Plugin Architecture
+# Harness ↔ Canvas V2.2 Plugin Architecture (`dsh@0.1.1-rc.2`)
 
-## 1. 架构目标
+## 1. Architectural objective
 
-在 Harness rc.8 的 dynamic client graph 上，把 Canvas 建成独立、可装载、可卸载、可 HMR、可关闭的产品能力，而不是把 Canvas 写死在 Web shell。
+Canvas is a first-class Harness extension domain. It must use Harness lifecycle, Session, Remote, Settings, Attachment, Client module and renderer infrastructure rather than embedding a parallel app framework.
 
-## 2. Ownership 图
+The product, however, deliberately adds a Canvas work surface beside Conversation. This document separates **framework ownership** from **product ownership** so future upstream syncs do not erase that requirement.
 
-```text
-Host
-├─ Session / CanvasService          durable authority
-├─ Canvas Remote                    Browser mutations/queries
-├─ MediaNodeRegistry                semantic node catalog
-├─ Workflow Engine                  N12+
-├─ Jobs / Providers                 N14+
-└─ Attachment Store                binary authority
-
-Browser
-├─ Web Boot Kernel                  framework-free startup only
-├─ render-service                   React root owner
-├─ ui-layout                        shell/layout owner
-├─ ui-conversation                  chat/composer owner
-├─ ui-attachment                    attachment presentation owner
-└─ ui-canvas                        Canvas product owner
-    ├─ CanvasView
-    ├─ MinimalCanvas
-    ├─ WorkflowEditor
-    ├─ session-scoped presentation store
-    ├─ interaction context builder
-    └─ Node catalog client projection
-```
-
-## 3. Slot / Service 规则
-
-Canvas V2 默认继续使用 Harness 已存在的 UI composition seam：
+## 2. High-level topology
 
 ```text
-conversation.view
+Host Harness
+├─ Session Log / Session Projection
+├─ Authorization / Settings
+├─ Attachment image authority
+├─ CanvasService
+├─ MediaNodeRegistry
+├─ MediaWorkflow Engine
+├─ MediaModelRegistry
+├─ MediaProviderRuntime
+└─ CanvasRunAdmission / later Run lifecycle
+         │ Typert Remote + Session projections
+         ▼
+Browser Harness
+├─ Client Runtime / Sessions
+├─ ui-renderer          ← React root + React bindings
+├─ ui-layout            ← geometry + generic slots
+│   ├─ sidebar
+│   ├─ shell.main       ← intentional Canvas extension
+│   ├─ conversation
+│   ├─ details
+│   └─ shell.overlay
+├─ ui-conversation      ← Conversation + Composer owner
+├─ ui-attachment        ← conversation attachment presentation
+└─ ui-canvas            ← Canvas Minimal/Editor presentation owner
 ```
 
-但这个 slot 只决定“在哪里显示 Canvas”，不决定谁持有 React root。rc.8 中 React root 由 `render-service` 持有。
+## 3. Host ownership
 
-`ui-layout` 只应该知道可渲染区域/column/overlay，不应该知道：
+### CanvasService
 
-- Workflow schema
-- Node executor
-- Provider
-- Canvas revision
-- Run lifecycle
-- Asset provenance
+Owns Canvas semantic commands, revisions, event append and current/history business operations. Browser Remote and Agent tools must converge here or at an explicitly shared command layer above it.
 
-## 4. Minimal / Editor Ownership
+### Session Projection
+
+Canvas projection must use the current official Projection state/wire-view contract:
 
 ```text
-CanvasViewState
-├─ mode: minimal | editor
-├─ selection
-├─ inspector draft
-├─ local graph layout interaction
-└─ transient save/progress presentation
+Session events
+    ↓
+Host Canvas projection state
+    ↓ explicit wire view
+Browser-safe Canvas projection
 ```
 
-以上全部属于 Canvas client plugin 的 presentation state。`mode` 不进入 Workflow semantic state；durable layout 走独立 layout projection/API。
+A private `owner/readGuard` projection-registry extension is not the long-term compatibility contract. Authorization remains mandatory but should be enforced at the synchronized official Session/Remote exposure boundary.
 
-## 5. Dynamic Plugin Lifecycle
+### Attachment
 
-`ui-canvas` 必须满足：
-
-1. activation 时注册 slot/service/listener。
-2. dispose 时撤销全部注册、subscription、timer、event listener。
-3. HMR replacement 不产生重复 slot occupant 或双 listener。
-4. session 切换时 presentation state 正确隔离。
-5. Canvas plugin 失败不能破坏 Harness boot failure page / conversation 基础能力。
-
-## 6. Node Catalog
-
-Browser 不打包一份 Host node registry 副本。
+Harness Attachment is the single image binary authority:
 
 ```text
-Host MediaNodeRegistry
-       │
-       ▼
-client-safe catalog Remote/Projection
-       │
-       ▼
-NodeLibrary / Inspector / Agent-facing summary
+raw image bytes
+→ validate/normalize/save
+→ ImageAttachmentRef
+→ Canvas durable AssetRef/provenance
 ```
 
-自定义 plugin node 在 Provider 缺失时仍能被存储和渲染；执行能力由当前 Host registry/admission 决定。
+Model request images are derived later through the official request-image pipeline. Canvas does not own image compression/request caches.
 
-## 7. 三栏布局
+### Media Workflow / Model / Provider
 
-现有产品要求继续保留：
+These remain Canvas-owned generation domains:
+
+- MediaNodeRegistry: exact `(type, version)` metadata, open-world.
+- MediaWorkflow Engine: validation/planning/execution fingerprinting, Browser-independent.
+- MediaModelRegistry: generation-model capability and routing policy.
+- MediaProviderRuntime: generation Provider operations/handles/cancel/health.
+
+They are distinct from Harness Chat LLM model routing.
+
+### Run Admission
+
+N15 owns Host-side pre-start governance. Every Browser/Agent run path must receive the same admission result and exact WorkflowRef fence.
+
+## 4. Browser ownership
+
+### ui-renderer
+
+Official `ui-renderer` owns:
+
+- `createRoot` / `hydrateRoot`;
+- React bindings required by dynamic UI plugins;
+- application-root mounting/unmounting.
+
+Web boot and `ui-layout` may not take this ownership back. Legacy `web-react` compatibility assumptions are superseded.
+
+### ui-layout
+
+`ui-layout` owns only geometry, generic slots and panel viewing state. It must not own Canvas semantic state, mode, workflow, run or asset state.
+
+The private extension adds a generic `shell.main` session slot and the geometry required to place it beside Conversation. This is an intentional product fork over official Layout, not a request to fork the whole layout subsystem.
+
+### ui-conversation
+
+Owns ConversationRoot, message flow, Composer and conversation-specific input seats. Canvas does not create a second Composer.
+
+### ui-canvas
+
+Owns:
+
+- Minimal/Editor presentation choice;
+- Canvas-specific selection/focus and transient editor presentation state;
+- Canvas-specific workflow renderer/inspector/library;
+- Canvas output composition inside `shell.main`;
+- prompt-preparation sampling for Canvas interaction context;
+- binding to Host node catalog/settings/projection/remote faces.
+
+It does **not** own durable semantic truth.
+
+## 5. Minimal vs Editor
 
 ```text
-Workspace / Navigation | Canvas | Conversation
+same Session Canvas projection
+        │
+        ├─ Minimal → current run/output/asset presentation
+        └─ Editor  → same workflow + layout/draft editing presentation
 ```
 
-Tool details 可以 overlay Conversation，而不是形成永久第四栏。布局实现可以位于 `ui-layout`，但 Canvas 内容必须通过正式 slot/plugin 注入。
+Switching modes must not create/copy a workflow or run. Editor draft state is presentation-only until a Host CAS mutation succeeds.
 
-## 8. 与独立 Infinite Canvas 服务的关系
+## 6. Agent and command path
 
-`apps/infinite-canvas` 当前仍是独立 FastAPI/静态应用进程。它可以作为过渡或外部 Canvas renderer，但最终 Harness integration contract 应由 `ui-canvas`/Canvas Remote/Session 定义，而不是由 iframe URL 定义。
+```text
+user prompt / slash command / Agent tool
+            │
+            ├─ official image submission envelope when images exist
+            │
+            ▼
+Canvas intent/tool/command
+            ▼
+Host Canvas command/service
+            ▼
+Workflow mutation or Run admission/start
+            ▼
+Session durable events + Projection
+            ▼
+Minimal/Editor update
+```
 
-因此：
+No Canvas-specific Browser→Provider shortcut is allowed.
 
-- iframe 可以暂时存在；
-- iframe 不是 Canvas Domain API；
-- Agent/Session 不得通过 DOM/iframe hack 控制业务状态；
-- 后续替换 renderer 时不应影响 Workflow/Session/Agent contract。
+## 7. Region editing
+
+Region selection is a normalized Canvas semantic intent sampled from UI context. The generic official `read_image_region` tool no longer exists and must not be reintroduced as an architectural dependency.
+
+Region operations should flow through Canvas image-edit/crop nodes/provider adapters and, when a derived durable image is required, save the result through Harness Attachment.
+
+## 8. Settings lifecycle
+
+Browser Canvas settings bind through the shared official Settings Describe Mirror. Host Canvas features still follow restart semantics:
+
+```text
+composition config base
++ durable user overlay
+→ effective settings sampled at feature-service activation
+→ immutable current CanvasCapabilities
+```
+
+Changing Settings does not half-hot-enable a currently disabled Canvas deployment.
+
+## 9. Plugin lifecycle requirements
+
+Every registration/subscription must belong to the creating Cordis effect/fiber:
+
+- `shell.main` occupant retracts when ui-canvas unloads;
+- Renderer root unmounts with ui-renderer dependency lifetime;
+- local Canvas mode/selection state is pruned with Session/plugin lifetime;
+- node/model/provider registry definitions unregister exactly on owning plugin disposal;
+- settings mirror scope subscriptions dispose with caller lifecycle;
+- no HMR generation reuses stale Browser semantic/presentation anchors.
+
+## 10. Cross-package value rules
+
+Client feature packages cooperate through Cordis services, slots, standard hooks and JSON-safe injected shares. Cross-plugin runtime imports must obey the current client package/domain graph rules.
+
+Canvas domain/engine/provider packages remain Browser-independent unless a dedicated client-safe types surface is explicitly published.
+
+## 11. Upgrade rule
+
+For infrastructure packages modified by both upstream and Canvas:
+
+```text
+latest official file/package
+        ↓
+reconcile official behavior first
+        ↓
+replay documented Canvas extension only
+        ↓
+run focused divergence tests
+```
+
+The largest current replay patch is `shell.main`; it must never be used as justification to freeze an old official ui-layout implementation.
