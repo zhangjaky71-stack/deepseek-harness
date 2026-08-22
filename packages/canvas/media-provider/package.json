@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-media-provider",
-  "description": "Media Provider/model capability registry and requirement resolver for Canvas workflows",
+  "description": "Media Provider/model capability registry, requirement resolver, and runtime adapter seam for Canvas workflows",
   "version": "0.1.0-rc.7",
   "publishConfig": { "access": "public" },
   "repository": {
@@ -20,6 +20,10 @@
       "types": "./lib/types/types.d.ts",
       "default": "./lib/types.js"
     },
+    "./runtime": {
+      "types": "./lib/types/runtime.d.ts",
+      "default": "./lib/runtime.js"
+    },
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
@@ -35,12 +39,14 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-brand": "workspace:^",
+    "@deepseek-ai/dsh-canvas": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-media-workflow": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-brand": "workspace:^",
+    "@deepseek-ai/dsh-canvas": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-media-workflow": "workspace:^"
   }
