@@ -1,4 +1,7 @@
-/** Fault-injectable Mock Media Provider for ProviderExecutor and full-DAG tests. */
+/**
+ * Fault-injectable Mock Media Provider for ProviderExecutor and full-DAG tests.
+ * @module @deepseek-ai/dsh-media-provider-mock
+ */
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -17,16 +20,19 @@ import {
   type MediaProviderStartResult,
 } from '@deepseek-ai/dsh-media-provider/runtime'
 
-/** Stable Mock Provider/catalog identities used by integration fixtures. */
+/** Stable Provider id used by the opt-in Mock registration. */
 export const MOCK_MEDIA_PROVIDER_ID = MediaProviderId('mock-media')
+/** Stable Provider-local model id used by the universal Mock model. */
 export const MOCK_MEDIA_MODEL_ID = MediaModelId('mock-universal-v1')
 
+/** N13 Provider descriptor installed by the Mock plugin. */
 export const MOCK_MEDIA_PROVIDER_DESCRIPTOR: MediaProviderDescriptor = Object.freeze({
   id: MOCK_MEDIA_PROVIDER_ID,
   displayName: 'Mock Media Provider',
   enabled: true,
 })
 
+/** Universal N13 model descriptor covering the four N14 Provider-backed capabilities. */
 export const MOCK_MEDIA_MODEL_DESCRIPTOR: MediaModelDescriptor = Object.freeze({
   providerId: MOCK_MEDIA_PROVIDER_ID,
   id: MOCK_MEDIA_MODEL_ID,
@@ -45,9 +51,10 @@ export const MOCK_MEDIA_MODEL_DESCRIPTOR: MediaModelDescriptor = Object.freeze({
   }),
 })
 
+/** Failure classes that a queued Mock scenario can inject. */
 export type MockMediaFailure = 'rate-limit' | 'server-error' | 'rejected' | 'timeout'
 
-/** One deterministic behavior consumed by the next Mock start call. */
+/** One deterministic behavior consumed by the next Mock `start()` call. */
 export interface MockMediaProviderScenario {
   readonly mode?: 'inline' | 'polling' | 'callback'
   readonly pendingResumes?: number
@@ -71,7 +78,7 @@ const encoder = new TextEncoder()
 function abortError(): MediaProviderError {
   return new MediaProviderError(
     'MEDIA_PROVIDER_ABORTED',
-    `Mock Media Provider operation was aborted`,
+    'Mock Media Provider operation was aborted',
     { providerId: MOCK_MEDIA_PROVIDER_ID },
   )
 }
@@ -96,7 +103,7 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 function failScenario(scenario: MockMediaProviderScenario): never {
   switch (scenario.failure) {
     case 'rate-limit':
-      // Deliberately throw SDK-shaped metadata instead of MediaProviderError so N14 normalization is exercised.
+      // SDK-shaped metadata intentionally exercises the N14 normalization path.
       throw { status: 429, retryAfterMs: scenario.retryAfterMs ?? 1000, rawResponse: 'mock-secret-provider-body' }
     case 'server-error':
       throw { status: 503, rawResponse: 'mock-secret-provider-body' }
@@ -154,8 +161,8 @@ function completionFor(request: MediaProviderRequest, sequence: number): MediaPr
 }
 
 /**
- * In-memory Provider with queued behavior. It stores no credentials and emits no Provider URL/raw response.
- * Async tasks retain completion state so duplicate resume/completion delivery is idempotent.
+ * In-memory Provider with queued deterministic behavior and failure injection.
+ * It stores no credentials and emits no Provider URL/raw response. Async tasks retain completion state so duplicate resume/completion delivery is idempotent.
  */
 export class MockMediaProvider implements MediaProvider {
   private readonly scenarios: MockMediaProviderScenario[] = []
@@ -163,12 +170,15 @@ export class MockMediaProvider implements MediaProvider {
   private sequence = 0
   private cancelCalls = 0
 
-  /** Queue behavior for subsequent `start()` calls. No scenario means inline success. */
+  /**
+   * Queue behavior for subsequent `start()` calls; an empty queue means inline success.
+   * @param scenarios - deterministic behaviors consumed in insertion order.
+   */
   enqueue(...scenarios: readonly MockMediaProviderScenario[]): void {
     this.scenarios.push(...scenarios)
   }
 
-  /** Number of Provider cancel calls observed by this instance. */
+  /** @returns Number of Provider cancel calls observed by this instance. */
   get cancellationCount(): number {
     return this.cancelCalls
   }
@@ -225,7 +235,6 @@ export class MockMediaProvider implements MediaProvider {
         retryAfterMs: task.scenario.retryAfterMs ?? 1,
       })
     }
-    // Returning the same immutable completion on every later resume makes duplicate completion delivery idempotent.
     return Object.freeze({ status: 'completed', completion: task.completion })
   }
 
@@ -239,10 +248,13 @@ export class MockMediaProvider implements MediaProvider {
 
 /** Cordis function-plugin name. */
 export const name = 'media-provider-mock'
-/** Mock registers catalog metadata first, then the runtime adapter, on one owning fiber. */
+/** Services required before the Mock can register catalog metadata and its runtime adapter. */
 export const inject = ['mediaModels', 'mediaProviders']
 
-/** Register the default successful Mock Provider and universal model. */
+/**
+ * Register the default successful Mock Provider and universal model on one owning fiber.
+ * @param ctx - Cordis context containing N13/N14 Provider registries.
+ */
 export function apply(ctx: Context): void {
   const provider = new MockMediaProvider()
   ctx.mediaModels.register(MOCK_MEDIA_PROVIDER_DESCRIPTOR, [MOCK_MEDIA_MODEL_DESCRIPTOR])
