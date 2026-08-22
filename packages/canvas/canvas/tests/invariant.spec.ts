@@ -76,7 +76,9 @@ describe('Canvas stream invariants', () => {
     const session = ctx.sessions.create(SessionId('canvas-layout-authority'))
     const created = createChange()
     session.append('canvas/change', created)
-    if (created.canvas === null || created.canvas.workflow === null) throw new Error('test Canvas lacks workflow')
+    const canvas = created.canvas
+    if (canvas === null || canvas.workflow === null) throw new Error('test Canvas lacks workflow')
+    const workflow = canvas.workflow
 
     await ctx.plugin(InvariantRegistry, { enabled: true })
     await ctx.plugin(CanvasInvariantCompanion)
@@ -90,10 +92,10 @@ describe('Canvas stream invariants', () => {
       version: CANVAS_LAYOUT_CHANGE_VERSION,
       layout: {
         schemaVersion: 1,
-        workflowId: created.canvas.workflow.id,
+        workflowId: workflow.id,
         nodePositions: { prompt: { x: 0, y: 0 } },
         viewport: { x: 0, y: 0, zoom: 1 },
-        updatedAt: created.canvas.updatedAt,
+        updatedAt: canvas.updatedAt,
       },
       meta,
     } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({
