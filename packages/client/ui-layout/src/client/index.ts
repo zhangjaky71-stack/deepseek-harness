@@ -7,10 +7,11 @@
  * with the runtime sessions service. A second effect seats the theme
  * presenter, which projects ctx.theme snapshots onto document.body.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PanelActions } from './service.ts'
-import { AppFrame } from './AppFrame.tsx'
+import { AppFrame, type AppFrameInjected } from './AppFrame.tsx'
+import { parseCanvasCommandEvent, type CanvasCommandDelivery } from './canvas-bridge.ts'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from './theme-presenter.ts'
@@ -108,13 +109,26 @@ export interface DetailsOwnerProps {}
 export const inject = ['slots', 'theme']
 
 /**
- * Client plugin body: provide ctx.layout, then one register() call — AppFrame
- * into 'root' with the four child-slot declarations, the layout store seat,
- * and the inject hook that hands the store's bound actions to the service.
+ * Client plugin body: provide ctx.layout, project live Canvas commands into a
+ * registrant-private observable, then register the root frame.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
   const layout = new LayoutController()
+  const canvasCommands = createSnapshotStore<ReadonlyMap<string, CanvasCommandDelivery>>(new Map())
+  const lastCanvasSeq = new Map<string, number>()
+
+  ctx.effect(() => ctx.on('session/live-event', (sessionId, event) => {
+    const delivery = parseCanvasCommandEvent(sessionId, event)
+    if (delivery === null) return
+    const previous = lastCanvasSeq.get(sessionId) ?? -1
+    if (delivery.seq <= previous) return
+    lastCanvasSeq.set(sessionId, delivery.seq)
+    const next = new Map(canvasCommands.getSnapshot())
+    next.set(sessionId, delivery)
+    canvasCommands.set(next)
+  }), 'ui-layout: live Canvas command projection')
+
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
@@ -129,10 +143,12 @@ export function apply(ctx: ClientContext): void {
       // entry and delivers useStore/actions to AppFrame as standard props.
       store: createLayoutStore,
       // The hook's only side effect connects the root store to ctx.layout;
-      // conversation business actions belong to their registrants.
-      inject: (actions: PanelActions) => {
+      // conversation business actions belong to their registrants. Canvas
+      // command data stays outside the layout geometry store and enters through
+      // the framework's observable hooks compartment.
+      inject: (actions: PanelActions): AppFrameInjected => {
         layout.attachPanels(actions)
-        return {}
+        return { hooks: { canvasCommands } }
       },
     }, AppFrame)
     return () => {
