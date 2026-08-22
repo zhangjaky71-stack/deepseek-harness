@@ -249,3 +249,8 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+# Canvas orchestration is session-owned: this tool appends a durable command,
+# while the Web client's live mux path delivers it to the separately-run app.
+- id: tool-canvas
+  name: '@deepseek-ai/dsh-tool-canvas'
