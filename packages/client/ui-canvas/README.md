@@ -26,6 +26,14 @@ Disabled feature data is not erased. In particular, a historical `video.generate
 
 The send-time interaction preparer is registered only inside an enabled Canvas capability scope. `regionEdit.enabled=false` strips any stale browser-local region selection before staging an otherwise valid prompt; the Host independently rejects a direct region-bearing stage call, so UI filtering is an affordance rather than the security/enforcement boundary.
 
+## Deployment settings
+
+When Harness Settings UI is present, `ui-canvas` independently binds the durable `canvas` Settings namespace and contributes a Canvas settings section for all eight deployment flags. This Settings contribution is intentionally outside the current `canvas.enabled` product-surface scope: even when the effective Host capability currently has `canvas.enabled=false`, the settings section remains available so the user can re-enable Canvas for the next activation instead of being locked out of the control that restores it.
+
+Settings edits are restart-applied configuration, not a live capability channel. Toggling a checkbox writes the user layer with `SettingsScope.set()`; **Reset** removes that user override with `SettingsScope.unset()` so the value inherits from composition/schema again. The current Canvas surface and affordances continue to follow only the Host `remote.canvasFeatures` effective snapshot for this activation. A saved checkbox change therefore does not make a disabled current Host pretend Canvas or Editor is already active; the updated value takes effect after the Host/feature service restarts or remounts.
+
+The Settings integration is optional for Canvas rendering. If `settingsScope` or the Settings UI shell is absent, no Canvas settings section is contributed, while capability-gated Canvas rendering continues to use the Host feature Remote exactly as before.
+
 ## Interaction selection and Agent turns
 
 N08 adds a separate per-session browser-local interaction store. Editor node/edge cards and Minimal/Editor output candidates can be selected; a later region/mask editor can use the same store through the `CanvasRegionSelection` seam. Selection is presentation context, not Canvas domain state: selecting, clearing, or focusing an item does not append a Session event, change a Projection, or advance a Canvas revision.
