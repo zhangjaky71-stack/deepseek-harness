@@ -255,8 +255,16 @@ export class MediaModelRegistry extends Service {
     return () => { void disposeEffect() }
   }
 
+  /** Notify observers after commit; observer failure is diagnostic and never vetoes catalog state. */
   private emit(change: MediaModelRegistryChange): void {
-    for (const listener of this.listeners) listener(change)
+    for (const listener of this.listeners) {
+      try {
+        listener(change)
+      } catch (error) {
+        this.ctx.logger.warn('mediaModels: a registry change listener failed')
+        this.ctx.logger.warn(error)
+      }
+    }
   }
 }
 
