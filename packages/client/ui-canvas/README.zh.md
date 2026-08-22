@@ -2,19 +2,23 @@
 
 [English](README.md) | 中文
 
-基于 Session-native Canvas Domain 的 Browser-only Canvas Conversation View。该插件不拥有 Conversation Session、Composer、Canvas durability、部署 Capability Policy 或 Provider execution。当前 Canvas 与 Editor Layout 状态只来自标准 Session Projection hook（`canvas` / `canvasLayout`），部署能力则来自 Host 只读 `canvasFeatures` Remote。
+基于 Session-native Canvas Domain 的 Browser-only Canvas 产品面。该插件不拥有 Conversation Session、Composer、Canvas durability、部署 Capability Policy、Layout Shell 或 Provider execution。当前 Canvas 与 Editor Layout 状态只来自标准 Session Projection hook（`canvas` / `canvasLayout`），部署能力则来自 Host 只读 `canvasFeatures` Remote。
 
 ## Surface 契约
 
-View 在同一个 projected Canvas 上提供两种 presentation mode。**Minimal** 只展示产品状态与生成结果引用，不暴露 Workflow topology。**Editor** 展示以 Workflow 为中心的 shell，包括语义 Node/Edge 数量、Revision/Layout 信息以及可选择的 Node/Edge card；N09 仍有意停在可视化 DAG mutation 之前。
+Canvas 产品面注册到通用、session-scoped 的 `shell.main` 区域。`ui-layout` 只声明和排列通用 `shell.left` / `shell.main` / `shell.right`，不会理解 Canvas Workflow、Run、Asset、Selection、Mode 或 mutation state。`ui-conversation` 继续在 `shell.right` 拥有 Conversation/Composer，并在内部继续使用自己的 `conversation.view` composition。Canvas 因而不需要抢占 Conversation view ring，也不会创建第二套 Composer。
+
+Surface 在同一个 projected Canvas 上提供两种 presentation mode。**Minimal** 只展示产品状态与生成结果引用，不暴露 Workflow topology。**Editor** 展示以 Workflow 为中心的 shell，包括语义 Node/Edge 数量、Revision/Layout 信息以及可选择的 Node/Edge card；完整可视化 DAG mutation 仍由后续 Editor 节点负责。
 
 Mode 是每个 Session 的 Browser-local state，永远不会成为 Session Event。用户可以自由切换 Minimal/Editor，且不会产生 Canvas mutation。Mode ledger 不依赖 Session write 或 persistence。
 
-Conversation Composer 始终由 `ui-conversation` 在 `conversation.view` ring 之外常驻拥有。因此在 Chat/Trajectory/Canvas 之间切换只会切换 Session body；输入仍使用普通 Conversation Composer，不复制一套 Canvas 专属输入框。
+普通 Conversation Composer 始终常驻在 Conversation-owned `shell.right` 产品面。位于 `shell.main` 的 Canvas 复用这条既有 Prompt 路径参与 Agent Turn，而不会复制一套 Canvas 专属输入框。
 
 ## 部署 Capability
 
-N09 让 Browser 对部署能力采取 fail-closed 策略。Plugin 会等待 generated `remote.canvasFeatures`，调用其 deployment-global 只读 `get()`；只有返回的 effective `canvas.enabled=true` 时才注册 `canvas` Conversation View。Remote 缺失、业务失败、Transport 失败，或查询完成前 Plugin 已 dispose，都不会注册 Canvas Tab。Capability discovery 不写入 Session State，也不会成为第二套业务状态 authority。
+Browser 对部署级 Canvas capability 采取 fail-closed 策略。Plugin 会等待 generated `remote.canvasFeatures`，调用其 deployment-global 只读 `get()`；只有返回的 effective `canvas.enabled=true` 时才向 `shell.main` 贡献 Canvas 产品面。Feature Remote 缺失、业务失败、Transport 失败，或查询完成前 Plugin 已 dispose，都不会发布 Canvas main surface。Capability discovery 不写入 Session State，也不会成为第二套业务状态 authority。
+
+写能力与只读渲染有意解耦。Canvas 已启用后，Projection 驱动的 Minimal surface 不要求 `remote.canvas` mutation transport 常驻；mutation transport 缺失或重连时，写操作会返回明确的 offline/save 结果，而不是抹掉可读 Projection。如果 Editor 已启用但 node catalog discovery 失败，本次 activation 会禁用 Editor，同时保留 Minimal 只读产品面。
 
 `editor.enabled=false` 时，即使 Browser-local Mode Store 里仍保存着 `editor`，Surface 也会强制使用 Minimal，并且不渲染 Mode Switch。已有本地偏好不会被重写，因此未来部署重新开启 Editor 时仍可沿用普通的 local preference 语义，不需要 Session mutation。
 
