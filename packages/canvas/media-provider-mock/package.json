@@ -35,7 +35,9 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-canvas": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/dsh-media-provider": "workspace:^"
+    "@deepseek-ai/dsh-media-provider": "workspace:^",
+    "@deepseek-ai/dsh-media-workflow": "workspace:^"
   }
 }
