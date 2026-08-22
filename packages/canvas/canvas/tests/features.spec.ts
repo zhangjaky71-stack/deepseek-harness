@@ -17,7 +17,7 @@ import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 function videoWorkflow(): MediaWorkflow {
