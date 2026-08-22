@@ -114,7 +114,7 @@ describe('Canvas Session projections and layout state', () => {
     const bench = await harness()
     const created = bench.ctx.canvas.create(bench.agent, { workflow: baseWorkflow() })
     bench.ctx.canvas.saveLayout(bench.agent, layoutFor(created))
-    bench.ctx.canvas.clear(bench.agent, created.id)
+    bench.ctx.canvas.clear(bench.agent, workflowRef(created))
 
     expect(bench.values()).toEqual({ canvas: null, canvasLayout: null })
     expect(bench.session.events.some(event => event.type === 'canvas/layout-change')).toBe(true)
@@ -191,9 +191,10 @@ describe('Canvas Session projections and layout state', () => {
       ...layoutFor(created),
       workflowId: MediaWorkflowId('other-workflow'),
     })).toThrow(CanvasLayoutError)
-    if (created.workflow === null) throw new Error('test Canvas lacks workflow')
+    const workflow = created.workflow
+    if (workflow === null) throw new Error('test Canvas lacks workflow')
     expect(() => bench.ctx.canvas.saveLayout(bench.agent, {
-      workflowId: created.workflow.id,
+      workflowId: workflow.id,
       nodePositions: { [WorkflowNodeId('missing')]: { x: 0, y: 0 } },
     })).toThrow(expect.objectContaining({ code: 'CANVAS_INVALID_LAYOUT' }))
     expect(bench.session.seq).toBe(before)
