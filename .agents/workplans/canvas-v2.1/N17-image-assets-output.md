@@ -1,78 +1,109 @@
-# N17 — 图片资产、Harness Attachment、多候选结果与 Primary Output（rc.8 Revision）
+# N17 — Image Asset / Harness Attachment / Multi-candidate Output（0.1.1-rc.2 Revision）
 
-## 1. 节点目标
+Status: `PLANNED / MAJOR UPSTREAM ALIGNMENT`
 
-利用 Harness durable attachment/asset 能力完成图片输入和生成结果的持久化、多候选、Primary 选择与 Minimal 展示，同时与 rc.8 动态 `ui-attachment` presentation ownership 对齐。
+## 1. 目标
 
-## 2. 前置依赖
+完全复用 Harness 0.1.1-rc.2 Image Attachment authority完成生成图片/输入图片的 durable master、Canvas AssetRef、多候选、Primary、authorized read与 Minimal/Editor呈现。Canvas不建立第二 image store或 request-image transform cache。
 
-`N16`
+## 2. 依赖
 
-## 3. 本节点范围
+`N16`，并要求 N11.5 已同步官方 Attachment/attachment-local。
 
-- Harness attachment store/image save seam。
-- CanvasImageAssetRef / AttachmentRef normalization。
-- CanvasOutput assets[] / primaryAssetIndex。
-- count 多候选。
-- provenance/metadata。
-- authorized image read。
-- user message image attachment → Canvas input asset linking seam。
+## 3. 官方 image authority
 
-## 4. 明确不在本节点处理
+最新 Harness 提供：
 
-- Session/Workflow 不保存 base64/bytes/object URL/provider temp URL。
-- Canvas 不建立第二套 image upload store。
-- `ui-canvas` 不复制 `ui-attachment` 组件 ownership。
+- normalized immutable `ImageAttachmentRef`；
+- verified media type/bytes/width/height；
+- normalization后的 `originalDimensions?`；
+- image count/byte/pixel/dimension limits；
+- `saveImage/saveImages/readImage`；
+- route-owned `ImageRequestPolicy`；
+- deterministic `readImageRequest`；
+- `RequestImageAttachment` + `variantId` request/cache identity。
 
-## 5. 核心契约
+Canvas必须把这些当底层 image binary authority。
 
-Session/Workflow 只保存稳定引用和 provenance：
-
-```text
-asset/attachment id
-mime/type
-safe metadata
-run/workflow/node/model/provider provenance
-```
-
-Binary 先 durable save，成功后才能 commit Run completed/output linked。
-
-## 6. rc.8 Attachment Ownership
+## 4. Durable output commit sequence
 
 ```text
-Harness Attachment Store      = binary authority
-ui-conversation               = message/composer data owner
-ui-attachment                 = attachment presentation owner
-Canvas AssetRef               = Workflow/Run semantic reference
-ui-canvas MediaStage          = Canvas-specific output composition
+N14 Provider raw image bytes
+→ validate/normalize with ctx.attachments.saveImage
+→ stable ImageAttachmentRef
+→ wrap/link CanvasImageAssetRef + provenance
+→ N16 append durable output/candidate event
+→ Projection/History
 ```
 
-Canvas 可以显示 asset，但不得把 attachment presentation 重新静态复制进 conversation shell。
+只有所有需要commit的 candidate durable save成功后，才可发布对应 completed output集合。部分content-addressed orphan若因后续失败存在，由 Attachment/retention规则处理；Canvas不能把部分refs假装成完成状态。
 
-## 7. 实施步骤
+## 5. CanvasImageAssetRef
 
-1. Provider/Executor result bytes 先 durable save。
-2. 生成稳定 AssetRef/AttachmentRef。
-3. count candidates 全部保存。
-4. `selectOutput` 只改 primary，不重新 Provider run。
-5. Minimal gallery/primary。
-6. authorized image loader。
-7. 用户附件作为 image node input 时只传 ref/content fingerprint。
-8. 记录 provenance。
+应保存 stable semantic信息：
 
-## 8. 测试要求
+- attachment/master stable id/ref；
+- media type + safe dimensions/bytes；
+- run/node/model/provider provenance；
+- candidate index/creation identity；
+-必要 content fingerprint。
 
-- [ ] 4 candidates 全 durable。
-- [ ] primary 切换不生成新图。
-- [ ] 刷新恢复。
-- [ ] save failure 时 Run 不 commit completed。
-- [ ] Session event 无 binary/base64。
-- [ ] composer image 可通过 ref 成为 Canvas input。
-- [ ] ui-attachment plugin 缺失不会损坏 durable asset。
+不得保存：
 
-## 9. 验收标准
+- request-image data；
+- request `variantId`作为 Canvas version identity；
+- compression cache path；
+- DeepSeek Files upload id/token；
+- object URL/provider temp URL。
 
-- [ ] Mock 文生图 Minimal 可显示。
-- [ ] 多候选/primary 语义稳定。
-- [ ] Asset 与 Workflow/Run 可追溯。
-- [ ] 与 Harness attachment store 共用同一 binary authority。
+## 6. Multi-candidate / Primary
+
+`count > 1` 时全部 candidates先 durable。Canvas Output保存 ordered asset refs；`primaryAssetIndex`/selection切换只改变 semantic primary，不重新调用 Provider。
+
+History/restore能恢复 candidate order与 primary semantics。
+
+## 7. Input images
+
+### Composer/user images
+
+0.1.1-rc.2 command/composer image envelope先由 Harness Attachment admission持久化。Canvas command/Agent tool若要引用它们，只将 stable admitted refs关联到 Canvas input/node/run boundary，不重复 base64 upload。
+
+### Existing Canvas assets
+
+N15/N17 authorization-aware Asset Availability确认 stable ref属于目标 Session/Canvas可见范围，再交 Provider adapter读取。
+
+## 8. Model request image projection
+
+如果 Canvas asset随后被发送给 Harness Chat LLM：
+
+```text
+Canvas stable ImageAttachmentRef
+→ Attachment.readImageRequest(route policy)
+→ RequestImageAttachment
+→ inline / DeepSeek Files transport
+```
+
+该 request projection不产生 Canvas workflow/run/history revision。
+
+Generation Provider若需要自己的 transform格式，由N14/N20 adapter处理；不要假设Chat LLM request image格式等于generation Provider格式。
+
+## 9. Authorized read / presentation
+
+Browser预览必须通过当前 Harness安全 media/attachment exposure seam读取，不以 `attachmentId` 当 bearer URL。`ui-canvas`可组合 Canvas-specific gallery/stage，但不复制 `ui-attachment` 的 Conversation composer/message presentation ownership。
+
+## 10. Tests
+
+- 4 candidates all durable；
+- candidate #3 primary switch no provider rerun；
+- refresh/replay restores same refs/order；
+- save failure → no completed output link；
+- Session event no bytes/base64/request variant；
+- composer image → stable Canvas input ref without second upload；
+- cross-session attachment id denied；
+- request-image derivation no Canvas event；
+- Attachment normalization metadata compatibility；
+- ui-attachment missing does not damage durable Canvas image state。
+
+## 11. 验收
+
+Mock image generation从 N14→Attachment→N16 durable output→Minimal/Editor完整跑通，且 latest official Attachment focused tests + REAL Canvas image flow执行后 ACCEPTED。
