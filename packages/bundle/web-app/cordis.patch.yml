@@ -180,6 +180,11 @@
     - id: ui-layout
       name: '@deepseek-ai/dsh-client-ui-layout'
 
+    # Dynamic React root owner. Web boot remains framework-free and hands the
+    # mount point over only after this ordinary client plugin activates.
+    - id: ui-renderer
+      name: '@deepseek-ai/dsh-client-ui-renderer'
+
     - id: ui-sidebar
       name: '@deepseek-ai/dsh-client-ui-sidebar'
 
