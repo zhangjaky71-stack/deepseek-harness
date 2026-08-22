@@ -13,17 +13,23 @@ export const inject = ['tools']
 /** No deployment configuration is required for the Phase 1 command bridge. */
 export interface Config {}
 
-function normalizedPrompt(value: string): string {
-  const prompt = value.trim()
-  if (prompt.length === 0) throw new Error('canvas requires a non-empty prompt')
-  return prompt
+function normalizedRequired(value: string, label: string): string {
+  const normalized = value.trim()
+  if (normalized.length === 0) throw new Error(`canvas requires a non-empty ${label}`)
+  return normalized
+}
+
+function normalizedOptional(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const normalized = value.trim()
+  return normalized.length === 0 ? undefined : normalized
 }
 
 /** Register the high-level `canvas` tool. */
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'canvas',
-    description: 'Send a high-level command to the user-visible Infinite Canvas. Phase 1 supports image generation through the Canvas workflow runtime.',
+    description: 'Send a high-level image-generation command to the user-visible Infinite Canvas in the Web app. The browser must have a classic canvas open; Canvas remains authoritative for model/provider execution.',
     parameters: {
       action: {
         type: 'string',
@@ -34,15 +40,15 @@ export function apply(ctx: Context): void {
       prompt: {
         type: 'string',
         required: true,
-        description: 'Generation prompt to place into the Canvas workflow.',
+        description: 'Generation prompt to place into a prompt node feeding the Canvas image generator.',
       },
       nodeId: {
         type: 'string',
-        description: 'Optional existing Canvas generator node id. Omit to create an active generator workflow.',
+        description: 'Optional existing Canvas image-generator node id. Omit to use the selected generator or create a prompt + generator pair.',
       },
       model: {
         type: 'string',
-        description: 'Optional Canvas model id.',
+        description: 'Optional Canvas image model id. Canvas validates the provider/model combination when it executes.',
       },
     },
     output: {
@@ -57,21 +63,26 @@ export function apply(ctx: Context): void {
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Canvas accepted ${value.action} command ${value.commandId}.`,
+        text: `Canvas queued ${value.action} command ${value.commandId}.`,
       }],
     },
     execute(args, exec) {
+      exec.signal.throwIfAborted()
       if (!exec.agent) throw new Error('canvas requires an owning agent session')
+      const prompt = normalizedRequired(args.prompt, 'prompt')
+      const nodeId = normalizedOptional(args.nodeId)
+      const model = normalizedOptional(args.model)
       const commandId = CanvasCommandId(`canvas_${randomUUID()}`)
       const command: CanvasGenerateCommand = {
         commandId,
         action: 'generate',
-        prompt: normalizedPrompt(args.prompt),
-        target: args.nodeId === undefined
+        prompt,
+        target: nodeId === undefined
           ? { kind: 'active' }
-          : { kind: 'node', nodeId: args.nodeId },
-        ...(args.model === undefined ? {} : { model: args.model }),
+          : { kind: 'node', nodeId },
+        ...(model === undefined ? {} : { model }),
       }
+      exec.signal.throwIfAborted()
       exec.agent.session.append('canvas/command', { command })
       return Promise.resolve({ accepted: true as const, commandId, action: command.action })
     },
