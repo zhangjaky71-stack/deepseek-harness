@@ -11,6 +11,7 @@ import type {
 export interface CanvasFlowNode {
   readonly id: WorkflowNodeId
   readonly type: string
+  readonly nodeVersion?: number
   readonly label: string
   readonly position: { readonly x: number; readonly y: number }
 }
@@ -42,6 +43,7 @@ export function toCanvasFlow(
     return {
       id: node.id,
       type: String(node.type),
+      ...(node.nodeVersion === undefined ? {} : { nodeVersion: node.nodeVersion }),
       label: node.name?.trim() || String(node.type),
       position: local ?? persisted ?? defaultPosition(index),
     }
