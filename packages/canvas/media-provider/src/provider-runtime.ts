@@ -1,7 +1,11 @@
-/** Effect-scoped Provider runtime routing and normalized operation lifecycle. */
+/**
+ * Effect-scoped Provider runtime routing and normalized operation lifecycle.
+ * @module @deepseek-ai/dsh-media-provider/runtime
+ */
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import type { MediaModelRegistry } from './model-registry.ts'
 import type { MediaProviderId } from './types.ts'
 import type {
   MediaProvider,
@@ -15,7 +19,6 @@ import type {
   MediaProviderRuntimeChange,
   MediaProviderStartResult,
 } from './runtime-types.ts'
-import type {} from './model-registry.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -43,6 +46,12 @@ export class MediaProviderError extends Error {
   readonly status?: number
   readonly retryAfterMs?: number
 
+  /**
+   * Create a normalized Provider runtime failure.
+   * @param code - stable Provider runtime failure code.
+   * @param message - safe Provider-neutral diagnostic text.
+   * @param options - optional Provider id, HTTP-like status, retry hint, and process-local cause.
+   */
   constructor(code: MediaProviderErrorCode, message: string, options: MediaProviderErrorOptions = {}) {
     super(message, options)
     this.code = code
@@ -62,7 +71,12 @@ function validRetryAfter(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
-/** Normalize an arbitrary adapter/SDK error without copying Provider response text or secrets into the public message. */
+/**
+ * Normalize an arbitrary adapter/SDK error without copying Provider response text or secrets into the public message.
+ * @param error - adapter or SDK failure value.
+ * @param providerId - Provider that produced the failure.
+ * @returns stable Provider runtime error safe for higher Host layers.
+ */
 export function normalizeMediaProviderError(error: unknown, providerId: MediaProviderId): MediaProviderError {
   if (error instanceof MediaProviderError) return error
   const record = error !== null && typeof error === 'object' ? error as Record<string, unknown> : undefined
@@ -109,12 +123,19 @@ function assertOpaqueId(value: string, label: string, providerId: MediaProviderI
   }
 }
 
+function validMediaTypeForKind(output: MediaProviderMediaOutput): boolean {
+  return output.kind === 'image'
+    ? output.mediaType.startsWith('image/')
+    : output.mediaType.startsWith('video/')
+}
+
 function snapshotOutput(output: MediaProviderMediaOutput, providerId: MediaProviderId): MediaProviderMediaOutput {
   if ((output.kind !== 'image' && output.kind !== 'video')
     || typeof output.mediaType !== 'string'
     || output.mediaType.length < 1
     || output.mediaType.length > MAX_MEDIA_TYPE_LENGTH
     || /[\u0000-\u001f\u007f]/.test(output.mediaType)
+    || !validMediaTypeForKind(output)
     || !(output.data instanceof Uint8Array)
     || output.data.byteLength === 0) {
     throw new MediaProviderError(
@@ -220,17 +241,28 @@ function wait(ms: number, signal: AbortSignal | undefined, providerId: MediaProv
 export class MediaProviderRuntimeRegistry extends Service {
   static inject = ['mediaModels']
 
+  private readonly modelRegistry: MediaModelRegistry
   private readonly providers = new Map<MediaProviderId, MediaProvider>()
   private readonly listeners = new Set<(change: MediaProviderRuntimeChange) => void>()
 
+  /**
+   * Mount runtime routing as `ctx.mediaProviders` after the N13 catalog exists.
+   * @param ctx - owning service context containing `ctx.mediaModels`.
+   */
   constructor(ctx: Context) {
     super(ctx, 'mediaProviders')
+    this.modelRegistry = ctx.mediaModels
   }
 
-  /** Register one runtime adapter on the caller fiber after its N13 Provider descriptor exists. */
+  /**
+   * Register one runtime adapter on the caller fiber after its N13 Provider descriptor exists.
+   * @param providerId - exact N13 Provider id routed by this adapter.
+   * @param provider - runtime adapter implementation.
+   * @returns idempotent disposer for this registration.
+   */
   register(providerId: MediaProviderId, provider: MediaProvider): () => void {
     assertProviderId(providerId)
-    if (this.ctx.mediaModels.getProvider(providerId) === undefined) {
+    if (this.modelRegistry.getProvider(providerId) === undefined) {
       throw new MediaProviderError(
         'MEDIA_PROVIDER_INVALID_REGISTRATION',
         `Media Provider ${providerId} must exist in the model catalog before its runtime adapter is registered`,
@@ -256,12 +288,20 @@ export class MediaProviderRuntimeRegistry extends Service {
     return () => { void disposeEffect() }
   }
 
-  /** Resolve an exact runtime adapter without fallback. */
+  /**
+   * Resolve an exact runtime adapter without fallback.
+   * @param providerId - exact Provider id selected by N13.
+   * @returns current adapter, or `undefined` when not registered.
+   */
   get(providerId: MediaProviderId): MediaProvider | undefined {
     return this.providers.get(providerId)
   }
 
-  /** Require an exact runtime adapter selected by N13. */
+  /**
+   * Require an exact runtime adapter selected by N13.
+   * @param providerId - exact Provider id selected by N13.
+   * @returns current adapter.
+   */
   require(providerId: MediaProviderId): MediaProvider {
     const provider = this.providers.get(providerId)
     if (provider !== undefined) return provider
@@ -272,12 +312,16 @@ export class MediaProviderRuntimeRegistry extends Service {
     )
   }
 
-  /** List currently registered runtime Provider ids in stable order. */
+  /** @returns currently registered runtime Provider ids in stable order. */
   list(): readonly MediaProviderId[] {
     return Object.freeze([...this.providers.keys()].sort((left, right) => left.localeCompare(right)))
   }
 
-  /** Subscribe on the caller effect lifetime. */
+  /**
+   * Subscribe on the caller effect lifetime.
+   * @param listener - synchronous post-commit topology observer.
+   * @returns idempotent disposer for the listener registration.
+   */
   onChange(listener: (change: MediaProviderRuntimeChange) => void): () => void {
     const disposeEffect = this.ctx.effect(() => {
       this.listeners.add(listener)
@@ -299,7 +343,14 @@ export class MediaProviderRuntimeRegistry extends Service {
   }
 }
 
-/** Resume/cancel one async operation until it completes. The handle itself is serializable for N16/N22. */
+/**
+ * Drive one inline or resumable Provider operation to completion.
+ * On asynchronous abort, cancellation is requested exactly once without the already-aborted signal; cancellation failure is contained, and this call waits for that cancellation request to settle before rejecting with `MEDIA_PROVIDER_ABORTED`.
+ * @param provider - exact runtime adapter selected by N13/N14 routing.
+ * @param request - Provider-neutral semantic media request.
+ * @param signal - optional operation cancellation signal.
+ * @returns completed Provider bytes plus safe operation metadata.
+ */
 export async function runMediaProviderOperation(
   provider: MediaProvider,
   request: MediaProviderRequest,
@@ -355,7 +406,12 @@ export async function runMediaProviderOperation(
   }
 }
 
-/** Explicit Provider cancellation seam for N16/N22 reconciliation paths. */
+/**
+ * Explicitly cancel a Provider operation for later reconciliation owners.
+ * @param provider - runtime adapter that owns the handle.
+ * @param handle - Provider task identity to cancel.
+ * @param signal - optional cancellation-of-the-cancel request signal.
+ */
 export async function cancelMediaProviderOperation(
   provider: MediaProvider,
   handle: MediaProviderOperationHandle,
