@@ -57,7 +57,6 @@ export interface CanvasRunAuthorizationPort {
 /** Read-only deployment feature policy consumed by N15. */
 export interface CanvasRunFeaturePort {
   isEnabled(feature: CanvasFeatureName): boolean
-  assertWorkflowExecutable(workflow: MediaWorkflow): void
 }
 
 /** Availability check for pre-existing boundary assets. N17/N21 will provide the durable implementation. */
