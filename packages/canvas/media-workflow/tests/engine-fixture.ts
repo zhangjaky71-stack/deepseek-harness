@@ -9,7 +9,7 @@ import type { MediaNodeExecutionCache, MediaNodeExecutionOutput } from '../src/e
 
 export const contexts: Context[] = []
 export async function disposeContexts(): Promise<void> {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 }
 
 const jsonScalar = z.union([z.string(), z.number(), z.boolean(), z.null()])
