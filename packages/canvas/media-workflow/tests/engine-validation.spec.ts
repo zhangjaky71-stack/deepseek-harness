@@ -24,7 +24,7 @@ import {
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 const jsonScalar = z.union([z.string(), z.number(), z.boolean(), z.null()])
