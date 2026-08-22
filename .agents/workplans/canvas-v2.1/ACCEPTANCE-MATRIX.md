@@ -1,31 +1,133 @@
-# Canvas V2.2 / Harness rc.8 — 节点验收矩阵
+# Canvas V2.2 — Acceptance Matrix (`dsh@0.1.1-rc.2`)
 
-| Node | 核心交付 | 关键验收 Gate |
-|---|---|---|
-| N00 | 工程实施总图与节点契约 | 节点编号、upstream baseline、跨节点不变量唯一可追溯。 |
-| N01 | Canvas Domain、类型系统与状态不变量 | `types.ts` 无运行时实现；Domain 不依赖 Browser；node type structural admission 是 open-world，不含 built-in whitelist；八种 Product State 有 Domain tests。 |
-| N02 | Schema Migration、Node Version 与 Golden Fixtures | 历史 fixture 可迁移；unknown plugin `type@version/config` 可在插件缺失时 reload；Core-only node version ownership；current schema unknown field fail loud。 |
-| N03 | Canvas Event Sourcing、Fold、CanvasService 与原子提交 | CanvasService 要求 exact-live Agent + Session；Service 自己 detached-fold preflight 后才 append；live writer meta v2；WorkflowRef CAS 错误分类稳定；semantic no-op 不增长 revision；RunId Session-wide 唯一；`run-update` 覆盖 queued/running/completed/failed/cancelled/interrupted 且 terminal 单调；active run 不可 clear，clear 使用 WorkflowRef CAS。 |
-| N04 | Authorization、Actor Provenance、Audit 与敏感数据边界 | UI 隐藏不是权限控制；current Canvas/Layout durable writer 在挂载 invariant 的生产组合中无 package permit 不能绕过 Host path；Browser 使用 Host-minted principal 且 target Session/resource 与 human identity 分离，Agent Tool 绑定 exact Agent；未知 authorization mode 启动失败，external policy 缺失/异常/畸形或矛盾响应可 fail closed；authorization request 有 typed resource scope；live Browser `canvas`/`canvasLayout` Projection 与 `ctx.canvas.get()` 使用同一 `canvas.read` current resource scope，不能以 session-only read 绕过 Canvas ACL；current durable Canvas 拒绝 Host/Provider credential、binary、raw provider diagnostic 与 URL-shaped asset references；read guard fiber disposal/HMR 与 adversarial security tests 有证据。 |
-| N05 | Session Projection、Canvas Layout Projection | Browser current Canvas/Layout 只来自 Session Projection；own-domain malformed projection event fail loud、无关 event same-reference；ACL/HMR 在无 Session event 时可用独立 visibility generation 同 seq revoke/re-allow，Client 丢弃 stale generation 且 baseline 可重新取得 authority；HMR replacement 仅允许同 key + 同显式 stable owner，different-owner collision fail loud，legacy unowned active disposal 必须提升 surviving definition、不得残留 ghost；history tail 在 core 返回后按最终真实 source 重新以 exact SessionId 授权，live↔cold race 或 final log/page cut 不一致时整块省略 projections，generic core baseline 不得作为安全 fallback；cold list/cache/restore 同样传 exact target SessionId，cache 不得成为 ACL 旁路；`undefined` Projection 结合 Session `openState` 区分 pending 与 authoritative unavailable 且不泄露 ACL；layout 使用 `canvasId + workflowId + layoutRevision`，与 `workflowRevision/runRevision` 独立，双 Tab stale CAS 与 clear/recreate 同 workflowId generation 穿透均被拒绝；projection bounded、无 binary/history/provider raw；refresh/reconnect 可恢复 authoritative Workflow/Run/Output/Layout。 |
-| N06 | Typert Remote、Mutation、Generation-scoped History API | Browser mutation 只走 Host `CanvasService`，current state 继续只读 Projection、无 `getCurrent` 双源；当前 Remote 只注册已实现的 edit/replace/select/saveLayout/clear/listRuns/getRun，不发布 future fake endpoints；SRC weak mode 在授权/业务逻辑前校验 WorkflowRef/edit/select/layout/history DTO；Gateway 仅透传显式 safe business/lookup/cancel failure，普通 Error 固定 redaction；History entry/request 都带 `canvasId` generation fence，clear/recreate 后 current ACL 不能读取旧 generation，cursor 基于 run-start Session seq，query 使用 Session-derived incremental index 而非重复全量扫描；Canvas fold + History cache batch 原子发布；`dsh-base` 正式挂 `dsh-invariants + canvas + canvas/invariant`，REAL Loader composition 证明 direct append 被拒绝且 CanvasService commit 成功；built-LIB HTTP smoke 使用 exact-live SessionStore；最终仍需 repository-pinned generated artifacts、Vitest/typecheck/lint/build/REAL evidence。 |
-| N07 | Canvas UI Shell、Minimal/Editor | `render-service` 持 root；ui-canvas 经 plugin/slot；UI 无第二份 authority。 |
-| N08 | Interaction Context | 当前 selection 与 Agent 指代打通，且 context 不持久化。 |
-| N09 | Feature Flags / Settings | Harness settings authority + Host enforcement；secret 不入 Browser。 |
-| N10 | Media Node Registry | open-world custom node 不需改巨型 switch/whitelist；Browser 不复制 Host catalog。 |
-| N11 | Workflow Editor | 人工 DAG 编辑、port connect/disconnect、Host catalog、Draft/CAS 可用。 |
-| N11.5 | Harness rc.8 Compatibility | 官方 rc.8 完整 tree 已同步；dynamic client REAL composition 通过；三栏 Canvas 保留；Typert/lock/module-graph 等 generated artifacts 与最终源码一致。 |
-| N12 | Media Workflow Engine v2.2 | Browser-independent；Mock DAG/Partial Run/Fingerprint/Executor Registry 全部通过。 |
-| N13 | Model Registry / Resolver | Agent/Executor 不猜模型 capability；resolved model identity 可进入 fingerprint。 |
-| N14 | Executor / Provider Adapter | 不接真实云也能完整执行；换 Provider 不改 Canvas Domain/Scheduler。 |
-| N15 | Run Admission | 任何收费/长任务 Provider task 前有 Host admission 证据。 |
-| N16 | Run Lifecycle / Jobs | Run durable、可取消、可重试、可解释、可恢复判断；复用 N03 `run-start/run-update` 与 N04 safe diagnostic/provenance seam，不另造 lifecycle/authorization authority。 |
-| N17 | Image Asset / Attachment | 与 Harness attachment store 共用 binary authority；Minimal 可显示 Mock 输出；Asset read 复用 N04 authorization resource。 |
-| N18 | Agent Tools / Command Bus | Agent/UI 共用同一 Domain command semantics；Tool 不直连 Provider；Agent Tool actor 复用 N04 exact-agent provenance。 |
-| N19 | History / Variant | 连续生成不丢上一版，可 restore/branch。 |
-| N20 | Real Image Provider | 自然语言可完成真实 text-to-image/image-edit。 |
-| N21 | Video Asset | Browser 授权 Range playback 稳定；Asset binary route 复用 N04 Browser principal + typed resource authorization。 |
-| N22 | Async Video Provider | polling/callback/resume/cancel 达到 V1；callback/reconciler source 不可伪造 Browser/Agent actor。 |
-| N23 | Progress / Observability | session→workflowRun→nodeRun→providerRequest 可追踪；progress 不膨胀 Session；Provider raw error 先 redaction/classification 再进入 durable summary。 |
-| N24 | GC / Retention / Chaos | orphan、race、部分失败都有恢复/清理路径。 |
-| N25 | Full E2E / Release | REAL composition + upstream compatibility gate + P0/P1/V1 全部有证据。 |
+Official baseline: `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`
+
+## 1. Status vocabulary
+
+- `PLANNED` — contract exists; implementation not started/currently not inherited.
+- `IMPLEMENTING` — active source work exists.
+- `IMPLEMENTED / REVALIDATE` — implementation exists, but changed upstream dependency seams require new validation/migration.
+- `REVIEW` — current source remediation exists; acceptance evidence incomplete.
+- `BLOCKED` — a required predecessor/toolchain/CI/REAL gate is unavailable.
+- `ACCEPTED` — exact current baseline and exact private head have executable evidence.
+
+Historical implementation does not equal current acceptance.
+
+## 2. Node matrix
+
+| Node | Current state | Upstream impact | Gate before acceptance |
+|---|---|---|---|
+| N00 | REVIEW | baseline changed | docs/current execution map coherent |
+| N01 | REVALIDATION REQUIRED | Attachment durable ref metadata | domain/migration tests on new baseline |
+| N02 | REVALIDATION REQUIRED | attachment metadata + open-world replay | fixture/migration compatibility |
+| N03 | REVALIDATION REQUIRED | official Projection integration downstream | event replay + binary exclusion |
+| N04 | REVALIDATION REQUIRED | private projection readGuard no longer baseline seam | latest Host exposure authorization tests |
+| N05 | REVALIDATION REQUIRED | official state/wire Projection split | checkpoint/replay/wire-view tests |
+| N06 | REVIEW | current Projection face changed | PR #34 logic replayed on new Projection |
+| N07 | REVIEW | official Layout no `shell.main` | intentional-fork layout tests + latest ui-layout replay |
+| N08 | REVIEW | upstream removed region-read tool; attachment/command changed | exact-turn context + semantic region tests |
+| N09 | REVIEW | Settings Describe Mirror changed | shared-mirror binding + restart capability tests |
+| N10 | REVIEW | small | Registry/catalog exact-version tests on new client graph |
+| N11 | REVIEW | renderer/projection/asset seams changed | Editor integration + lifecycle tests |
+| N11.5 | BLOCKED / REOPENED | rc.8 baseline superseded | complete 0.1.1-rc.2 realignment + REAL assembled evidence |
+| N12 | IMPLEMENTED / REVALIDATE | image asset/request boundary clarified | PR #42 engine tests + new asset-ref integration |
+| N13 | IMPLEMENTED / REVALIDATE | must stay separate from Chat LLM model route | PR #43 registry/resolver tests |
+| N14 | IMPLEMENTED / REVALIDATE | image output materializer now official Attachment-backed | PR #44 provider tests + materializer contract |
+| N15 | IMPLEMENTING / REVALIDATE | workplan lagged actual package; upstream policy seams changed | rewrite contract + exact WorkflowRef admission tests |
+| N16 | PLANNED | latest Jobs/cancel seam must be re-read | durable lifecycle/retry/cancel/race tests |
+| N17 | PLANNED | major Attachment upgrade | normalized master/request-image integration |
+| N18 | PLANNED | official command image envelope available | Agent/UI/Slash common semantics test |
+| N19 | PLANNED | request variants must stay out of history | restore/provenance/variant tests |
+| N20 | PLANNED | provider input/output through Attachment master | real image provider E2E |
+| N21 | PLANNED | image authority upstream improved; video still Canvas-owned | durable video binary/range/auth tests |
+| N22 | PLANNED | latest Jobs/cancellation/polling | async resume/cancel/idempotency tests |
+| N23 | PLANNED | trace identities updated | session→run→node→provider trace tests |
+| N24 | PLANNED | image object retention owned by Attachment | orphan/reference/retention chaos tests |
+| N25 | PLANNED | repository gate surface changed | exact current official gates + REAL release E2E |
+
+## 3. Cross-node acceptance gates
+
+### Upstream gate
+
+- [ ] official baseline exact commit recorded;
+- [ ] changed infrastructure packages reconciled;
+- [ ] intentional divergences enumerated and regression-tested;
+- [ ] private post-sync commit recorded.
+
+### Generated-artifact gate
+
+- [ ] lockfile regenerated with pinned pnpm;
+- [ ] Typert generated outputs current;
+- [ ] client/module/config/tool/persistence/scoped-event docs/catalogs regenerated by owners;
+- [ ] translation pairings current.
+
+### Source quality gate
+
+Use the synchronized root scripts. At minimum, relevant exact-head runs must cover typecheck, lint, build, focused tests and coverage. Product-visible client changes also require current client-package/domain/runtime-closure gates.
+
+### REAL composition gate
+
+- [ ] real Host profile assembles Canvas packages;
+- [ ] Web ModuleLoader/transport settles all required entries;
+- [ ] ui-renderer mounts the application root;
+- [ ] latest ui-layout with `shell.main` extension renders Canvas + Conversation;
+- [ ] plugin disposal/HMR retracts registrations/state cleanly;
+- [ ] Agent and Browser operate the same Session-authoritative Canvas.
+
+## 4. Required evidence by milestone
+
+### Milestone A — Durable Canvas (N01–N07)
+
+- replay/checkpoint/current Projection reconstructs correctly;
+- authorization cannot be bypassed through Browser Remote;
+- Minimal loads from Session Projection after refresh/reconnect;
+- Canvas and Conversation coexist under latest layout.
+
+### Milestone B — Collaborative Editor (N08–N11)
+
+- exact-turn selection context;
+- no selection persistence into workflow;
+- Settings capability semantics stable across restart;
+- exact-version node catalog;
+- Draft/CAS/Undo/Redo/Clipboard/layout authoring remains Host-authoritative.
+
+### Milestone B.5 — Upstream realignment (N11.5)
+
+- Projection migrated;
+- shared Settings mirror adopted;
+- Attachment pipeline synchronized;
+- ui-renderer/React binding ownership synchronized;
+- Web transport seam synchronized;
+- intentional Layout patch replayed;
+- generated/REAL gates execute.
+
+### Milestone C — Executable Workflow (N12–N16)
+
+- deterministic validated plan;
+- exact model/provider execution identity;
+- Provider runtime does not write Canvas directly;
+- N15 admission happens before any chargeable Provider task;
+- N16 starts the exact admitted workflow snapshot/ref and owns retries/cancel.
+
+### Milestone D — Image (N17–N20)
+
+- image bytes durable through Harness Attachment;
+- all candidates saved before completed output linkage;
+- command/user reference images reuse official envelope/attachment authority;
+- history uses stable refs only;
+- real image provider round-trip passes.
+
+### Milestone E — Video (N21–N22)
+
+- durable video binary authority independent of image Attachment assumptions;
+- async polling/callback/recovery is idempotent and resumable.
+
+### Milestone F — Production release (N23–N25)
+
+- traceability, retention and chaos cases pass;
+- exact current repository gates execute;
+- REAL end-to-end Agent→Canvas image/video/workflow scenarios pass in both Minimal and Editor presentation.
+
+## 5. CI evidence rule
+
+A job that fails before repository steps execute (`steps=[]`, `steps=null`, missing logs/`BlobNotFound`, indefinitely queued enterprise runner) is `INFRASTRUCTURE BLOCKED`. It is neither PASS nor a Canvas test assertion failure. Acceptance waits for a runnable exact-head job or equivalent repository-pinned local/approved runner evidence.
