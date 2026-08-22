@@ -30,6 +30,8 @@ import {
 export interface MediaProviderExecutorBinding {
   readonly ref: MediaNodeDefinitionRef
   readonly capability: MediaProviderRequest['capability']
+  readonly outputKind: 'image' | 'video'
+  outputCount(context: MediaProviderNodeBindingContext): number
   buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest
   buildResult(
     context: MediaProviderNodeBindingContext,
@@ -65,14 +67,14 @@ function findResolvedModel(context: MediaNodeExecutorContext, models: MediaModel
   if (model === undefined) {
     throw new MediaProviderError(
       'MEDIA_PROVIDER_MODEL_NOT_FOUND',
-      `Resolved media model identity is no longer present in the model catalog`,
+      'Resolved media model identity is no longer present in the model catalog',
     )
   }
   const provider = models.getProvider(model.providerId)
   if (provider?.enabled !== true || !model.enabled) {
     throw new MediaProviderError(
       'MEDIA_PROVIDER_MODEL_NOT_FOUND',
-      `Resolved media model is no longer enabled in the model catalog`,
+      'Resolved media model is no longer enabled in the model catalog',
       { providerId: model.providerId },
     )
   }
@@ -102,8 +104,23 @@ function assertRequestIdentity(request: MediaProviderRequest, model: MediaModelD
     && request.executionIdentityKey === model.executionIdentityKey) return
   throw new MediaProviderError(
     'MEDIA_PROVIDER_INVALID_OPERATION',
-    `Provider node binding returned a request for a different resolved model identity`,
+    'Provider node binding returned a request for a different resolved model identity',
     { providerId: model.providerId },
+  )
+}
+
+function assertRawOutputs(
+  binding: MediaProviderExecutorBinding,
+  context: MediaProviderNodeBindingContext,
+  run: MediaProviderRunResult,
+): void {
+  const expectedCount = binding.outputCount(context)
+  if (run.completion.outputs.length === expectedCount
+    && run.completion.outputs.every(output => output.kind === binding.outputKind)) return
+  throw new MediaProviderError(
+    'MEDIA_PROVIDER_INVALID_RESULT',
+    `Media Provider ${context.providerId} returned an unexpected ${binding.outputKind} output set`,
+    { providerId: context.providerId },
   )
 }
 
@@ -141,7 +158,7 @@ export function createMediaProviderNodeExecutor(
       if (context.definition.execution.capability !== binding.capability) {
         throw new MediaProviderError(
           'MEDIA_PROVIDER_INVALID_OPERATION',
-          `Provider executor binding capability does not match the node definition`,
+          'Provider executor binding capability does not match the node definition',
         )
       }
       const model = findResolvedModel(context, dependencies.models)
@@ -157,6 +174,8 @@ export function createMediaProviderNodeExecutor(
       assertRequestIdentity(request, model)
       const provider = dependencies.providers.require(model.providerId)
       const run = await runMediaProviderOperation(provider, request, context.signal)
+      // Validate Provider semantics before N17/N21 materialization can durably store any bytes.
+      assertRawOutputs(binding, semantic, run)
       const materialized = await materializeOutputs(dependencies.materializer, semantic, run)
       return binding.buildResult(semantic, run, materialized)
     },
@@ -232,7 +251,7 @@ function assertMaterializedKind(
   if (materialized.length === count && materialized.every(item => item.value.kind === kind && item.fingerprint.trim() !== '')) return
   throw new MediaProviderError(
     'MEDIA_PROVIDER_INVALID_RESULT',
-    `Media Provider ${providerId} returned an unexpected ${kind} output set`,
+    `Media Provider ${providerId} materializer returned an unexpected ${kind} output set`,
     { providerId },
   )
 }
@@ -248,6 +267,8 @@ export const BUILTIN_MEDIA_PROVIDER_BINDINGS: readonly MediaProviderExecutorBind
   Object.freeze({
     ref: Object.freeze({ type: 'image.generate', version: 1 }),
     capability: 'text-to-image',
+    outputKind: 'image',
+    outputCount: (context: MediaProviderNodeBindingContext) => countFromConfig(context.config),
     buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest {
       return Object.freeze({
         ...common(context),
@@ -274,6 +295,8 @@ export const BUILTIN_MEDIA_PROVIDER_BINDINGS: readonly MediaProviderExecutorBind
   Object.freeze({
     ref: Object.freeze({ type: 'image.edit', version: 1 }),
     capability: 'image-edit',
+    outputKind: 'image',
+    outputCount: () => 1,
     buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest {
       const mask = optionalMask(context.inputs, 'mask')
       return Object.freeze({
@@ -292,6 +315,8 @@ export const BUILTIN_MEDIA_PROVIDER_BINDINGS: readonly MediaProviderExecutorBind
   Object.freeze({
     ref: Object.freeze({ type: 'video.generate', version: 1 }),
     capability: 'text-to-video',
+    outputKind: 'video',
+    outputCount: () => 1,
     buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest {
       return Object.freeze({
         ...common(context),
@@ -307,6 +332,8 @@ export const BUILTIN_MEDIA_PROVIDER_BINDINGS: readonly MediaProviderExecutorBind
   Object.freeze({
     ref: Object.freeze({ type: 'video.image-to-video', version: 1 }),
     capability: 'image-to-video',
+    outputKind: 'video',
+    outputCount: () => 1,
     buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest {
       const prompt = optionalText(context.inputs, 'prompt')
       return Object.freeze({
