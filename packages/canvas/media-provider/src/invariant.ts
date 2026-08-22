@@ -1,21 +1,31 @@
-/** Package-owned media Provider/model catalog invariant registration. @module @deepseek-ai/dsh-media-provider/invariant */
+/** Package-owned media Provider catalog/runtime invariant registration. @module @deepseek-ai/dsh-media-provider/invariant */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+import type {} from './model-registry.ts'
+import type {} from './provider-runtime.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-media-provider'
 
 /** Cordis companion plugin name. */
 export const name = 'media-provider-invariant'
-/** Invariant registry must exist before installation. */
-export const inject = ['invariants']
+/** Invariant registry and both N13/N14 Provider authorities must exist before installation. */
+export const inject = ['invariants', 'mediaModels', 'mediaProviders']
 
-// No runtime invariant: N13 owns one process-local catalog and validates every
-// descriptor, Provider/model ownership, duplicate identity, and registration
-// mutation at its commit point. It has no independent mutable/event authority
-// to compare against until N14 introduces Provider runtime registrations.
-const install: InvariantInstaller = () => {}
+function validateRuntimeCatalogRelation(ctx: Context, fail: InvariantFailure): void {
+  for (const providerId of ctx.mediaProviders.list()) {
+    if (ctx.mediaModels.getProvider(providerId) !== undefined) continue
+    fail(`runtime Provider ${providerId} has no matching N13 catalog descriptor`)
+  }
+}
 
-/** Register the package's intentionally empty N13 invariant contribution. */
+const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
+  // Runtime registration itself also requires the catalog descriptor. This
+  // startup check independently proves reconstructed composition state obeys
+  // the same cross-authority relationship if internals/change ordering evolve.
+  validateRuntimeCatalogRelation(ctx, fail)
+}, { inject: ['mediaModels', 'mediaProviders'] })
+
+/** Register the N14 runtime/catalog cross-authority check. */
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))
