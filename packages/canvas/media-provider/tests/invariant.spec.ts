@@ -9,7 +9,7 @@ import { model, provider } from './model-fixture.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 const runtime: MediaProvider = {
