@@ -11,7 +11,7 @@ import CanvasInteractionService from '../src/interaction-service.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 class MemorySettings extends SettingsProvider {
