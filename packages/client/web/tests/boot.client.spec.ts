@@ -98,7 +98,7 @@ describe('dynamic renderer handoff', () => {
     expect(events).toEqual(['consumer', 'mount', 'unmount'])
   })
 
-  it('keeps the boot failure surface when no renderer service activates', async () => {
+  it('fails loud when the activated graph does not provide uiRenderer', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const container = document.createElement('div')
     document.body.append(container)
@@ -110,9 +110,9 @@ describe('dynamic renderer handoff', () => {
 
     await entry.run()
 
-    expect(container.textContent).toContain('Loading plugins…')
-    expect(container.textContent).not.toContain('mounted')
-    expect(error).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('uiRenderer service missing after client graph activation')
+    expect(container.textContent).toContain('Failed to load plugins')
+    expect(error).toHaveBeenCalledOnce()
     await entry.dispose()
   })
 })
