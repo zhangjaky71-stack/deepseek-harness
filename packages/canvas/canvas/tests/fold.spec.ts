@@ -85,8 +85,9 @@ describe('Canvas durable fold', () => {
     applyCanvasChange(state, createChange())
     if (state.canvas === null) throw new Error('expected Canvas')
     applyCanvasChange(state, runStartChange(state.canvas))
-    if (state.canvas === null) throw new Error('expected run')
-    expect(() => applyCanvasChange(state, runCompleteChange(state.canvas))).not.toThrow()
+    const run = state.canvas
+    if (run === null) throw new Error('expected run')
+    expect(() => applyCanvasChange(state, runCompleteChange(run))).not.toThrow()
     expect(state.canvas?.run?.status).toBe('completed')
   })
 
@@ -159,8 +160,9 @@ describe('Canvas durable fold', () => {
       kind: 'canvas/change', version: 1, operation: 'clear', canvas: null, meta: { schemaVersion: 1 },
     })
     applyCanvasChange(state, createChange(CanvasId('canvas-b')))
-    if (state.canvas === null) throw new Error('expected second Canvas')
-    expect(() => applyCanvasChange(state, runStartChange(state.canvas, CanvasRunId('run-reused')))).toThrow(
+    const second = state.canvas
+    if (second === null) throw new Error('expected second Canvas')
+    expect(() => applyCanvasChange(state, runStartChange(second, CanvasRunId('run-reused')))).toThrow(
       'cannot be reused',
     )
   })
