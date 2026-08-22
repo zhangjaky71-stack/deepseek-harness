@@ -3,7 +3,7 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   CanvasId,
@@ -17,7 +17,7 @@ import { CanvasInteractionBridge, CanvasInteractionBridgeError } from '../src/in
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 function currentCanvas(revision = 1): CanvasSnapshot {
@@ -46,10 +46,11 @@ function sampled(revision = 1): CanvasInteractionContext {
 }
 
 function agent(ctx: Context): Agent {
+  const id = SessionId('session-bridge')
   return {
-    id: 'agent-bridge',
+    id,
     options: {},
-    session: { id: 'session-bridge', events: [] } as unknown as Session,
+    session: { id, events: [] } as unknown as Session,
     inbox: {} as Agent['inbox'],
     status: 'idle',
     ctx,
