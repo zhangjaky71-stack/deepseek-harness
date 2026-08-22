@@ -1,104 +1,128 @@
-# N25 — 完整 E2E、REAL Composition、Upstream Compatibility 与发布门禁（rc.8 Revision）
+# N25 — Full E2E / Release Gate（0.1.1-rc.2 Revision）
 
-## 1. 节点目标
+Status: `PLANNED`
 
-以真实 Harness composition 验证 Agent、人、Session、Remote、dynamic client plugins、Workflow Engine、Jobs、图片、视频、历史、权限、恢复与上游升级兼容性，并给出可发布结论。
+## 1. 目标
 
-## 2. 前置依赖
+证明 Canvas V2.2 在同步后的 Harness 0.1.1-rc.2 上作为真实 shipped composition工作：Agent/Browser/Slash共享同一Canvas，Minimal/Editor、图片/视频、Workflow、Run、History、Settings、权限、恢复与插件生命周期全部闭环。
 
-`N01-N24`，其中包含 `N11.5`。
+## 2. 依赖
 
-## 3. 本节点范围
+`N01–N24`，并要求 N11.5 accepted。
 
-- REAL composition tests。
-- 完整产品 E2E。
-- rc.8 dynamic Web Client assembled boot。
-- 性能/体积/queue limits。
-- Feature Flag rollout/rollback。
-- upstream compatibility gate。
-- 发布验收报告。
+## 3. Exact baseline gate
 
-## 4. 明确不在本节点处理
-
-- 不用手工 `ctx.plugin(...)` 假装产品 REAL composition。
-- 不把 static audit 当测试 PASS。
-- 不允许存在未记录的 Canvas core patch 后直接发布。
-
-## 5. REAL Composition 必须覆盖
+Release evidence必须记录：
 
 ```text
-Web boot kernel
-→ dynamic client roster
-→ render-service
-→ ui-layout
-→ ui-conversation
-→ ui-attachment
-→ ui-canvas
-→ Session/Remote
-→ CanvasService
-→ Workflow Engine
-→ Jobs/Provider
+official baseline commit: b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+private post-sync commit: <exact sha>
+package/lock/generated state: tool-generated and clean
 ```
 
-## 6. 核心 E2E 场景
+若官方在N25前再次发布新版本，先更新baseline/revalidation，不得假装0.1.1-rc.2仍是“latest”。
 
-- 生成图片→4候选→选第3张→编辑→Variant→视频。
-- Agent 修改 ↔ Browser 修改双向可见。
-- selection context 指代。
-- stale CAS。
-- Run snapshot rev12 + current workflow rev13。
-- refresh/offline/reconnect/session switch。
-- history restore。
-- browser close long run。
-- host restart interrupted。
-- authorization/quota/queue/retry/callback/GC。
-- schema golden fixtures。
-- ui-canvas activation/dispose/HMR。
-- Minimal/Editor same projection。
-- user attachment → Canvas asset input。
+## 4. Required product E2E
 
-## 7. Upstream Compatibility Gate
+### Canvas shell
 
-发布前必须证明：
+- Conversation + Canvas `shell.main` 并存；
+- ui-canvas unload/disable无残留slot；
+- Minimal/Editor切换不改变semantic state；
+- refresh/reconnect恢复current Canvas。
 
-1. `RC8-UPSTREAM-BASELINE.md` 与实际 private commit/tree 一致。
-2. 完整 upstream rc.8 已同步，不是局部兼容 backport。
-3. `render-service` 是 React root owner。
-4. `packages/client/web` 无 Canvas 产品特判。
-5. `ui-layout` 只有最小 layout seam。
-6. Canvas 主要代码位于 Canvas-owned packages。
-7. 上游核心保护区任何修改都有 ADR/理由。
-8. `UPGRADE-MIGRATION-RUNBOOK.md` 可用于下一版本。
+### Agent / commands
 
-## 8. 实施步骤
+- natural-language selection-aware edit；
+- Agent生成Workflow；
+- Agent文生图；
+- Agent使用Composer/selected reference image编辑；
+- Slash/command image envelope不丢附件；
+- Browser与Agent运行都经过同一N15。
 
-1. Mock 全链 composition。
-2. Real Image Provider staging。
-3. Video Provider staging。
-4. 执行核心 E2E。
-5. 验证 max nodes/edges/workflow bytes/queue limits。
-6. feature off/rollback。
-7. upgradeability review。
-8. 输出验收报告：通过、失败、已知限制、上线建议、upstream overlay 清单。
+### Image
 
-## 9. 验收标准
+- Provider→official Attachment normalized master→Canvas output；
+- multi-candidate/primary；
+- history/restore；
+- request-image projection不污染Canvas history。
 
-- [ ] 所有 P0/P1/V1 checklist 有证据。
-- [ ] REAL composition 通过。
-- [ ] 无 P0/P1 blocker。
-- [ ] 高风险能力可 Feature Flag 关闭。
-- [ ] 上游兼容 gate 通过。
-- [ ] 验收报告可直接作为发布 gate。
+### Video
 
-## 10. Definition of Done
+- text/image-to-video async run；
+- durable video save/range/playback；
+- cancel/restart/resume；
+- duplicate callback idempotency。
 
-- [ ] typecheck/lint/build/target test 有真实执行记录。
-- [ ] REAL composition 与 Browser E2E 有证据。
-- [ ] baseline/compatibility docs 更新到发布 commit。
-- [ ] rollback 方案验证。
+### Governance
 
-## 11. 风险与禁止项
+- permission deny；
+- feature disabled；
+- quota/cost/approval；
+- idempotency；
+- global/session/provider concurrency/backpressure；
+- no Provider operation before admission。
 
-- 只测 happy path。
-- runner 不可用仍写 PASS。
-- 发布后才发现 Canvas 依赖旧 shell ownership。
+## 5. Current repository gates
+
+不要把旧rc.8命令表硬编码成永恒事实。以同步后root `package.json`/`scripts/run-gates.ts`为准，并至少执行当前0.1.1-rc.2对应的：
+
+- typecheck；
+- lint；
+- build / official build相关gate；
+- unit/focused tests；
+- partitioned coverage / required coverage gates；
+- Web/GUI/snapshot E2E relevant lanes；
+- `verify-client-packages`；
+- `verify-client-domain-graph`；
+- `verify-runtime-closure`；
+- optional dependency/node-next/package invariants；
+- docs/translation/pairing/generated catalogs；
+- consumers/artifacts/static checks；
+-平台要求的Windows/Linux lanes。
+
+记录实际执行命令和结果。
+
+## 6. REAL assembled boot
+
+必须真实验证：
+
+```text
+Host profile boot
+→ boot manifest
+→ ModuleLoader / optional __DSH_TRANSPORT__.loadBundle
+→ client graph all ACTIVE
+→ ui-renderer mount
+→ latest ui-layout + shell.main extension
+→ Conversation + Canvas
+→ Session projection/settings/remotes
+→ Agent command/run flows
+```
+
+不能只靠isolated React/component tests宣称产品集成成功。
+
+## 7. Security/privacy release checks
+
+- Browser bundle/DTO无Provider credential；
+- attachment/video ids不作为未经授权bearer access；
+- provider temp/signed URL不进Session/history；
+- raw internal error不泄漏；
+- cross-session Canvas/asset access denied；
+- feature/permission无法通过direct Remote绕过。
+
+## 8. Upgrade/maintenance gate
+
+文档必须留下下一次官方升级如何diff/replay `shell.main` intentional fork、如何迁移Projection/Attachment/Settings/Renderer而不扩大私有fork的说明。
+
+## 9. Acceptance
+
+只有以下全部成立才发布：
+
+1. N01–N24当前baseline accepted；
+2. generated/lockfile由pinned toolchain产生；
+3. repository gates实际执行；
+4. REAL assembled product E2E执行；
+5. 无未说明P0/P1 architecture/security blocker；
+6. private post-sync/release commit和evidence可追溯。
+
+Runner前置失败不能算PASS；若critical lane无法运行，N25保持 `BLOCKED`。
