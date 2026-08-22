@@ -137,4 +137,16 @@ describe('Canvas WorkflowEditor autosave', () => {
 
     await act(async () => { resolveCommit?.({ ok: true, workflowRevision: 2 }); await Promise.resolve() })
   })
+
+  it('keeps an offline write visibly unsaved instead of reporting Saved', async () => {
+    const commitOperations = vi.fn(async () => ({ ok: false as const, status: 'offline' as const, message: 'offline' }))
+    const input = renderEditor(commitOperations)
+
+    act(() => { Simulate.change(input, { target: { value: 'Offline edit' } }) })
+    await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve() })
+
+    expect(commitOperations).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('[data-save-status="offline"]')).not.toBeNull()
+    expect(host.querySelector('[data-save-status="saved"]')).toBeNull()
+  })
 })
