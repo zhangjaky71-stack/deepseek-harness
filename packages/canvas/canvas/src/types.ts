@@ -285,7 +285,6 @@ export type WorkflowEditOperation =
     readonly config: Readonly<Record<string, CanvasJsonValue>>
   }
   | { readonly op: 'rename-node'; readonly nodeId: WorkflowNodeId; readonly name: string }
-  | { readonly op: 'clear-node-name'; readonly nodeId: WorkflowNodeId }
   | { readonly op: 'connect'; readonly edge: MediaWorkflowEdge }
   | { readonly op: 'disconnect'; readonly edgeId: WorkflowEdgeId }
   | { readonly op: 'set-output-nodes'; readonly nodeIds: readonly WorkflowNodeId[] }
