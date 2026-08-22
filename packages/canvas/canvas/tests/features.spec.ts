@@ -18,7 +18,7 @@ import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 class MemorySettings extends SettingsProvider {
@@ -176,7 +176,7 @@ describe('Canvas deployment feature policy', () => {
     expect(() => ctx.canvas.clear(agent, workflowRef(created))).toThrow(
       expect.objectContaining<Partial<CanvasFeatureError>>({ feature: 'canvas' }),
     )
-    expect(() => ctx.canvas.listRuns(agent)).toThrow(
+    expect(() => ctx.canvas.listRuns(agent, { canvasId: created.id })).toThrow(
       expect.objectContaining<Partial<CanvasFeatureError>>({ feature: 'history' }),
     )
 
