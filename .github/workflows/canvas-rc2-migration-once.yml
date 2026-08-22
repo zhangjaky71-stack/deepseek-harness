@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - sync/upstream-0.1.1-rc.2-canvas
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -43,7 +46,6 @@ jobs:
                   raise SystemExit(f'{path}: expected exactly one anchor, found {count}: {old!r}')
               p.write_text(text.replace(old, new, 1))
 
-          # Keep every Canvas-owned package in the upstream rc.2 release family.
           for path in [
               'packages/canvas/canvas/package.json',
               'packages/canvas/media-workflow/package.json',
@@ -53,7 +55,6 @@ jobs:
           ]:
               replace_once(path, '"version": "0.1.0-rc.7"', f'"version": "{RC2}"')
 
-          # Host bundle owns the Canvas authority and the open-world node registry.
           replace_once(
               'packages/bundle/base/package.json',
               '    "@deepseek-ai/dsh-bash-sandbox": "workspace:^",\n',
@@ -62,7 +63,6 @@ jobs:
               '    "@deepseek-ai/dsh-media-workflow": "workspace:^",\n',
           )
 
-          # Web bundle ships ui-canvas as a normal dynamic client plugin.
           replace_once(
               'packages/bundle/web-app/package.json',
               '    "@deepseek-ai/dsh-client-ui-attachment": "workspace:^",\n',
@@ -70,7 +70,6 @@ jobs:
               '    "@deepseek-ai/dsh-client-ui-canvas": "workspace:^",\n',
           )
 
-          # Client aggregate: Canvas is additive; keep every rc.2 reference intact.
           replace_once(
               'tsconfig.client.json',
               '    { "path": "./packages/client/ui-conversation" },\n',
@@ -78,7 +77,6 @@ jobs:
               '    { "path": "./packages/client/ui-canvas" },\n',
           )
 
-          # Host aggregate: add only Canvas-owned Host projects.
           replace_once(
               'tsconfig.host.json',
               '    { "path": "./packages/attachment/attachment" },\n',
