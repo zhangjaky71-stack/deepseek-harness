@@ -119,11 +119,13 @@ describe('Canvas stream invariants', () => {
     const session = ctx.sessions.create(SessionId('canvas-invariant-run-update'))
     const created = currentWriterChange(createChange())
     session.append('canvas/change', created)
-    if (created.canvas === null) throw new Error('expected Canvas')
-    const started = currentWriterChange(runStartChange(created.canvas))
+    const createdCanvas = created.canvas
+    if (createdCanvas === null) throw new Error('expected Canvas')
+    const started = currentWriterChange(runStartChange(createdCanvas))
     session.append('canvas/change', started)
-    if (started.canvas === null) throw new Error('expected started Canvas')
-    expect(() => session.append('canvas/change', currentWriterChange(runCompleteChange(started.canvas)))).toThrow(
+    const startedCanvas = started.canvas
+    if (startedCanvas === null) throw new Error('expected started Canvas')
+    expect(() => session.append('canvas/change', currentWriterChange(runCompleteChange(startedCanvas)))).toThrow(
       expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }),
     )
     expect(session.seq).toBe(2)
@@ -134,7 +136,9 @@ describe('Canvas stream invariants', () => {
     const session = ctx.sessions.create(SessionId('canvas-layout-invariant'))
     const change = currentWriterChange(createChange())
     session.append('canvas/change', change)
-    if (change.canvas === null || change.canvas.workflow === null) throw new Error('test Canvas lacks workflow')
+    const canvas = change.canvas
+    if (canvas === null || canvas.workflow === null) throw new Error('test Canvas lacks workflow')
+    const workflow = canvas.workflow
 
     const meta = {
       schemaVersion: 2 as const,
@@ -146,10 +150,10 @@ describe('Canvas stream invariants', () => {
       version: CANVAS_LAYOUT_CHANGE_VERSION,
       layout: {
         schemaVersion: 1,
-        workflowId: change.canvas.workflow.id,
+        workflowId: workflow.id,
         nodePositions: { prompt: { x: 0, y: 0 } },
         viewport: { x: 0, y: 0, zoom: 1 },
-        updatedAt: change.canvas.updatedAt,
+        updatedAt: canvas.updatedAt,
       },
       meta,
     } as never)).not.toThrow()
@@ -162,7 +166,7 @@ describe('Canvas stream invariants', () => {
         schemaVersion: 1,
         workflowId: MediaWorkflowId('wrong-workflow'),
         nodePositions: {},
-        updatedAt: change.canvas.updatedAt + 1,
+        updatedAt: canvas.updatedAt + 1,
       },
       meta,
     } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
@@ -173,9 +177,9 @@ describe('Canvas stream invariants', () => {
       version: CANVAS_LAYOUT_CHANGE_VERSION,
       layout: {
         schemaVersion: 1,
-        workflowId: change.canvas.workflow.id,
+        workflowId: workflow.id,
         nodePositions: { missing: { x: 1, y: 1 } },
-        updatedAt: change.canvas.updatedAt + 1,
+        updatedAt: canvas.updatedAt + 1,
       },
       meta,
     } as never)).toThrow(expect.objectContaining<Partial<InvariantError>>({ code: 'INVARIANT' }))
