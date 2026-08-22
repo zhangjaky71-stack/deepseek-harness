@@ -1,178 +1,184 @@
-# DeepSeek Harness Canvas V2.2 — rc.8 兼容工程节点索引
+# DeepSeek Harness Canvas V2.2 — `dsh@0.1.1-rc.2` 工程节点索引
 
-> 原始总设计与来源快照仍保留在 `SOURCE-V2.1.md` / `SOURCE-V2.1-PART-*`。  
-> 从本次修订起，实际实施与验收以本索引、各节点文档及 rc.8 compatibility documents 为准。  
-> 上游目标：`deepseek-ai/deepseek-harness@141eb6fef83422698aef7a981029e843e8161534` (`dsh@0.1.0-rc.8`)。
+> 本目录是下一阶段 Canvas 代码同步、开发、Code Review 与验收的**当前契约**。  
+> 历史设计来源仍保留在 `SOURCE-V2.1.md` / `SOURCE-V2.1-PART-*`，不得用历史快照覆盖本目录中的现行契约。
 
-## 1. 使用规则
-
-可以直接说：
+## 1. 当前官方基线
 
 ```text
-实施 N11.5
-继续 N12
-按 rc.8 复查 N07
-验收 N18
+deepseek-ai/deepseek-harness
+b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+dsh@0.1.1-rc.2
+release date: 2026-08-21
 ```
 
-每个节点仍是独立验收单元。实现可以拆 commit/PR，但必须达到节点 gate 才标记 `ACCEPTED`。测试基础设施不可用时写 `BLOCKED/UNVERIFIED`，不能写假 PASS。
+当前私有 Canvas 开发栈从 `fix/canvas-n15-v2.2-run-admission` 分出。仓库根版本仍可能显示旧 release family；**版本号本身不是兼容证据**。真正的目标是：先机械吸收官方基础设施，再重放并收窄 Canvas 产品扩展。
 
-## 2. rc.8 兼容基础文档
+详见：
 
-- [RC8 Upstream Baseline](RC8-UPSTREAM-BASELINE.md)
+- [Upstream 0.1.1-rc.2 Baseline](UPSTREAM-0.1.1-RC2-BASELINE.md)
 - [Upstream Compatibility Policy](UPSTREAM-COMPATIBILITY-POLICY.md)
-- [Harness ↔ Canvas Dynamic Plugin Architecture](HARNESS-CANVAS-PLUGIN-ARCHITECTURE.md)
+- [Upgrade Migration Runbook](UPGRADE-MIGRATION-RUNBOOK.md)
+- [Harness ↔ Canvas Plugin Architecture](HARNESS-CANVAS-PLUGIN-ARCHITECTURE.md)
 - [Canvas Event Protocol](CANVAS-EVENT-PROTOCOL.md)
 - [Canvas Settings Integration](CANVAS-SETTINGS-INTEGRATION.md)
-- [Upgrade Migration Runbook](UPGRADE-MIGRATION-RUNBOOK.md)
+- [Acceptance Matrix](ACCEPTANCE-MATRIX.md)
 
-这些文件冻结“Canvas 如何长期作为 Harness 扩展域存在”，优先于旧文档中任何 rc.7 Web shell ownership 假设。
+`RC8-UPSTREAM-BASELINE.md` 仅保留为历史兼容入口，已被新的 0.1.1-rc.2 baseline 取代。
 
-## 3. 推荐主路径
+## 2. 产品目标冻结
+
+Canvas V2.2 继续满足以下产品目标，官方升级不得把它们当成“偏差”直接删除：
+
+1. Agent / Session 可实时读取并操作同一个 Canvas。
+2. Agent 可以下达文生图、图生图/编辑、文生视频、图生视频、工作流生成与工作流修改指令。
+3. Minimal 模式只呈现最终结果与必要状态；Editor 模式呈现可人工编辑的 Workflow DAG。
+4. Minimal 与 Editor 共用同一 Workflow / Run / Asset durable authority，不维护第二套业务状态。
+5. Conversation / Composer 与 Canvas 产品面并存；Canvas 不复制第二个聊天输入框。
+6. Custom Media Node、Model、Provider 都是 open-world extension，不建立内置类型白名单作为 durable admission。
+7. Browser 不直接调用 Provider，不拥有 Credential、Quota、Model Registry、Node Registry 或 Settings 的第二真源。
+
+## 3. 官方能力与 Canvas 扩展的关系
+
+### 3.1 原样继承官方的基础设施
+
+优先吸收官方 `0.1.1-rc.2`：
+
+- Session Projection 的 Host state / client wire-view 分层；
+- Attachment normalized master / request image / deterministic variant pipeline；
+- shared `SettingsDescribeMirror`；
+- `ui-renderer` 统一 React bindings 与 application-root ownership；
+- `__DSH_TRANSPORT__.loadBundle` / ModuleLoader 最新 transport seam；
+- slash command image submission envelope；
+- 最新 build / coverage / client-domain / runtime-closure / docs gates。
+
+Canvas 不在这些领域建立平行实现。
+
+### 3.2 必须保留的 intentional product divergence
+
+官方 Layout 当前是：
+
+```text
+sidebar | conversation | details
+```
+
+Canvas 产品要求是：
+
+```text
+sidebar | shell.main(Canvas) | conversation | details
+```
+
+因此 `shell.main` 是明确、受测试保护的 Canvas 产品扩展，不是待删除的兼容问题。同步官方 `ui-layout` 时只能在最新官方实现上重放这一个最小产品面扩展，不能整包覆盖私有 Layout，也不能长期 fork theme/slot/session/details lifecycle。
+
+## 4. 当前执行原则
+
+- **先文档后代码**：本次文档迁移完成后，后续代码调整以本目录为准。
+- **先 upstream infrastructure，后 Canvas patch replay**。
+- 不手改 `pnpm-lock.yaml`、Typert/generated catalog、module graph、config catalog 等工具拥有产物。
+- 任何旧节点若依赖已变化的 upstream seam，状态自动回到 `REVALIDATION REQUIRED`，即使历史实现已完成。
+- CI/runner 未执行真实 repository steps 时只能写 `BLOCKED/UNVERIFIED`，不能写 PASS。
+
+## 5. 推荐执行路径
 
 ```text
 N00
  ↓
-N01 → N02 → N03 → N04
-              │      │
-              └→ N05 → N06 → N07 → N08
-                       │       │
-                       │       └→ N09
-                       │
-N01/N02/N09 → N10 → N11 → N11.5 → N12 → N13 → N14
-                                              │
-N04/N09/N13/N14 ───────────────────────────→ N15
-                                              ↓
-                                             N16
-                                          ┌───┴────┐
-                                          ↓        ↓
-                                         N17      N21
-                                          ↓        ↓
-                                         N18      N22
-                                          ↓        │
-                                         N19       │
-                                          ↓        │
-                                         N20 ──────┘
-                                           \      /
-                                            N23
-                                             ↓
-                                            N24
-                                             ↓
-                                            N25
+N01 → N02 → N03 → N04 → N05 → N06 → N07 → N08 → N09 → N10 → N11
+                                                           ↓
+                                             N11.5 upstream realignment
+                                                           ↓
+                               N12 → N13 → N14 → N15 → N16
+                                                     ┌─────┴─────┐
+                                                     ↓           ↓
+                                                    N17         N21
+                                                     ↓           ↓
+                                                    N18         N22
+                                                     ↓           │
+                                                    N19          │
+                                                     ↓           │
+                                                    N20 ─────────┘
+                                                      \          /
+                                                       N23 → N24 → N25
 ```
 
-## 4. 节点目录
+**关键变化：** N11.5 不再是“rc.8 一次性兼容节点”，而是当前 `0.1.1-rc.2` 上游重对齐 gate。N12–N15 已有实现可保留为 prior implementation，但在新 baseline 上必须重新验证依赖 seam；N16 之后不得按旧 rc.8 文档直接继续。
 
-| Node | 名称 | 依赖 | rc.8 修订重点 |
-|---|---|---|---|
-| N00 | 工程实施总图与节点契约 | 无 | 新增 upstream baseline / plugin ownership / N11.5 gate |
-| N01 | Canvas Domain、类型系统与状态不变量 | N00 | Domain 继续 Browser-independent |
-| N02 | Migration、Node Version、Golden Fixtures | N01 | 未安装 custom node 仍可 load/migrate |
-| N03 | Event Sourcing、CanvasService、原子提交 | N01,N02 | `canvas/change` durable authority 继续成立 |
-| N04 | Authorization、Actor、Audit | N03 | Host enforce 不变 |
-| N05 | Session Projection、Layout Projection | N03 | reconnect/Projection authority 不变 |
-| N06 | Remote、Mutation、History API | N04,N05 | 不走私有 Browser→Session hack |
-| N07 | UI Shell、Minimal/Editor | N05,N06 | render-service root + dynamic ui-canvas plugin |
-| N08 | Interaction Context | N07 | transient send-time context，不持久化 |
-| N09 | Feature Flags / Settings | N04,N07 | 接 Harness rc.8 settings/schema authority |
-| N10 | Media Node Registry | N01,N02,N09 | open-world node types + Host catalog |
-| N11 | Workflow Editor | N06,N07,N10 | Host catalog、port authoring、plugin lifecycle |
-| **N11.5** | **Harness rc.8 Compatibility Migration** | **N11** | **完整上游同步、render-service/ui-attachment/settings、REAL composition** |
-| N12 | Workflow Engine v2.2 | N10,N11.5 | Executor registry、partial boundaries、snapshot、fingerprint、runtime seam |
-| N13 | Model Registry / Resolver | N10,N12 | resolved model identity |
-| N14 | Executor / Provider Adapter / Mock | N12,N13 | Provider 不直写 Canvas；并列 runtime executor |
-| N15 | Run Admission | N04,N09,N13,N14 | Host admission |
-| N16 | Run Lifecycle / Jobs | N12,N14,N15 | durable run/retry/cancel |
-| N17 | Image Asset / Attachment | N16 | 复用 Harness attachment authority |
-| N18 | Agent Tools / Command Bus | N08,N11.5,N16,N17 | Agent/UI/Slash 同一 command semantics |
-| N19 | History / Variant | N06,N17,N18 | provenance / restore |
-| N20 | Real Image Provider | N14-N19 | Provider Adapter 接入 |
-| N21 | Video Asset | N04,N19 | binary/range 独立 |
-| N22 | Async Video Provider | N15,N16,N21 | polling/callback/resume |
-| N23 | Progress / Observability | N16,N20,N22 | session→workflowRun→nodeRun→provider trace |
-| N24 | GC / Retention / Chaos | N17,N21,N22,N23 | orphan/race recovery |
-| N25 | Full E2E / Release | N01-N24 + N11.5 | REAL composition + upstream compatibility gate |
+## 6. 节点目录与 0.1.1-rc.2 修订重点
 
-## 5. 里程碑
+| Node | 名称 | 新基线重点 |
+|---|---|---|
+| N00 | 执行总图 | 新 baseline、重放策略、revalidation 状态 |
+| N01 | Canvas Domain | stable AttachmentRef；request image 不进 durable domain |
+| N02 | Migration / Fixtures | attachment metadata forward compatibility；open-world node 保留 |
+| N03 | Event Sourcing | binary/request-version 不进 Session event |
+| N04 | Authorization / Audit | 不再把私有 Projection `readGuard` 当长期公共 seam |
+| N05 | Projection / Layout Projection | 迁到官方 Host-state / wire-view Projection contract |
+| N06 | Remote / History | 保留 Typert `RemoteResult`；重验新版 Projection face |
+| N07 | Minimal / Editor Shell | 固化 `shell.main` 为 intentional Layout extension |
+| N08 | Interaction Context | region 是 Canvas semantic intent，不依赖已删除 `read_image_region` |
+| N09 | Feature / Settings | Browser 使用 shared Settings Describe Mirror；Host restart-applied snapshot 保留 |
+| N10 | Media Node Registry | 基本保留；重验 client catalog/gates |
+| N11 | Workflow Editor | 对齐最新 renderer / projection / asset refs |
+| N11.5 | Upstream Realignment | Projection、Settings、Attachment、renderer、transport、build gates 全量重对齐 |
+| N12 | Workflow Engine | 不做 image request transform/cache；消费 stable asset refs |
+| N13 | Media Model Registry | 与 Harness Chat LLM model catalog 明确分层 |
+| N14 | Provider Runtime / Mock | image output 经 Attachment materializer；video 交 N21 |
+| N15 | Run Admission | 以当前独立 `run-admission` package 与 exact WorkflowRef 契约重写 |
+| N16 | Run / Jobs / Retry | 消费 N15 permit 的 exact WorkflowRef；重验最新版 Jobs/cancel seam |
+| N17 | Image Asset | 完整接官方 normalized master / request image pipeline |
+| N18 | Agent Tools / Intent | 复用官方 command image envelope，不造第二上传链 |
+| N19 | History / Variants | durable ref/provenance only；不持久化 variant/files transport id |
+| N20 | Real Image Provider | provider bytes → official Attachment master → Canvas output |
+| N21 | Video Asset | 图片用官方 Attachment；视频仍需独立 durable binary authority |
+| N22 | Async Video Provider | 重验最新版 jobs/cancellation；Provider async state 不写 Browser |
+| N23 | Progress / Observability | trace 关联 attachment/provider op；敏感 transport metadata 不进日志 |
+| N24 | GC / Retention / Chaos | Canvas 管引用；Attachment owner 管底层 image object retention |
+| N25 | Full E2E / Release | 使用 0.1.1-rc.2 repository gates + REAL assembled lifecycle |
 
-### Milestone A — Durable Shared Canvas
+## 7. 当前状态
 
-`N00 → N01 → N02 → N03 → N04 → N05 → N06 → N07`
+| 范围 | 状态 | 说明 |
+|---|---|---|
+| N01–N05 | `REVALIDATION REQUIRED` | 历史实现保留；Projection/authorization seam 必须按 0.1.1-rc.2 重验 |
+| N06 | `REVIEW` | PR #34；Remote 主体可保留，Projection 依赖重验 |
+| N07 | `REVIEW` | PR #35；`shell.main` 保留为 intentional divergence |
+| N08 | `REVIEW` | PR #36；region/attachment interaction contract 需更新 |
+| N09 | `REVIEW` | PR #37；Host settings 语义保留，Browser mirror 需迁移 |
+| N10 | `REVIEW` | PR #38；Registry 契约基本保留 |
+| N11 | `REVIEW` | PR #39；Editor 需重验最新 client seams |
+| N11.5 | `BLOCKED / REOPENED` | PR #40/#41 是 rc.8 证据；现已被 0.1.1-rc.2 supersede |
+| N12 | `IMPLEMENTED / REVALIDATE` | PR #42；Engine 保留，upstream integration 重验 |
+| N13 | `IMPLEMENTED / REVALIDATE` | PR #43；Media Model Registry 保留 |
+| N14 | `IMPLEMENTED / REVALIDATE` | PR #44；Provider runtime 保留，Attachment materializer contract 更新 |
+| N15 | `IMPLEMENTING / REVALIDATE` | 当前 `fix/canvas-n15-v2.2-run-admission`；文档以实际 package 为准 |
+| N16–N25 | `PLANNED` | 只能按本次修订后的文档实施 |
 
-结果：Browser/Agent 共享同一 Session-authoritative Canvas。
+## 8. 全局不变量
 
-### Milestone B — Human + Agent Collaborative Editing
+1. Session Log 是 Canvas durable semantic authority；Projection 是可重建视图。
+2. Browser Remote 与 Agent Tool 都落到同一 Host Canvas command/service 层。
+3. Minimal / Editor 共用同一 Workflow / Run / Asset。
+4. `ui-renderer` 持有 React application root 与 React bindings；Web boot 保持 framework-free。
+5. `ui-layout` 只拥有几何与通用 slot，`shell.main` 是最小 Canvas product extension；Layout 不拥有 Canvas semantic authority。
+6. `ui-canvas` 是 Canvas Browser capability/presentation owner。
+7. MediaWorkflow 不依赖 graph renderer、Provider SDK 或 Browser。
+8. Custom node/model/provider 是 open-world extension；durable domain 不依赖内置 whitelist。
+9. Image binary authority 归 Harness Attachment；Canvas 只持 stable reference + provenance。Video binary 在 N21 单独治理。
+10. `RequestImageAttachment`、variant cache、Files upload id 属 request/provider transport，不进 Canvas Session durable state。
+11. workflowRevision、layoutRevision、runRevision 分离；Run 固定 immutable Workflow Snapshot / exact WorkflowRef。
+12. 权限、feature、quota、cost、approval、idempotency、concurrency admission 全在 Host enforce。
+13. Progress 不以高频百分比污染 Session durable log；History 不塞入 current Projection。
+14. 明确模型/Provider请求不得 silent fallback；content rejection 不得自动换 Provider 绕过策略。
+15. Browser 不维护 Host node/model/provider/settings 第二真源。
+16. Provider credential、remote Files bearer/temporary id 不进入 Workflow/Session/Browser durable DTO。
+17. Region selection 是 Canvas semantic intent；不得依赖官方已删除的 `read_image_region`。
+18. 每次 Harness 升级必须先更新 baseline，分类 official adoption / intentional divergence / unresolved gap，再执行 replay 与 REAL verification。
 
-`N08 → N09 → N10 → N11`
+## 9. 文档维护规则
 
-结果：selection context、人工 DAG 编辑、open-world node catalog。
-
-### Milestone B.5 — Harness rc.8 Integration Baseline
-
-`N11.5`
-
-结果：
-
-```text
-官方 rc.8 完整 tree
-+ dynamic render-service/client plugins
-+ 三栏 Canvas 产品布局
-+ attachment/settings/session compatibility
-+ REAL assembled boot evidence
-```
-
-### Milestone C — Executable Media Workflow
-
-`N12 → N13 → N14 → N15 → N16`
-
-结果：Validated DAG、Executor Registry、Model Resolution、Mock Provider、Admission、Jobs/Retry/Cancel。
-
-### Milestone D — Image V1
-
-`N17 → N18 → N19 → N20`
-
-### Milestone E — Video V1
-
-`N21 → N22`
-
-### Milestone F — Production Hardening & Release
-
-`N23 → N24 → N25`
-
-## 6. 节点状态表
-
-| 节点 | 状态 | PR/Branch | 验收结论 | 备注 |
-|---|---|---|---|---|
-| N00-N10 | 以 implementations/PR 实际记录为准 |  |  | 不因 rc.8 重写历史 |
-| N11 | IMPLEMENTING/REVIEW | `agent/canvas-n11-editor-workspace` / PR #27 |  | 仍有 catalog/port/open-world/test blockers |
-| N11.5 | PLANNED/BLOCKED |  |  | 等官方 rc.8 完整同步与 REAL verification |
-| N12 | PLANNED | `agent/canvas-n12-workflow-engine-v2` 曾有草稿实现 |  | 必须基于 N11.5 最终基线复核 |
-| N13-N25 | PLANNED |  |  | 按修订后依赖推进 |
-
-## 7. 全局冻结不变量
-
-1. Session Log 是 Canvas durable authority。
-2. Agent Tool 与 Browser Remote 都写 CanvasService/统一 Domain command 层。
-3. Minimal/Editor 共用同一 Workflow/Run/Asset。
-4. `render-service` 持有 React application root。
-5. `ui-layout` 不持有 Canvas semantic authority。
-6. `ui-canvas` 是 Canvas Browser capability owner。
-7. MediaWorkflow 不依赖 graph renderer 或 Provider SDK。
-8. Custom node 是 open-world extension；无 built-in type whitelist。
-9. Binary 不进入 Session Event/Projection/Typert JSON。
-10. workflowRevision 与 runRevision 分离；Run 固定 immutable Workflow Snapshot。
-11. Layout 与 Semantic Workflow 分离；operations 原子提交。
-12. 权限/feature/quota/admission 在 Host enforce。
-13. Progress 不按百分比写 Session；History 不塞 current Projection。
-14. 明确模型请求不得 silent fallback；content rejection 不可自动切 Provider 绕过。
-15. Browser 不维护 Host node/provider/settings 第二真源。
-16. Provider credential 永不进入 Workflow/Session/Browser。
-17. 每次 Harness 升级必须执行可复现 baseline + compatibility runbook。
-
-## 8. 文档维护规则
-
-1. `SOURCE-V2.1-*` 是历史快照，原则上不改。
-2. 接口/ownership 变化先改对应节点文档。
-3. 跨节点变化同步修改 README、ACCEPTANCE-MATRIX 与 compatibility docs。
-4. 已验收节点发生 breaking change 时重新进入 REVIEW。
-5. 官方升级完成后必须更新 upstream/private commit 证据。
+1. `SOURCE-V2.1-*` 是历史快照，原则上不重写。
+2. `implementations/N*.md` 是实施历史；上游变化通过 `Upstream revalidation` 章节追加，不伪造历史 PASS。
+3. `RC8-UPSTREAM-BASELINE.md` 只做 superseded pointer；当前事实写在 `UPSTREAM-0.1.1-RC2-BASELINE.md`。
+4. 接口/ownership 变化先改对应节点，再同步 README、Acceptance Matrix、Compatibility Policy。
+5. 双语 package/Agent Note 必须同步更新 pairing；生成型文档使用仓库 owner script 重生成。
+6. 任何节点在新 upstream seam 上未经 exact-head repository-pinned checks，不得标记 ACCEPTED。
