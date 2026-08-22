@@ -61,20 +61,10 @@ export const CORE_MEDIA_WORKFLOW_NODE_VERSIONS: Readonly<Record<CanvasCoreMediaW
 
 /** Stable failure raised while decoding or migrating durable Canvas values. */
 export class CanvasMigrationError extends Error {
-  /** Stable machine-readable reason. */
   readonly code: CanvasMigrationErrorCode
-  /** Durable value whose version or fields failed decoding. */
   readonly subject: string
-  /** Rejected version when the failure is version-related. */
   readonly version?: number
 
-  /**
-   * Creates one stable migration failure.
-   * @param code Stable machine-readable reason.
-   * @param subject Durable value being decoded.
-   * @param message Human-readable diagnostic.
-   * @param version Rejected schema or Canvas-owned node version when applicable.
-   */
   constructor(code: CanvasMigrationErrorCode, subject: string, message: string, version?: number) {
     super(message)
     this.name = 'CanvasMigrationError'
@@ -238,7 +228,6 @@ function migrateNode(value: unknown, index: number): CanvasMigrationResult<Media
   const config: Record<string, CanvasJsonValue> = {}
   for (const [key, item] of Object.entries(configValue)) config[key] = json(item, `${subject}.config.${key}`)
 
-  // Frozen pre-registry V1 fixture only. Current writers never emit this retired alias.
   if (rawType === 'image.create') {
     coreNodeVersion(source.nodeVersion, 1, subject)
     return {
@@ -294,12 +283,6 @@ function migrateEdge(value: unknown, index: number): MediaWorkflowEdge {
   }
 }
 
-/**
- * Decodes and migrates one stored workflow without applying current relational invariants.
- * Unknown plugin nodes remain structurally intact; N10/N12 decide current availability and executability.
- * @param value Stored JSON value read from a durable boundary.
- * @returns Current runtime workflow plus non-fatal migration notices.
- */
 export function migrateStoredMediaWorkflow(value: unknown): CanvasMigrationResult<MediaWorkflow> {
   const source = record(value, 'media-workflow')
   requireAllowedKeys(source, new Set(['edges', 'id', 'name', 'nodes', 'outputNodeIds', 'schemaVersion']), 'media-workflow')
@@ -327,11 +310,6 @@ export function migrateStoredMediaWorkflow(value: unknown): CanvasMigrationResul
   }
 }
 
-/**
- * Decodes, migrates, then validates one stored workflow against the current Canvas domain.
- * @param value Stored JSON value read from a durable boundary.
- * @returns Current validated workflow plus non-fatal migration notices.
- */
 export function decodeMediaWorkflow(value: unknown): CanvasMigrationResult<MediaWorkflow> {
   const migrated = migrateStoredMediaWorkflow(value)
   assertMediaWorkflow(migrated.value)
@@ -432,11 +410,6 @@ function decodeOutput(value: unknown, subject: string): CanvasOutput {
   }
 }
 
-/**
- * Decodes and migrates one stored Canvas snapshot without applying current relational invariants.
- * @param value Stored JSON value read from a durable boundary.
- * @returns Current runtime snapshot plus workflow/node migration notices.
- */
 export function migrateStoredCanvasSnapshot(value: unknown): CanvasMigrationResult<CanvasSnapshot> {
   const source = record(value, 'canvas-snapshot')
   requireAllowedKeys(
@@ -466,22 +439,12 @@ export function migrateStoredCanvasSnapshot(value: unknown): CanvasMigrationResu
   }
 }
 
-/**
- * Decodes, migrates, then validates one stored Canvas snapshot against the current Canvas domain.
- * @param value Stored JSON value read from a durable boundary.
- * @returns Current validated snapshot plus workflow/node migration notices.
- */
 export function decodeCanvasSnapshot(value: unknown): CanvasMigrationResult<CanvasSnapshot> {
   const migrated = migrateStoredCanvasSnapshot(value)
   assertCanvasSnapshot(migrated.value)
   return migrated
 }
 
-/**
- * Verifies the version field of a durable `canvas/change` envelope.
- * @param value Stored `CanvasChange.version` value.
- * @returns The current supported change version.
- */
 export function decodeCanvasChangeVersion(value: unknown): CanvasChangeVersion {
   const decoded = integer(value, 'canvas-change.version')
   if (decoded > CANVAS_CHANGE_VERSION) {
@@ -503,12 +466,6 @@ export function decodeCanvasChangeVersion(value: unknown): CanvasChangeVersion {
   return CANVAS_CHANGE_VERSION
 }
 
-/**
- * Structurally decodes one stored editor layout at the current schema version.
- * Current layout relationships are validated by `decodeCanvasLayoutSnapshot()` in `layout.ts`.
- * @param value Stored layout JSON value.
- * @returns Current structural layout value.
- */
 export function migrateStoredCanvasLayoutSnapshot(value: unknown): CanvasLayoutSnapshot {
   const source = record(value, 'canvas-layout')
   requireAllowedKeys(source, new Set(['nodePositions', 'schemaVersion', 'updatedAt', 'viewport', 'workflowId']), 'canvas-layout')
@@ -542,17 +499,11 @@ export function migrateStoredCanvasLayoutSnapshot(value: unknown): CanvasLayoutS
   }
 }
 
-/**
- * Decodes one run-history compatibility DTO derived from Session history.
- * This decoder does not create a second durable authority; any cache using this DTO must remain rebuildable.
- * @param value Run-history JSON value at an API or rebuildable-cache boundary.
- * @returns Validated current history entry.
- */
 export function decodeCanvasRunHistoryEntry(value: unknown): CanvasRunHistoryEntry {
   const source = record(value, 'canvas-run-history')
   requireAllowedKeys(
     source,
-    new Set(['finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),
+    new Set(['canvasId', 'finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),
     'canvas-run-history',
   )
   const statusValue = string(source.status, 'canvas-run-history.status')
@@ -567,6 +518,7 @@ export function decodeCanvasRunHistoryEntry(value: unknown): CanvasRunHistoryEnt
   if (!terminal && finishedAt !== undefined) invalid('canvas-run-history.finishedAt', `non-terminal history entry ${String(source.runId)} cannot include finishedAt`)
   if (finishedAt !== undefined && finishedAt < startedAt) invalid('canvas-run-history.finishedAt', 'canvas-run-history.finishedAt must not precede startedAt')
   return {
+    canvasId: CanvasId(nonEmptyString(source.canvasId, 'canvas-run-history.canvasId')),
     runId: CanvasRunId(nonEmptyString(source.runId, 'canvas-run-history.runId')),
     ...(variantId === undefined ? {} : { variantId: CanvasVariantId(nonEmptyString(variantId, 'canvas-run-history.variantId')) }),
     workflowId: MediaWorkflowId(nonEmptyString(source.workflowId, 'canvas-run-history.workflowId')),
