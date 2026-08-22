@@ -23,15 +23,31 @@ import type {
   CanvasInteractionContext,
   CanvasInteractionDiscardReceipt,
   CanvasInteractionStageReceipt,
-  DiscardCanvasInteractionRequest,
   ResolvedCanvasInteractionContext,
-  StageCanvasInteractionRequest,
 } from './interaction-types.ts'
 import type { CanvasAccessContext, CanvasAssetRef, CanvasSnapshot } from './types.ts'
 
 const DEFAULT_STAGE_TTL_MS = 30_000
 const MAX_RPC_ID_CHARS = 128
 const RPC_ID_PATTERN = /^[A-Za-z0-9._:-]+$/
+
+type UnknownRecord = Record<string, unknown>
+
+function requestRecord(value: unknown, subject: string): UnknownRecord {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CanvasInteractionBridgeError(`${subject} must be an object`, 'CANVAS_INTERACTION_INVALID_CONTEXT')
+  }
+  return value as UnknownRecord
+}
+
+function exactRequest(source: UnknownRecord, allowed: readonly string[], subject: string): void {
+  const allow = new Set(allowed)
+  for (const key of Object.keys(source)) {
+    if (!allow.has(key)) {
+      throw new CanvasInteractionBridgeError(`${subject}.${key} is not allowed`, 'CANVAS_INTERACTION_INVALID_CONTEXT')
+    }
+  }
+}
 
 /** Narrow Canvas host face consumed by the process-local bridge. */
 export interface CanvasInteractionHost {
@@ -113,9 +129,16 @@ export class CanvasInteractionBridge {
   }
 
   /** Stage a detached Browser snapshot after rpc-id mint but before prompt transport. */
-  stage(agent: Agent, request: StageCanvasInteractionRequest): CanvasInteractionStageReceipt {
-    const rpcId = this.assertRpcId(request.rpcId)
-    const context = this.decode(request.context)
+  stage(
+    agent: Agent,
+    request: unknown,
+    validateContext?: (context: CanvasInteractionContext) => void,
+  ): CanvasInteractionStageReceipt {
+    const source = requestRecord(request, 'canvas-interaction stage request')
+    exactRequest(source, ['rpcId', 'context'], 'canvas-interaction stage request')
+    const rpcId = this.assertRpcId(source.rpcId)
+    const context = this.decode(source.context)
+    validateContext?.(context)
     const current = this.host.get(agent, this.browserAccess(agent, rpcId))
     resolveCanvasInteractionContext(context, current)
     this.assertAssetsBelongToSession(agent, context)
@@ -147,8 +170,10 @@ export class CanvasInteractionBridge {
   }
 
   /** Best-effort rollback when the corresponding ordinary prompt was not admitted. */
-  discard(agent: Agent, request: DiscardCanvasInteractionRequest): CanvasInteractionDiscardReceipt {
-    const rpcId = this.assertRpcId(request.rpcId)
+  discard(agent: Agent, request: unknown): CanvasInteractionDiscardReceipt {
+    const source = requestRecord(request, 'canvas-interaction discard request')
+    exactRequest(source, ['rpcId'], 'canvas-interaction discard request')
+    const rpcId = this.assertRpcId(source.rpcId)
     const key = this.stageKey(agent, rpcId)
     const entry = this.staged.get(key)
     if (entry === undefined) return { discarded: false }
@@ -157,7 +182,7 @@ export class CanvasInteractionBridge {
     return { discarded: true }
   }
 
-  private assertRpcId(value: string): string {
+  private assertRpcId(value: unknown): string {
     if (
       typeof value !== 'string'
       || value.length === 0
