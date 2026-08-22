@@ -44,63 +44,48 @@ interface MediaNodeCatalogSource { list(): readonly CatalogDefinition[] }
 
 /**
  * Deployment feature policy shared by Canvas Host operations and Browser
- * capability discovery. Cordis entry config remains the composition base. If
- * the optional Harness settings provider is mounted, this owner registers the
- * same schema as namespace `canvas` and samples the resolved user section for
- * this service activation. The namespace declares `applies: restart`: later
- * in-process document edits are persisted for the next activation and do not
- * silently rewrite the already-published capability surface.
+ * capability discovery. The settings service is an activation dependency so
+ * a Host never publishes a base-only capability snapshot and then mutates it
+ * when settings arrives later. The same Schemastery Config supplies schema
+ * defaults and validates both the Cordis composition base and the durable
+ * `canvas` user section.
+ *
+ * The namespace is `applies: restart`: this service samples the resolved value
+ * exactly once at activation. Later document edits are durable but do not
+ * rewrite the current capability surface. Restarting/remounting the service
+ * re-resolves the stored user layer over the composition base.
  */
 export class CanvasFeatureService extends TypertRemoteService {
+  static inject = ['settings']
+
   static Config: z<CanvasFeatureConfig> = z.object({
     canvas: toggle(true), editor: toggle(true), history: toggle(true), video: toggle(false),
     variants: toggle(false), partialRun: toggle(false), regionEdit: toggle(false), providerFallback: toggle(false),
   })
 
-  private readonly compositionConfig: CanvasFeatureConfig
-  private activeCapabilities: CanvasCapabilities
+  readonly capabilities: CanvasCapabilities
 
   constructor(ctx: Context, config: CanvasFeatureConfig = {}) {
     super(ctx, 'canvasFeatures')
-    this.compositionConfig = structuredClone(config)
-    this.activeCapabilities = resolveCanvasCapabilities(this.compositionConfig)
-
-    // Settings is deliberately optional. This mirrors other feature owners:
-    // lightweight/custom compositions keep working from entry config alone,
-    // while the standard Host settings provider supplies the user layer.
-    ctx.inject(['settings'], (settingsCtx) => {
-      const scope = settingsCtx.settings.register(
-        SETTINGS_NAMESPACE,
-        CanvasFeatureService.Config,
-        { base: this.compositionConfig, applies: 'restart' },
-      )
-      const sampled = resolveCanvasCapabilities(scope.get())
-      this.activeCapabilities = sampled
-      settingsCtx.effect(() => () => {
-        // If the settings provider disappears, do not retain a detached user
-        // document as current deployment authority. A later provider mount is
-        // injected again and re-samples its own registered namespace.
-        if (this.activeCapabilities === sampled) {
-          this.activeCapabilities = resolveCanvasCapabilities(this.compositionConfig)
-        }
-      }, 'canvas-features: settings activation sample')
-    })
+    const scope = ctx.settings.register(
+      SETTINGS_NAMESPACE,
+      CanvasFeatureService.Config,
+      { base: structuredClone(config), applies: 'restart' },
+    )
+    this.capabilities = resolveCanvasCapabilities(scope.get())
   }
 
-  /** Effective deployment capability snapshot for this Host activation. */
-  get capabilities(): CanvasCapabilities { return this.activeCapabilities }
-
-  isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.activeCapabilities, feature) }
-  assertEnabled(feature: CanvasFeatureName): void { assertCanvasFeatureEnabled(this.activeCapabilities, feature) }
-  assertWorkflowCreatable(workflow: MediaWorkflow): void { assertCanvasWorkflowCreatable(this.activeCapabilities, workflow) }
+  isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.capabilities, feature) }
+  assertEnabled(feature: CanvasFeatureName): void { assertCanvasFeatureEnabled(this.capabilities, feature) }
+  assertWorkflowCreatable(workflow: MediaWorkflow): void { assertCanvasWorkflowCreatable(this.capabilities, workflow) }
   assertWorkflowEditable(workflow: MediaWorkflow, operations: readonly WorkflowEditOperation[]): void {
-    assertCanvasWorkflowEditable(this.activeCapabilities, workflow, operations)
+    assertCanvasWorkflowEditable(this.capabilities, workflow, operations)
   }
-  assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.activeCapabilities, workflow) }
+  assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.capabilities, workflow) }
 
   /** Browser-readable effective deployment capabilities; raw settings layers never cross this Remote. */
   @Remote('get')
-  remoteExportGet(): CanvasCapabilities { return structuredClone(this.activeCapabilities) }
+  remoteExportGet(): CanvasCapabilities { return structuredClone(this.capabilities) }
 
   /** Return installed node metadata from the Host registry as a data-only DTO. */
   @Remote('listNodes')
