@@ -26,7 +26,7 @@ import { capabilities, model, provider } from './model-fixture.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 const definition = BUILTIN_MEDIA_NODE_DEFINITIONS.find(item => item.type === 'image.generate')!
