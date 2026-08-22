@@ -6,6 +6,9 @@ on:
       - fix/canvas-n04-v2.2-host-security
     paths:
       - .github/workflows/canvas-n04-baseline-sync.yml
+  pull_request:
+    branches:
+      - fix/canvas-n04-v2.2-host-security
 
 permissions:
   contents: write
