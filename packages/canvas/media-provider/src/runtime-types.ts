@@ -1,4 +1,7 @@
-/** Types-only semantic Provider runtime, operation, and output-materialization contracts. */
+/**
+ * Types-only semantic Provider runtime, operation, and output-materialization contracts.
+ * @module @deepseek-ai/dsh-media-provider/runtime
+ */
 
 import type {
   CanvasImageAssetRef,
@@ -12,7 +15,7 @@ import type {
 } from '@deepseek-ai/dsh-media-workflow/engine'
 import type { MediaModelId, MediaProviderId } from './types.ts'
 
-/** Stable Provider runtime failures; messages must stay provider-response/secret free. */
+/** Stable Provider runtime failures; messages must stay Provider-response/secret free. */
 export type MediaProviderErrorCode =
   | 'MEDIA_PROVIDER_INVALID_REGISTRATION'
   | 'MEDIA_PROVIDER_DUPLICATE'
@@ -39,6 +42,7 @@ export interface MediaProviderRequestBase {
   readonly config: Readonly<Record<string, CanvasJsonValue>>
 }
 
+/** Semantic text-to-image Provider request. */
 export interface MediaProviderTextToImageRequest extends MediaProviderRequestBase {
   readonly capability: 'text-to-image'
   readonly prompt: string
@@ -46,6 +50,7 @@ export interface MediaProviderTextToImageRequest extends MediaProviderRequestBas
   readonly references: readonly CanvasImageAssetRef[]
 }
 
+/** Semantic image-edit Provider request. */
 export interface MediaProviderImageEditRequest extends MediaProviderRequestBase {
   readonly capability: 'image-edit'
   readonly image: CanvasImageAssetRef
@@ -53,11 +58,13 @@ export interface MediaProviderImageEditRequest extends MediaProviderRequestBase 
   readonly mask?: CanvasImageAssetRef
 }
 
+/** Semantic text-to-video Provider request. */
 export interface MediaProviderTextToVideoRequest extends MediaProviderRequestBase {
   readonly capability: 'text-to-video'
   readonly prompt: string
 }
 
+/** Semantic image-to-video Provider request. */
 export interface MediaProviderImageToVideoRequest extends MediaProviderRequestBase {
   readonly capability: 'image-to-video'
   readonly image: CanvasImageAssetRef
@@ -87,6 +94,7 @@ export interface MediaProviderCompletion {
   readonly providerRequestId?: string
 }
 
+/** Resumable Provider execution strategy. */
 export type MediaProviderAsyncMode = 'polling' | 'callback'
 
 /** Serializable async Provider task identity. N16/N22 may retain this for resume/reconciliation. */
@@ -108,8 +116,25 @@ export type MediaProviderResumeResult =
 
 /** Provider adapter. Credentials/configuration stay inside the adapter/deployment layer, never in the semantic request. */
 export interface MediaProvider {
+  /**
+   * Start one semantic media operation.
+   * @param request - Provider-neutral request after N13 model resolution.
+   * @param signal - optional cancellation signal for start I/O.
+   * @returns inline completion or a resumable task identity.
+   */
   start(request: MediaProviderRequest, signal?: AbortSignal): Promise<MediaProviderStartResult> | MediaProviderStartResult
+  /**
+   * Resume one previously started async operation.
+   * @param handle - exact Provider task identity returned by `start()`.
+   * @param signal - optional cancellation signal for resume I/O.
+   * @returns pending retry hint or completed media bytes.
+   */
   resume(handle: MediaProviderOperationHandle, signal?: AbortSignal): Promise<MediaProviderResumeResult> | MediaProviderResumeResult
+  /**
+   * Request cancellation of one Provider-owned task.
+   * @param handle - exact Provider task identity to cancel.
+   * @param signal - optional cancellation signal for an explicit cancel request; automatic abort cancellation may omit it.
+   */
   cancel(handle: MediaProviderOperationHandle, signal?: AbortSignal): Promise<void> | void
 }
 
@@ -144,10 +169,14 @@ export interface MediaProviderMaterializedOutput {
   readonly fingerprint: string
 }
 
-/**
- * Byte-to-asset seam. N14 tests use an in-memory implementation; N17/N21 will durably save bytes before returning refs.
- */
+/** Byte-to-asset seam. N14 tests use an in-memory implementation; N17/N21 will durably save bytes before returning refs. */
 export interface MediaProviderOutputMaterializer {
+  /**
+   * Convert one already-validated Provider byte output into a stable media asset value.
+   * @param output - Host-local Provider bytes and safe media metadata.
+   * @param context - resolved Provider/model/node/task provenance for the stored asset.
+   * @returns materialized N12 media value and stable content/provenance fingerprint.
+   */
   materialize(
     output: MediaProviderMediaOutput,
     context: MediaProviderMaterializationContext,
