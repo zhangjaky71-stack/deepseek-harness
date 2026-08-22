@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { MediaWorkflowId, WorkflowNodeId } from '@deepseek-ai/dsh-canvas'
 import type { CanvasImageAssetRef, MediaWorkflow } from '@deepseek-ai/dsh-canvas/types'
@@ -15,7 +15,7 @@ import {
   createMediaProviderNodeExecutor,
   registerBuiltinMediaProviderExecutors,
 } from '../src/provider-executor.ts'
-import { MediaProviderError, MediaProviderRuntimeRegistry } from '../src/provider-runtime.ts'
+import { MediaProviderRuntimeRegistry } from '../src/provider-runtime.ts'
 import type {
   MediaProvider,
   MediaProviderMaterializedOutput,
@@ -124,23 +124,27 @@ describe('Provider-backed N12 executor', () => {
   it('builds a semantic request and materializes validated outputs with safe provenance', async () => {
     let captured: MediaProviderRequest | undefined
     const ctx = await harness(imageProvider(request => { captured = request }))
-    const materialize = vi.fn<MediaProviderOutputMaterializer['materialize']>((output, provenance) => {
-      expect(output.data).toBeInstanceOf(Uint8Array)
-      expect(provenance).toMatchObject({
-        providerId,
-        modelId: descriptorModel.id,
-        executionIdentityKey: descriptorModel.executionIdentityKey,
-        nodeId,
-        operationMode: 'inline',
-        providerRequestId: 'provider-request-1',
-      })
-      return imageValue(provenance.outputIndex)
-    })
+    const materializedIndices: number[] = []
+    const materializer: MediaProviderOutputMaterializer = {
+      materialize(output, provenance) {
+        expect(output.data).toBeInstanceOf(Uint8Array)
+        expect(provenance).toMatchObject({
+          providerId,
+          modelId: descriptorModel.id,
+          executionIdentityKey: descriptorModel.executionIdentityKey,
+          nodeId,
+          operationMode: 'inline',
+          providerRequestId: 'provider-request-1',
+        })
+        materializedIndices.push(provenance.outputIndex)
+        return imageValue(provenance.outputIndex)
+      },
+    }
     const binding = BUILTIN_MEDIA_PROVIDER_BINDINGS.find(item => item.ref.type === 'image.generate')!
     const executor = createMediaProviderNodeExecutor(binding, {
       models: ctx.mediaModels,
       providers: ctx.mediaProviders,
-      materializer: { materialize },
+      materializer,
     })
 
     const result = await executor.execute(executionContext())
@@ -155,7 +159,7 @@ describe('Provider-backed N12 executor', () => {
     })
     expect(captured).not.toHaveProperty('credential')
     expect(captured).not.toHaveProperty('url')
-    expect(materialize).toHaveBeenCalledTimes(2)
+    expect(materializedIndices).toEqual([0, 1])
     expect(result.outputs.images?.value).toMatchObject({ kind: 'image-list' })
     if (result.outputs.images?.value.kind !== 'image-list') throw new Error('expected image-list')
     expect(result.outputs.images.value.assets).toHaveLength(2)
@@ -181,18 +185,24 @@ describe('Provider-backed N12 executor', () => {
       cancel() {},
     }
     const ctx = await harness(badProvider)
-    const materialize = vi.fn<MediaProviderOutputMaterializer['materialize']>()
+    let materializeCalls = 0
+    const materializer: MediaProviderOutputMaterializer = {
+      materialize() {
+        materializeCalls += 1
+        return imageValue(0)
+      },
+    }
     const binding = BUILTIN_MEDIA_PROVIDER_BINDINGS.find(item => item.ref.type === 'image.generate')!
     const executor = createMediaProviderNodeExecutor(binding, {
       models: ctx.mediaModels,
       providers: ctx.mediaProviders,
-      materializer: { materialize },
+      materializer,
     })
 
     await expect(executor.execute(executionContext())).rejects.toMatchObject({
       code: 'MEDIA_PROVIDER_INVALID_RESULT',
     })
-    expect(materialize).not.toHaveBeenCalled()
+    expect(materializeCalls).toBe(0)
   })
 
   it('fails closed when the N13 execution identity is missing or stale', async () => {
@@ -204,7 +214,7 @@ describe('Provider-backed N12 executor', () => {
       materializer: { materialize: () => imageValue(0) },
     })
 
-    const withoutIdentity = { ...executionContext(), executionIdentity: undefined }
+    const { executionIdentity: _identity, ...withoutIdentity } = executionContext()
     await expect(executor.execute(withoutIdentity)).rejects.toMatchObject({
       code: 'MEDIA_PROVIDER_EXECUTION_IDENTITY_REQUIRED',
     })
