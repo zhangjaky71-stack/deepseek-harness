@@ -1,7 +1,8 @@
 /** Port-level semantic connection authoring from the Host node catalog. */
 
-import type { CanvasNodeCatalogEntry, MediaPortType, MediaWorkflow, WorkflowNodeId } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasCapabilities, CanvasNodeCatalogEntry, MediaPortType, MediaWorkflow, WorkflowNodeId } from '@deepseek-ai/dsh-canvas/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { nodeCatalogAvailability } from './catalog.ts'
 import css from './WorkflowEditor.module.css'
 
 export interface CanvasPortEndpoint {
@@ -10,19 +11,20 @@ export interface CanvasPortEndpoint {
   readonly type: MediaPortType
 }
 
-export function ConnectionPanel({ workflow, catalog, disabled, onConnect, t }: {
+export function ConnectionPanel({ workflow, catalog, capabilities, disabled, onConnect, t }: {
   readonly workflow: MediaWorkflow
   readonly catalog: readonly CanvasNodeCatalogEntry[]
+  readonly capabilities: CanvasCapabilities
   readonly disabled: boolean
   readonly onConnect: (source: CanvasPortEndpoint, target: CanvasPortEndpoint) => void
   readonly t: TranslateNS<'canvas'>
 }) {
-  const definitions = new Map(catalog.map(definition => [String(definition.type), definition] as const))
   const outputs: Array<CanvasPortEndpoint & { label: string }> = []
   const inputs: Array<CanvasPortEndpoint & { label: string }> = []
   for (const node of workflow.nodes) {
-    const definition = definitions.get(String(node.type))
-    if (definition === undefined) continue
+    const availability = nodeCatalogAvailability(catalog, capabilities, node)
+    if (!availability.available) continue
+    const definition = availability.definition
     const label = node.name?.trim() || definition.displayName
     for (const port of definition.outputs) outputs.push({ nodeId: node.id, port: port.name, type: port.type, label: `${label} · ${port.name} (${port.type})` })
     for (const port of definition.inputs) inputs.push({ nodeId: node.id, port: port.name, type: port.type, label: `${label} · ${port.name} (${port.type})` })
