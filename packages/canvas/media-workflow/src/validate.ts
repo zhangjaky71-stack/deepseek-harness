@@ -228,7 +228,7 @@ function topologicalOrder(
   diagnostics: MediaWorkflowDiagnostic[],
 ): readonly WorkflowNodeId[] {
   const ids = [...nodes.keys()].sort((left, right) => left.localeCompare(right))
-  const indegree = new Map(ids.map(nodeId => [nodeId, 0] as const))
+  const indegree = new Map<WorkflowNodeId, number>(ids.map(nodeId => [nodeId, 0]))
   const outgoing = new Map<WorkflowNodeId, MediaWorkflowEdge[]>()
   for (const edge of edges) {
     indegree.set(edge.targetNodeId, (indegree.get(edge.targetNodeId) ?? 0) + 1)
@@ -304,12 +304,6 @@ function validateOutputsAndReachability(
   }
 }
 
-/**
- * Validate static workflow execution semantics using the active definition registry.
- * @param workflow - semantic workflow to inspect.
- * @param registry - active exact-version node-definition registry.
- * @returns diagnostics plus node-id-stable topology when acyclic.
- */
 export function validateMediaWorkflow(workflow: MediaWorkflow, registry: MediaNodeRegistry): MediaWorkflowValidationResult {
   const diagnostics: MediaWorkflowDiagnostic[] = []
   const structure = structuralIndex(workflow, diagnostics)
@@ -324,13 +318,6 @@ export function validateMediaWorkflow(workflow: MediaWorkflow, registry: MediaNo
   })
 }
 
-/**
- * Validate a workflow and capture the exact active definitions needed by scheduler/executor code.
- * @param workflow - semantic workflow to validate.
- * @param registry - active exact-version node-definition registry.
- * @returns validated workflow, definition map, and deterministic topology.
- * @throws MediaWorkflowValidationError when any blocking diagnostic exists.
- */
 export function assertValidMediaWorkflow(workflow: MediaWorkflow, registry: MediaNodeRegistry): ValidatedMediaWorkflow {
   const result = validateMediaWorkflow(workflow, registry)
   const errors = result.diagnostics.filter(item => item.severity === 'error')
