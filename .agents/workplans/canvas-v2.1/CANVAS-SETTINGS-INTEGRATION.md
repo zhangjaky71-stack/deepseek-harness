@@ -1,64 +1,99 @@
-# Canvas Settings Integration — Harness rc.8
+# Canvas V2.2 — Settings Integration (`dsh@0.1.1-rc.2`)
 
-## 1. 原则
+## 1. Purpose
 
-Canvas 不建立独立 Browser settings authority。Canvas 配置进入 Harness 当前 settings/schema 体系，由 Host 持久化和校验，Browser 只消费经过 schema 验证的安全配置投影。
+Canvas uses Harness Settings for durable user preferences but must not confuse a mutable settings document with the capabilities of the currently running Host activation.
 
-## 2. 建议设置分组
-
-```text
-Canvas
-├─ General
-│  ├─ enabled
-│  ├─ defaultMode
-│  └─ history/variant preferences
-├─ Workflow
-│  ├─ partialRunEnabled
-│  └─ editorEnabled
-├─ Media
-│  ├─ imageEnabled
-│  └─ videoEnabled
-├─ Runtime
-│  ├─ concurrency
-│  └─ local runtime capability
-└─ Advanced
-   ├─ diagnostics
-   └─ experimental capabilities
-```
-
-Provider credential 不属于 Browser-readable Canvas settings；它应由 Host/provider configuration secret boundary 持有。
-
-## 3. Feature Flag 与 Settings 的关系
-
-Feature/capability 不只是 UI preference：
+## 2. Authority split
 
 ```text
-Settings/Deployment Capability
-       │
-       ├─ UI exposure
-       ├─ Agent tool exposure
-       └─ Host admission/enforcement
+Harness Settings document
+  composition base + durable user overlay
+                 │
+                 ▼
+CanvasFeatureService activation
+                 │ sample once
+                 ▼
+immutable current CanvasCapabilities
 ```
 
-UI 隐藏不是安全控制。
+The Settings document answers “what should the next compatible activation use?”. `canvasFeatures` answers “what is available now?”.
 
-## 4. Source of Truth
+## 3. Host contract
 
-- Host settings schema：配置真源。
-- Canvas Session：当前 Canvas durable state。
-- Canvas UI store：仅 presentation preference/draft。
-- Provider secret/config：Host-only。
+The Canvas feature service:
 
-不得把 API key、provider secret、任意 provider URL 保存到 Workflow/Session/Browser localStorage。
+- formally depends on Harness Settings;
+- registers namespace `canvas`;
+- treats plugin/composition config as base values;
+- overlays durable user settings;
+- declares restart-applied behavior;
+- samples effective values once per activation;
+- exposes only effective current capability information to Browser consumers;
+- never leaks raw credentials or provider configuration through feature settings.
 
-## 5. rc.8 Compatibility
+Current feature families may include Canvas, Editor, image generation/editing, Video and region editing; exact fields are owned by the Canvas feature contract.
 
-rc.8 已调整 client settings/schema ownership，因此新增 Canvas 设置时必须复用当前 `ui-settings`/Host settings 扩展方式；不要依赖已经被上游迁移/删除的旧 `schema-form` package 假设。
+## 4. Browser contract under 0.1.1-rc.2
 
-## 6. 验收
+Official client Settings now has one shared `SettingsDescribeMirror`. Canvas must bind its namespace through the official `settingsScope` service and derive from that mirror rather than issuing a private `settings.describe()` read lifecycle per Canvas scope.
 
-- [ ] Canvas setting 有 schema validation。
-- [ ] Host 与 Browser 对 feature 状态一致。
-- [ ] 绕过 UI 直接调用 Remote 仍会被 Host capability/admission 拒绝。
-- [ ] secret 不进入 Projection/Tool result/Browser。
-- [ ] settings plugin dispose/HMR 不重复注册 section。
+Expected shape:
+
+```text
+settings.describe()
+      ↓ once/shared
+SettingsDescribeMirror
+      ↓ derived namespace
+settingsScope.bind({ namespace: 'canvas' })
+      ↓
+Canvas Settings section
+```
+
+The Canvas settings UI may call namespace `set/unset` writes through the official scope, including expected revision behavior handled by the settings subsystem.
+
+## 5. Disabled Canvas recovery
+
+The Settings contribution must remain reachable when current `canvas.enabled=false` so a loopback/local user can change the next-start configuration. This does **not** mean the current Canvas product surface becomes enabled immediately.
+
+```text
+current canvas.enabled=false
+→ shell.main Canvas occupant absent
+→ Settings section still available if settings service is available
+→ user changes value
+→ restart/new Host activation required
+```
+
+## 6. Browser rendering rule
+
+`ui-canvas` product rendering follows only current `CanvasCapabilities` from the Host feature Remote. It must never render Editor/Image/Video simply because the Settings document says they will be enabled after restart.
+
+## 7. Fail-closed rules
+
+- feature Remote unavailable → do not fabricate Canvas current capability;
+- Settings unavailable/read-only → keep current Canvas rendering unchanged and show the appropriate settings state;
+- malformed namespace view → Settings subsystem treats the view as unavailable/invalid; Canvas does not invent defaults client-side;
+- feature disabled → direct Host mutation/run paths must reject even if a Browser attempts to bypass UI gating.
+
+## 8. Testing requirements
+
+- composition base only;
+- user override wins over base;
+- `unset` restores inherited base;
+- current capabilities remain stable until restart/remount of the Host feature activation;
+- shared mirror feeds Canvas namespace without an extra Canvas `describe` reader;
+- disabled Canvas still exposes restart settings where allowed;
+- remote/non-loopback memory mode is not falsely writable;
+- Browser product surface never follows raw Settings directly;
+- Host feature/admission checks remain authoritative.
+
+## 9. Migration from the rc.8 private client
+
+The existing N09 Host semantics are retained. The required code migration is primarily Browser-side:
+
+```text
+old private SettingsScopeController owning describe/read refresh
+→ official shared SettingsDescribeMirror + derived scope
+```
+
+Do not reintroduce a separate Canvas mirror to minimize code changes.
