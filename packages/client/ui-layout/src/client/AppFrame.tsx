@@ -5,35 +5,46 @@
  * throttle), the concession chain (columns.ts), and the child-slot render
  * decisions. The details surface remains mounted and overlays the conversation
  * column when a tool opens it. Pure component: everything arrives
- * through the three framework shares — zero cordis or framework imports,
- * zero self-made hooks.
+ * through framework shares — zero cordis imports and zero self-made subscription hooks.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
 import {
+  createCanvasHostCommandMessage,
   createCanvasHostInitMessage,
   INFINITE_CANVAS_ORIGIN,
   INFINITE_CANVAS_URL,
   isCanvasBridgeMessage,
   isTrustedCanvasMessage,
 } from './canvas-bridge.ts'
+import type { CanvasCommandDelivery } from './canvas-bridge.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
-/** Full composed props: runtime share + child-slot render share + store share. */
+/** Registrant-private live Canvas command source; web-react binds it to `useCanvasCommands`. */
+export interface AppFrameInjected {
+  hooks: {
+    canvasCommands: ObservableSnapshot<ReadonlyMap<string, CanvasCommandDelivery>>
+  }
+}
+
+/** Full composed props: runtime + child-slot + store + business shares. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
+  & InjectFace<AppFrameInjected>
 
 type CanvasConnectionStatus = 'loading' | 'handshaking' | 'ready' | 'error'
 
 /** Center column hosting the separately-run Infinite Canvas application. */
-function CanvasColumn() {
+function CanvasColumn(props: { command?: CanvasCommandDelivery }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const handshakeTimer = useRef<number | null>(null)
+  const sentSeqBySession = useRef(new Map<string, number>())
   const [status, setStatus] = useState<CanvasConnectionStatus>('loading')
 
   const clearHandshakeTimer = useCallback(() => {
@@ -46,8 +57,15 @@ function CanvasColumn() {
     const onMessage = (event: MessageEvent<unknown>) => {
       const frameWindow = frameRef.current?.contentWindow ?? null
       if (!isCanvasBridgeMessage(event.data) || !isTrustedCanvasMessage(event, frameWindow)) return
-      clearHandshakeTimer()
-      setStatus(event.data.type === 'canvas:ready' ? 'ready' : 'error')
+      if (event.data.type === 'canvas:ready') {
+        clearHandshakeTimer()
+        setStatus('ready')
+      } else if (event.data.type === 'canvas:error') {
+        clearHandshakeTimer()
+        setStatus('error')
+      }
+      // `canvas:command-result` is a command outcome, not a connection failure;
+      // Phase 1 keeps it out of shell presentation while retaining the wire ack.
     }
 
     window.addEventListener('message', onMessage)
@@ -56,6 +74,17 @@ function CanvasColumn() {
       window.removeEventListener('message', onMessage)
     }
   }, [clearHandshakeTimer])
+
+  useEffect(() => {
+    const delivery = props.command
+    if (status !== 'ready' || delivery === undefined) return
+    const alreadySent = sentSeqBySession.current.get(delivery.sessionId) ?? -1
+    if (delivery.seq <= alreadySent) return
+    const frameWindow = frameRef.current?.contentWindow
+    if (frameWindow === undefined || frameWindow === null) return
+    frameWindow.postMessage(createCanvasHostCommandMessage(delivery.command), INFINITE_CANVAS_ORIGIN)
+    sentSeqBySession.current.set(delivery.sessionId, delivery.seq)
+  }, [props.command, status])
 
   const onLoad = useCallback(() => {
     clearHandshakeTimer()
@@ -149,10 +178,13 @@ function DragHandle(props: { side: 'sidebar' | 'conversation'; left: number; onS
 export function AppFrame({
   useStore,
   useSessions,
+  useCanvasCommands,
   actions,
   renderSlot,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  const currentSession = useSessions(s => s.current)
+  const canvasCommand = useCanvasCommands(commands => currentSession === undefined ? undefined : commands.get(currentSession))
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -249,7 +281,7 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CanvasColumn />
+        <CanvasColumn command={canvasCommand} />
         <ConversationColumn>{renderSlot('conversation', {})}</ConversationColumn>
       </>
       <div className={css.detailsOverlay} style={{ left: viewport - panels.conversation }}>
@@ -260,7 +292,7 @@ export function AppFrame({
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      <DragHandle side="conversation" left={viewport - panels.conversation} onStart={onConversationStart} onDrag={onConversationDrag} onEnd={onDragEnd} />
+      <DragHandle side="conversation" left={viewport - panels.conversation} onStart={onConversationStart} onDrag={onConversationDrag} onEnd={onDragEnd} />}
     </div>
   )
 }
