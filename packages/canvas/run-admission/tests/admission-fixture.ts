@@ -174,7 +174,11 @@ export async function admissionHarness(options: HarnessOptions = {}) {
 
   const request: CanvasRunAdmissionRequest = {
     sessionId: 'session-admission',
-    canvasId,
+    workflowRef: {
+      canvasId,
+      workflowId,
+      workflowRevision: 7,
+    },
     access: canvasBrowserAccess('session-admission'),
     workflow: imageWorkflow(),
     modelRequests: new Map([[generateNodeId, imageModelRequest()]]),
