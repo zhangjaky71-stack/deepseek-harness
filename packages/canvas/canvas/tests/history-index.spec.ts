@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { CanvasRunId } from '@deepseek-ai/dsh-canvas'
-import {
-  CanvasRunHistoryIndex,
-  buildCanvasRunHistoryIndex,
-} from '../src/history.ts'
+import { buildCanvasRunHistoryIndex } from '../src/history.ts'
 import {
   createChange,
   runStartChange,
@@ -13,7 +10,7 @@ import {
 
 describe('CanvasRunHistoryIndex', () => {
   it('fails loud when Session history updates a run before run-start', () => {
-    const session = new Session(SessionId('history-missing-start'))
+    const session = Session.create(SessionId('history-missing-start'))
     const created = createChange()
     session.append('canvas/change', created)
     if (created.canvas === null) throw new Error('expected created Canvas')
@@ -28,7 +25,7 @@ describe('CanvasRunHistoryIndex', () => {
   })
 
   it('supports one rebuild followed by incremental apply and generation-scoped lookup', () => {
-    const session = new Session(SessionId('history-incremental'))
+    const session = Session.create(SessionId('history-incremental'))
     const created = createChange()
     session.append('canvas/change', created)
     if (created.canvas === null) throw new Error('expected created Canvas')
