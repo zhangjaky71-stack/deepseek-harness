@@ -1,198 +1,141 @@
-# Canvas Event Protocol — Session、Workflow、Run 与 Client Projection
+# Canvas V2.2 — Session Event and Projection Protocol (`dsh@0.1.1-rc.2`)
 
-## 1. 目标
+## 1. Durable authority
 
-定义 Agent、Session、CanvasService、Workflow Engine 与 Browser 之间的稳定事件边界，使“实时调用画布”建立在正式 Domain event/projection 上，而不是依赖 UI 内部状态或零散 tool-call 解析。
-
-## 2. 两类消息
-
-### Command
-
-表示“请求系统做某件事”，由 Remote、Agent Tool 或 UI action 发起。
-
-### Event
-
-表示“Host 已经接受并提交的事实”或“运行中的临时通知”。
+Canvas semantic truth is append-only Session state. Browser stores, Provider callbacks, request-image caches and live progress are not substitute authorities.
 
 ```text
-UI / Agent Tool / Slash Command
-          │
-          ▼
-     Canvas Command
-          │
-          ▼
- CanvasService / Run Service
-          │
-          ├─ durable Session Event
-          └─ ephemeral Runtime Event
+Browser / Agent command
+        ↓
+Host CanvasService
+        ↓ atomic validation/authorization
+Canvas Session event(s)
+        ↓
+Host Projection fold state
+        ↓ official wire view
+Browser Canvas projection
 ```
 
-## 3. Durable Canvas Events
+## 2. Durable event principles
 
-Durable event 必须可 replay，并能重建当前 Canvas projection。
+A durable Canvas event may contain:
 
-rc.8/V2.2 当前 wire authority 继续使用：
+- stable Canvas/workflow/run/node/edge identifiers;
+- semantic node configuration after boundary validation;
+- workflow/layout/run revisions where the owning event requires them;
+- stable image/video asset references and safe metadata;
+- model/provider identity required for provenance;
+- terminal run/output state and history links.
+
+A durable Canvas event must not contain:
+
+- image/video bytes or base64;
+- Browser object/blob URLs;
+- provider temporary download URLs;
+- provider credentials/tokens;
+- `RequestImageAttachment.data`;
+- request-image `variantId` when it is only a transform/cache identity;
+- DeepSeek Files/other remote upload bearer identity unless a future durable provider contract explicitly proves it is safe and reconstructable;
+- high-frequency progress percentages.
+
+## 3. Image event rule under the new Attachment pipeline
+
+For images:
 
 ```text
-canvas/change
+provider/user bytes
+→ Harness Attachment validates/normalizes/commits master
+→ stable ImageAttachmentRef / CanvasImageAssetRef
+→ only then append Canvas output/link event
 ```
 
-每个已接受的业务 mutation 携带完整 post-change `CanvasSnapshot`；`clear` 携带 null tombstone。若未来拆成更细事件，必须提供 migration/fold 兼容，不能同时创建第二份 authority。
+If attachment persistence fails, a completed Canvas output event must not be published.
 
-当前 operation vocabulary：
+Model-request projection is later and non-semantic:
 
 ```text
-create
-workflow-edit
-workflow-replace
-run-start
-run-update
-output-select
-clear
+durable ImageAttachmentRef
+→ Attachment.readImageRequest(route policy)
+→ RequestImageAttachment
+→ LLM/Provider transport
 ```
 
-历史 `run-complete` 只作为 N03 早期 Session replay compatibility 保留，不是当前 writer vocabulary。
+The request variant never changes Canvas workflow/run history by itself.
 
-`run-update` 负责 durable lifecycle milestone：
+## 4. Projection contract
+
+The current official Session Projection framework separates Host fold state from client-visible wire view. Canvas should define:
+
+- Host state schema/version;
+- deterministic `init` / `apply` fold behavior;
+- a client-safe wire view schema/projection;
+- replay/checkpoint compatibility.
+
+Browser-visible Projection must contain enough semantic state for Minimal/Editor without leaking Host-only audit, authorization internals, credentials or binary data.
+
+## 5. Interaction context is not a Canvas event
+
+Current UI selection/focus/region is transient presentation context. N08 may log a model-visible plugin-context message only when that exact admitted user message is actually consumed by the Agent, but selection itself does not become a `canvas/change` semantic event.
+
+Therefore:
 
 ```text
-queued
-running
-completed
-failed
-cancelled
-interrupted
+selected node / edge / asset / region
+≠ workflow mutation
+≠ Canvas revision increment
 ```
 
-它不代表 Provider progress 百分比；progress 仍属于 ephemeral channel。
+## 6. Registry/settings changes are not Canvas semantic events
 
-## 4. Durable writer / reader compatibility
+The following process/deployment changes are external authorities and do not append Canvas events merely because they changed:
 
-历史 reader path：
+- Media Node Registry registration/HMR;
+- Media Model/Provider Registry registration/HMR;
+- Canvas Settings document edits;
+- current feature capability activation;
+- provider health snapshots;
+- request-image cache creation.
+
+A Run may persist the exact resolved identities it used for reproducibility, but registry mutation itself is not Session history.
+
+## 7. Revisions
+
+Keep revision domains separate:
+
+- `workflowRevision`: semantic workflow mutation fence;
+- `layoutRevision`: durable/editor layout mutation fence;
+- `runRevision`: durable run lifecycle update fence where used;
+- registry revisions: process-local discovery generations, not Session durable revisions.
+
+A workflow mutation must not advance layout revision merely because node positions are displayed, and a layout save must not change semantic execution fingerprints.
+
+## 8. Run snapshot rule
+
+N16 must start a run from an exact workflow identity/revision admitted by N15. A later workflow edit may not silently change the already-started run.
 
 ```text
-CanvasChange meta v1 → readable
-CanvasChange meta v2 → readable
-legacy run-complete   → readable
+N15 admit exact WorkflowRef
+→ N16 commits immutable Run snapshot/reference
+→ later workflowRevision changes are separate history
 ```
 
-当前 live writer path：
+## 9. History
 
-```text
-meta v2 required
-actor/source required
-run lifecycle uses run-update
-sensitive workflow credential/binary fields rejected precommit
-```
+Current Projection is optimized for current semantic state. Large run/variant history stays behind explicit history APIs/indexes rather than being stuffed into the current Browser Projection.
 
-可读兼容不意味着旧协议仍可继续写。
+History records stable asset/provenance references. Request-image transforms and provider transport caches remain reconstructable/transient and are not history variants.
 
-## 5. Session Commit Point
+## 10. Video
 
-```text
-build candidate
-→ detached fold preflight
-→ Session internal/dispatch precommit invariant
-→ Session log push = logical commit
-→ session/event postcommit observers
-→ cache / Projection / persistence consumers
-```
+Official Attachment upgrades currently provide the authoritative image path. N21 still owns the video binary durability design. The same event rule applies: persist video bytes through the eventual video authority first, then append only a stable Canvas asset reference.
 
-任何 Browser/cache state 都不得先于 Session commit 发布。
+## 11. Validation requirements
 
-CanvasService 还必须确认 Agent 与 Session 都是当前 Host registry/store 的 exact live object；detached Session 不能作为 durable mutation target。
-
-## 6. Ordering / Identity / Idempotency
-
-- Workflow semantic mutation：`workflowRevision +1`，`runRevision` 不变。
-- Run lifecycle mutation：`runRevision +1`，`workflowRevision` 不变。
-- Semantic no-op 不产生 revision/event。
-- `CanvasId` 与 `CanvasRunId` 在同一 Session 历史内都不得复用。
-- Run terminal 后不得回到 non-terminal。
-- `running → queued` 禁止。
-- Browser 收到旧 revision event 不得覆盖更高 revision Projection。
-- Provider duplicate completion 在 N16 必须幂等收敛到已有 terminal state。
-
-## 7. Clear / destructive mutation
-
-`clear` 必须使用当前 `WorkflowRef { canvasId, workflowId, workflowRevision }` CAS，而不是只有 CanvasId。
-
-```text
-non-terminal run
-→ clear rejected
-→ cancel/interrupted durable terminal
-→ clear allowed
-```
-
-避免已经收费/运行中的 Job/Provider task 失去 Canvas owner。
-
-## 8. Ephemeral Events
-
-不进入 Session Log：
-
-```text
-canvas/run-progress
-canvas/node-progress
-canvas/provider-phase
-canvas/transient-warning
-```
-
-断线丢失 ephemeral event 不得影响 durable correctness；重新连接后通过 Projection/Run 查询恢复权威状态。
-
-## 9. Interaction Context
-
-`CanvasInteractionContext` 不是 durable Canvas event。
-
-它是用户发送当前 turn 时采样的 session-scoped UI snapshot：
-
-```text
-workflowRevision
-selectedNodeIds
-selectedEdgeIds
-selectedAssets
-focusedOutput
-regionSelection?
-```
-
-只用于帮助 Agent 解释“这个/这张/这里”。Session 切换或 revision 过期后不得继续沿用。
-
-## 10. Run Event 关联字段
-
-运行/观测链路至少能关联：
-
-```text
-sessionId
-canvasId
-workflowId
-workflowRevision
-workflowRunId
-nodeRunId?
-providerRequestId?
-correlationId?
-```
-
-高基数 ID 用于 log/trace，不直接作为 metrics label。
-
-## 11. Browser Consumption
-
-Browser 只消费：
-
-1. Session Projection：当前 authoritative semantic state。
-2. Remote query：历史/详情/大型数据。
-3. Ephemeral event：进度与临时运行信息。
-
-Browser 不通过监听 Agent token/tool text 来推断 Canvas 已经变更，也不自己维护第二份 semantic workflow authority。
-
-## 12. 安全边界
-
-Durable event 中禁止出现：
-
-- Provider credential；
-- Authorization/API key/token/password/callback secret；
-- raw image/video bytes；
-- base64/data URL/blob media；
-- private provider request payload 中的敏感字段。
-
-Binary 必须通过 Attachment/Asset authorization route 获取。
-
-CanvasService 会在业务入口扫描；Canvas invariant 还会在 Session live precommit 再检查一次，防止其它 Host plugin 直接 append 绕过 Service。
+- replay from Session events reconstructs the same Canvas Host state;
+- Browser wire view contains no Host-only/binary values;
+- attachment save failure cannot publish completed image output;
+- request-image derivation produces no Canvas event;
+- selection/region changes produce no Canvas semantic revision;
+- registry/settings/HMR changes alone produce no Canvas event;
+- run snapshot remains pinned after workflow edits;
+- history remains queryable without unbounded current Projection growth.
