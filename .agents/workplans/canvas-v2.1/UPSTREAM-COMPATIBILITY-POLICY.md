@@ -1,163 +1,158 @@
-# Canvas / Harness Upstream Compatibility Policy
+# Canvas V2.2 — Upstream Compatibility Policy
 
-## 1. 目标
+Baseline: `deepseek-ai/deepseek-harness@b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` (`dsh@0.1.1-rc.2`)
 
-让 Canvas 能长期跟随官方 DeepSeek Harness 升级，而不是每次上游 Web/Agent 架构变化都重做一次大规模私有 fork 合并。
+## 1. Policy goal
 
-## 2. 核心原则
+Canvas is an extension of Harness, not a second application framework. The private repository should carry only product behavior that upstream does not provide or intentionally differs for the Canvas product. Every Harness upgrade therefore follows **adopt upstream first, replay the smallest Canvas extension second**.
 
-> Canvas 是 Harness 的正式扩展能力域，不是 Web Shell 的永久硬编码页面。
+## 2. Classification required for every upstream diff
 
-优先级：
+Every changed upstream file that intersects Canvas work must receive exactly one class:
 
-```text
-官方 lifecycle / service / slot contract
-    > 私有实现细节
-    > 临时兼容 patch
-```
+### A — Adopt unchanged
 
-产品需求不因上游升级丢失，但实现必须尽可能重新映射到官方 seam。
+Use upstream behavior and delete/retire private parallel logic. Typical examples:
 
-## 3. Compatibility Overlay 与 Full Upstream Sync 必须分开记账
+- Session Projection framework;
+- Attachment normalized/request-image pipeline;
+- Settings Describe Mirror;
+- ui-renderer React ownership;
+- ModuleLoader/transport core;
+- command attachment envelope;
+- repository build/gate machinery.
 
-“Canvas 能按新版 API 工作”与“私有仓库已经机械同步到该官方版本 final tree”是两个不同结论，禁止互相代替。
+### B — Replay intentional Canvas extension
 
-### Compatibility Overlay
-
-可以在旧 package/version baseline 上 backport 新版 contract，例如：
-
-- 改用新版 slot/store/hook discipline；
-- 将 Canvas 移到独立 dynamic client plugin；
-- 使用新版 Settings/Projection/Remote seam；
-- 移除旧的 public runtime export；
-- 让 `ui-layout` 只提供 generic `shell.main`。
-
-这些改动可以被标记为 `compatible` / `partial backport`，但**不能**被写成“已同步上游版本”。
-
-### Full Upstream Sync
-
-只有以下证据同时成立，才能把某个 Harness 版本标记为 `synced`：
-
-1. 官方 target commit/version 已记录并可核验；
-2. 私有 pre-sync commit 与 post-sync commit 已记录；
-3. target 版本新增/删除/改名的 package graph 已机械对齐，而不是只复制局部 API；
-4. root/package version 与目标 release baseline 一致，或有明确、审计过的私有版本策略说明；
-5. 应由上游新 owner 持有的 lifecycle 已真正迁移，例如 rc.8 的 React root 必须由动态 `ui-renderer`/`uiRenderer` ownership 持有；
-6. Web boot、dynamic roster、bundle/tsconfig/lock/build graph 与目标版本一致或有逐项 overlay 记录；
-7. REAL assembled boot 与目标测试有真实执行证据。
-
-缺任意一项，状态只能是 `PARTIAL BACKPORT` / `SYNC INCOMPLETE` / `REVIEW`，不得写 `synced`。
-
-### rc.8 当前特别门禁
-
-对于 `dsh@0.1.0-rc.8`，以下事实属于 sync-completion 的机械门禁：
+Start from the upstream file and re-apply only the documented Canvas requirement. Current principal example:
 
 ```text
-packages/client/web boot kernel
-      ──不拥有 React root──>
-dynamic @deepseek-ai/dsh-client-ui-renderer
-      ──provides──>
-ctx.uiRenderer.mount(container)
+official layout: sidebar | conversation | details
+Canvas layout:   sidebar | shell.main(Canvas) | conversation | details
 ```
 
-只要私有 `packages/client/web` 仍直接 `createRoot()`、仍通过 shell-own AppRoot/AppShell assembly 挂载真实应用，或者 `packages/client/ui-renderer` 仍缺失，就不能声称完整 rc.8 final-tree sync，即使 Canvas 自身已经遵守 rc.8 client rules。
+The replay must stay small enough to explain and regression-test independently.
 
-## 4. 路径分级
+### C — Revalidate private domain
 
-### A. 上游核心保护区
+The subsystem is Canvas-owned and not replaced by upstream, but its dependency seams may have changed. Examples: Canvas Domain, Media Workflow Engine, Media Model Registry, Provider Runtime and Run Admission.
 
-以下区域原则上禁止出现 Canvas 特判：
+### D — Deferred Canvas-only capability
 
-- `packages/client/web/**`
-- `packages/client/ui-renderer/**`（旧文档中的 render-service 概念在 rc.8 final tree 对应此 owner）
-- Agent core/session runtime 与模型 transport 核心实现
-- 通用 attachment store 核心
-- 通用 API carrier/connection 核心
+Upstream has no equivalent. Continue implementation under Canvas ownership. Examples: editable media workflow, image/video generation, Canvas Run lifecycle, video binary authority, generation history/variants.
 
-如确需修改，必须有独立 ADR，证明不存在 slot/service/plugin 扩展点，并在下一次上游升级优先移除。
+## 3. Forbidden compatibility strategies
 
-### B. 最小 overlay 区
+- Do not make a large private infrastructure fork merely to avoid adapting to a changed official seam.
+- Do not copy an old private package wholesale over the new upstream package.
+- Do not call a behavior “upstream-compatible” because TypeScript still compiles.
+- Do not preserve a private API solely because older Canvas docs mention it.
+- Do not treat generated files or lockfiles as hand-authored merge surfaces.
+- Do not silently change a product requirement to reduce merge work.
 
-可存在少量 Canvas integration seam，但必须保持通用职责：
+## 4. Product invariants that outrank upstream defaults
 
-- `packages/client/ui-layout/**`：只允许 layout region/slot/column 行为，不允许 Canvas domain state。
-- bundle/client roster：只允许注册 Canvas plugin，不允许实现 Canvas 业务。
-- settings composition：只允许注册 Canvas schema/section。
+Harness upgrades may change defaults but must not remove these product requirements without an explicit product decision:
 
-### C. Canvas 自有区
+1. Canvas and Conversation coexist in the Web shell.
+2. Minimal and Editor share one durable semantic state.
+3. Agent and Browser operate the same Host-authoritative Canvas.
+4. Editor workflows remain manually editable and open-world.
+5. Image/video generation and workflow generation remain Agent-addressable.
+6. Provider credentials and admission policy remain Host-only.
+7. Browser may degrade presentation when optional capabilities are absent, but must never fabricate semantic state.
 
-长期业务应集中于：
+## 5. Infrastructure ownership rules
 
-- `packages/canvas/**`
-- `packages/client/ui-canvas/**`
-- 后续 `packages/client/canvas-runtime/**` / `canvas-session/**`（若拆包）
-- `packages/canvas/tool-canvas/**`
-- Canvas provider/executor package
+### Session / Projection
 
-## 5. Upstream Conflict 分类
+- Session log is durable authority.
+- Canvas fold state uses the official projection framework.
+- Browser gets an explicit client-safe wire view.
+- Authorization is Host-enforced at the current official exposure/Remote boundary; a historical private `registerReadGuard` must not become an unreviewed permanent fork.
 
-每次升级把冲突分为：
+### Image attachments
 
-1. **Mechanical**：版本、import、build graph、rename。
-2. **Lifecycle**：plugin activation/dispose/HMR ownership。
-3. **Service Contract**：Session/Remote/Attachment/Settings API 变化。
-4. **UI Composition**：slot/layout/root ownership 变化。
-5. **Semantic**：上游行为与 Canvas 产品不变量真正冲突。
+- Harness Attachment owns normalized image bytes and request-image derivation.
+- Canvas stores stable references/provenance only.
+- Request variants, compression cache and Files upload identities remain request/provider infrastructure.
 
-只有第 5 类允许讨论调整产品架构；前 4 类应通过兼容迁移解决。
+### Settings
 
-任何第 1–4 类冲突即使已经通过 private overlay 绕开，也必须继续记录是否与 official final tree 一致；“功能能跑”不等价于“升级完成”。
+- Settings document is the durable preference authority.
+- Browser namespace scopes derive from the shared official mirror.
+- Canvas current feature capability is a Host activation snapshot, not the live checkbox value.
 
-## 6. UI Composition Policy
+### Client rendering
 
-Canvas main product surface 使用通用 `shell.main`，由 `ui-canvas` 动态贡献。
+- `ui-renderer` owns React root and React bindings.
+- Web boot remains framework-free.
+- `ui-layout` owns geometry/slots, not Canvas semantics.
+- `ui-canvas` owns Canvas Browser presentation.
 
-- `ui-layout` 只声明/排列 generic shell regions。
-- Conversation/Composer 保持 Conversation owner；Canvas 不抢 `conversation.view` ownership，也不创建第二 Composer。
-- Web boot / ui-renderer 不知道 Canvas component、Workflow、Mode、Selection 或 Draft。
-- Canvas feature package dispose/HMR 后，其 slot contribution、listener、local session state 必须随 plugin lifecycle 清理。
+### Commands / attachments
 
-如果上游未来调整 slot 名称或 root ownership，应把 Canvas 重新映射到新的 generic seam，而不是恢复 Web/AppFrame 产品特判。
+- Composer/command image submissions use official submission-envelope semantics.
+- Canvas must not add another base64/image admission path when the official envelope can carry the input.
 
-## 7. 禁止模式
+## 6. Intentional Layout fork contract
 
-- 在 `AppFrame` 保存 Workflow/Run/selection authority。
-- Browser 直接调用 Provider。
-- Canvas 自建第二套 attachment store。
-- Canvas 自建第二套 settings persistence。
-- 为自定义节点维护 built-in type whitelist。
-- 复制官方 Client plugin loader 形成私有 loader。
-- 将 Session 私有 hack 当正式通信协议。
-- 把 compatibility commit 冒充 upstream post-sync commit。
-- 只因为历史 `sync/*` branch 是当前祖先就声称 final-tree sync 完成。
-- 在 upstream 新增 owner package 缺失时，用旧 owner 中的兼容代码假装 package graph 已同步。
+The `shell.main` extension is allowed to change only the minimum surface required to place Canvas beside Conversation.
 
-## 8. Upgradeability Gate
+Allowed divergence:
 
-N25 发布前必须证明：
+- declare `shell.main` as a session-scoped generic slot;
+- add the track/column necessary to render it;
+- let `ui-canvas` occupy it dynamically;
+- keep Conversation as its own product owner.
 
-- Canvas 主要代码位于 Canvas-owned packages。
-- 上游核心保护区不存在未说明 Canvas 特判。
-- 下一次 Harness 升级可先机械同步官方 tree，再叠加有限 Canvas overlay。
-- 所有 overlay 路径都有 regression test。
-- `UPGRADE-MIGRATION-RUNBOOK.md` 可直接执行。
-- 最近一次声明为 `synced` 的 Harness baseline 有完整 version/package/root-owner/REAL-boot 证据，而不仅是 API compatibility note。
+Not automatically allowed:
 
-## 9. 每次升级的最小证据集
+- fork ThemePresenter behavior;
+- fork Cordis/slot lifecycle;
+- change session scope semantics;
+- re-own `details` behavior;
+- move React root ownership back to Web/Layout;
+- import Canvas domain/package values into `ui-layout`.
 
-升级记录至少必须包含：
+Every upstream layout upgrade must first reconstruct the new official package and then replay this contract.
+
+## 7. Version and generated-artifact policy
+
+Root/package family versions, lockfile and generated outputs are synchronized only through the repository's release/build tooling. In particular:
+
+- do not hand-edit `pnpm-lock.yaml`;
+- do not hand-edit generated Typert Remote artifacts;
+- do not hand-edit generated module/config/tool/persistence/client catalogs;
+- regenerate with the exact current scripts after source reconciliation.
+
+## 8. Node status policy after an upstream upgrade
+
+An implemented node becomes `REVALIDATION REQUIRED` when any of its dependency seams changes. Its implementation history remains true, but its acceptance is no longer current.
+
+A node returns to `ACCEPTED` only after:
+
+- source contracts are reconciled to the new baseline;
+- generated outputs are current;
+- focused tests execute;
+- relevant repository gates execute;
+- REAL assembled evidence exists for product-visible integration.
+
+## 9. Upgrade evidence record
+
+For each future upgrade, record:
 
 ```text
-upstreamVersion
-upstreamCommit
-privatePreSyncCommit
-privatePostSyncCommit
-packageGraphDelta
-rootMountOwner
-CanvasSchemaVersion
-WorkflowSchemaVersion
-compatibilityStatus
-realCompositionEvidence
+official repository + commit + release
+private pre-sync branch/commit
+classified diff summary
+intentional divergence list
+source migrations performed
+generated commands run
+exact-head validation commands/results
+REAL assembled evidence
+remaining blockers
+private post-sync commit
 ```
 
-若 `privatePostSyncCommit`、`rootMountOwner` 或 `realCompositionEvidence` 仍未知/未执行，则升级状态不得为 `COMPLETE`。
+Without this record, the repository is not considered synchronized even if a merge commit exists.
