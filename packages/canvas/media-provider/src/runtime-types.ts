@@ -3,7 +3,6 @@
 import type {
   CanvasImageAssetRef,
   CanvasJsonValue,
-  CanvasVideoAssetRef,
   WorkflowNodeId,
 } from '@deepseek-ai/dsh-canvas/types'
 import type {
@@ -11,7 +10,6 @@ import type {
   MediaNodeExecutionOutput,
   MediaNodeExecutionValue,
 } from '@deepseek-ai/dsh-media-workflow/engine'
-import type { MediaCapability } from '@deepseek-ai/dsh-media-workflow/types'
 import type { MediaModelId, MediaProviderId } from './types.ts'
 
 /** Stable Provider runtime failures; messages must stay provider-response/secret free. */
@@ -156,19 +154,6 @@ export interface MediaProviderOutputMaterializer {
   ): Promise<MediaProviderMaterializedOutput> | MediaProviderMaterializedOutput
 }
 
-/** Exact provider-backed node binding kept separate from Provider adapters. */
-export interface MediaProviderNodeBinding {
-  readonly nodeType: string
-  readonly nodeVersion: number
-  readonly capability: MediaCapability
-  buildRequest(context: MediaProviderNodeBindingContext): MediaProviderRequest
-  buildExecutorResult(
-    context: MediaProviderNodeBindingContext,
-    run: MediaProviderRunResult,
-    materialized: readonly MediaProviderMaterializedOutput[],
-  ): MediaNodeExecutionOutput | Readonly<Record<string, MediaNodeExecutionOutput>>
-}
-
 /** Inputs available to one semantic node binding after N13 model identity lookup. */
 export interface MediaProviderNodeBindingContext {
   readonly providerId: MediaProviderId
@@ -181,7 +166,3 @@ export interface MediaProviderNodeBindingContext {
   readonly inputs: Readonly<Record<string, readonly MediaNodeExecutionOutput[]>>
   readonly fingerprint: MediaNodeExecutionFingerprint
 }
-
-/** Utility aliases for custom Provider bindings. */
-export type MediaProviderImageInput = CanvasImageAssetRef
-export type MediaProviderVideoInput = CanvasVideoAssetRef
