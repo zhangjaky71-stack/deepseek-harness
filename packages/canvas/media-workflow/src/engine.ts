@@ -13,6 +13,7 @@ import type {
   MediaNodeExecutionIdentity,
   MediaNodeExecutionInputs,
   MediaNodeExecutionOutput,
+  MediaNodeExecutorResult,
   MediaNodeFingerprintInput,
   MediaWorkflowExecutionPlan,
   MediaWorkflowNodeRunResult,
@@ -222,9 +223,11 @@ export class MediaWorkflowEngine {
 
       const cached = fingerprint.cacheable ? await this.cache?.get(fingerprint) : undefined
       assertNotAborted(request.signal)
-      let result = cached === undefined ? undefined : snapshotMediaNodeExecutorResult(cached, definition)
-      const cacheHit = result !== undefined
-      if (cacheHit) {
+      let result: MediaNodeExecutorResult
+      let cacheHit: boolean
+      if (cached !== undefined) {
+        result = snapshotMediaNodeExecutorResult(cached, definition)
+        cacheHit = true
         await publish(request.eventSink, { kind: 'node-cache-hit', nodeId, fingerprint })
       } else {
         const executor = this.executors.require({ type: definition.type, version: definition.version })
@@ -239,6 +242,7 @@ export class MediaWorkflowEngine {
         })
         assertNotAborted(request.signal)
         result = snapshotMediaNodeExecutorResult(raw, definition)
+        cacheHit = false
         if (fingerprint.cacheable) await this.cache?.set(fingerprint, result)
       }
 
