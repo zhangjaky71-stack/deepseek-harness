@@ -28,7 +28,7 @@ jobs:
 
   canvas-rc2-reconcile:
     name: Canvas rc2 reconcile
-    if: github.event_name == 'pull_request' && github.head_ref == 'sync/canvas-rc2-trigger'
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'sync/canvas-rc2-trigger')
     permissions:
       contents: write
     runs-on: ubuntu-24.04
