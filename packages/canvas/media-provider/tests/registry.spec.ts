@@ -10,10 +10,8 @@ describe('MediaModelRegistry', () => {
   it('registers one Provider and its models atomically with stable ordering and normalized ratios', async () => {
     const ctx = await registryHarness()
     const p = provider('provider-b')
-    ctx.mediaModels.register(p, [
-      model(p.id, 'z-model', { capabilities: { ...model(p.id).capabilities, aspectRatios: ['18:32'] } }),
-      model(p.id, 'a-model'),
-    ])
+    const z = model(p.id, 'z-model', { capabilities: { ...model(p.id).capabilities, aspectRatios: ['18:32'] } })
+    ctx.mediaModels.register(p, [z, model(p.id, 'a-model')])
     expect(ctx.mediaModels.snapshot().revision).toBe(1)
     expect(ctx.mediaModels.listProviders().map(item => item.id)).toEqual([p.id])
     expect(ctx.mediaModels.listModels().map(item => item.id)).toEqual([
@@ -22,6 +20,8 @@ describe('MediaModelRegistry', () => {
     ])
     expect(ctx.mediaModels.getProvider(p.id)).toMatchObject({ displayName: 'Provider provider-b' })
     expect(ctx.mediaModels.getModel(ref('provider-b', 'z-model'))?.capabilities.aspectRatios).toEqual(['9:16'])
+    expect(ctx.mediaModels.getModelByExecutionIdentity(z.executionIdentityKey)?.id).toBe(MediaModelId('z-model'))
+    expect(ctx.mediaModels.getModelByExecutionIdentity('missing/execution@identity')).toBeUndefined()
   })
 
   it('unregisters exactly the owned catalog on fiber disposal and emits monotonic revisions', async () => {

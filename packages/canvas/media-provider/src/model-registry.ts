@@ -221,6 +221,12 @@ export class MediaModelRegistry extends Service {
     return this.models.get(modelKey(ref))
   }
 
+  /** Resolve the model that owns one opaque N12 execution identity key. */
+  getModelByExecutionIdentity(executionIdentityKey: string): MediaModelDescriptor | undefined {
+    const key = this.executionIdentities.get(executionIdentityKey)
+    return key === undefined ? undefined : this.models.get(key)
+  }
+
   /** List Providers in stable id order. */
   listProviders(): readonly MediaProviderDescriptor[] {
     return Object.freeze([...this.providers.values()].sort((left, right) => left.id.localeCompare(right.id)))

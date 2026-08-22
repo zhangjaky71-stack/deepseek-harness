@@ -7,9 +7,9 @@
   "include": ["src"],
   "references": [
     { "path": "../../../vendor/cordis" },
-    { "path": "../../util/brand" },
     { "path": "../canvas" },
     { "path": "../media-workflow" },
+    { "path": "../media-provider" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }
