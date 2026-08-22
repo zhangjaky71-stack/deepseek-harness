@@ -19,6 +19,7 @@ import {
   type MediaProviderResumeResult,
   type MediaProviderStartResult,
 } from '@deepseek-ai/dsh-media-provider/runtime'
+import type { MediaCapability } from '@deepseek-ai/dsh-media-workflow/types'
 
 /** Stable Provider id used by the opt-in Mock registration. */
 export const MOCK_MEDIA_PROVIDER_ID = MediaProviderId('mock-media')
@@ -32,6 +33,13 @@ export const MOCK_MEDIA_PROVIDER_DESCRIPTOR: MediaProviderDescriptor = Object.fr
   enabled: true,
 })
 
+const MOCK_MEDIA_CAPABILITIES = [
+  'text-to-image',
+  'image-edit',
+  'text-to-video',
+  'image-to-video',
+] as const satisfies readonly MediaCapability[]
+
 /** Universal N13 model descriptor covering the four N14 Provider-backed capabilities. */
 export const MOCK_MEDIA_MODEL_DESCRIPTOR: MediaModelDescriptor = Object.freeze({
   providerId: MOCK_MEDIA_PROVIDER_ID,
@@ -40,7 +48,7 @@ export const MOCK_MEDIA_MODEL_DESCRIPTOR: MediaModelDescriptor = Object.freeze({
   enabled: true,
   executionIdentityKey: 'mock-media/mock-universal-v1@1',
   capabilities: Object.freeze({
-    operations: Object.freeze(['text-to-image', 'image-edit', 'text-to-video', 'image-to-video']),
+    operations: Object.freeze(MOCK_MEDIA_CAPABILITIES),
     aspectRatios: 'any',
     dimensions: Object.freeze({ width: null, height: null }),
     duration: Object.freeze({ supported: true, minMs: 1000, maxMs: 60000, stepMs: 1000 }),
@@ -103,7 +111,6 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 function failScenario(scenario: MockMediaProviderScenario): never {
   switch (scenario.failure) {
     case 'rate-limit':
-      // SDK-shaped metadata intentionally exercises the N14 normalization path.
       throw { status: 429, retryAfterMs: scenario.retryAfterMs ?? 1000, rawResponse: 'mock-secret-provider-body' }
     case 'server-error':
       throw { status: 503, rawResponse: 'mock-secret-provider-body' }
@@ -160,25 +167,16 @@ function completionFor(request: MediaProviderRequest, sequence: number): MediaPr
   })
 }
 
-/**
- * In-memory Provider with queued deterministic behavior and failure injection.
- * It stores no credentials and emits no Provider URL/raw response. Async tasks retain completion state so duplicate resume/completion delivery is idempotent.
- */
 export class MockMediaProvider implements MediaProvider {
   private readonly scenarios: MockMediaProviderScenario[] = []
   private readonly tasks = new Map<string, MockTask>()
   private sequence = 0
   private cancelCalls = 0
 
-  /**
-   * Queue behavior for subsequent `start()` calls; an empty queue means inline success.
-   * @param scenarios - deterministic behaviors consumed in insertion order.
-   */
   enqueue(...scenarios: readonly MockMediaProviderScenario[]): void {
     this.scenarios.push(...scenarios)
   }
 
-  /** @returns Number of Provider cancel calls observed by this instance. */
   get cancellationCount(): number {
     return this.cancelCalls
   }
@@ -246,15 +244,9 @@ export class MockMediaProvider implements MediaProvider {
   }
 }
 
-/** Cordis function-plugin name. */
 export const name = 'media-provider-mock'
-/** Services required before the Mock can register catalog metadata and its runtime adapter. */
 export const inject = ['mediaModels', 'mediaProviders']
 
-/**
- * Register the default successful Mock Provider and universal model on one owning fiber.
- * @param ctx - Cordis context containing N13/N14 Provider registries.
- */
 export function apply(ctx: Context): void {
   const provider = new MockMediaProvider()
   ctx.mediaModels.register(MOCK_MEDIA_PROVIDER_DESCRIPTOR, [MOCK_MEDIA_MODEL_DESCRIPTOR])
