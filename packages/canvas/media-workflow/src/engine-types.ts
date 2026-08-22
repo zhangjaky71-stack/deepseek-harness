@@ -2,7 +2,6 @@
 
 import type {
   CanvasImageAssetRef,
-  CanvasJsonValue,
   CanvasVideoAssetRef,
   MediaWorkflow,
   MediaWorkflowId,
@@ -221,6 +220,3 @@ export interface MediaWorkflowRunResult {
   readonly plan: MediaWorkflowExecutionPlan
   readonly nodes: ReadonlyMap<WorkflowNodeId, MediaWorkflowNodeRunResult>
 }
-
-/** JSON-safe payload accepted by fingerprint helpers when callers need an execution identity descriptor later. */
-export type MediaWorkflowFingerprintJson = CanvasJsonValue
