@@ -70,6 +70,21 @@ function assertPositiveRequirement(value: number | undefined, label: string): vo
   }
 }
 
+function effectiveAspectRatio(requirements: MediaModelRequirements): string | undefined {
+  const explicit = requirements.aspectRatio === undefined
+    ? undefined
+    : normalizeAspectRatio(requirements.aspectRatio, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
+  if (requirements.width === undefined || requirements.height === undefined) return explicit
+  const derived = normalizeAspectRatio(`${requirements.width}:${requirements.height}`, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
+  if (explicit !== undefined && explicit !== derived) {
+    throw new MediaModelResolutionError(
+      'MEDIA_MODEL_INVALID_REQUIREMENTS',
+      `requirements.aspectRatio ${explicit} conflicts with width/height ratio ${derived}`,
+    )
+  }
+  return explicit ?? derived
+}
+
 /** Validate scalar requirement values before matching any model. */
 export function assertMediaModelRequirements(requirements: MediaModelRequirements): void {
   assertPositiveRequirement(requirements.width, 'requirements.width')
@@ -79,9 +94,7 @@ export function assertMediaModelRequirements(requirements: MediaModelRequirement
     && (!Number.isSafeInteger(requirements.referenceImageCount) || requirements.referenceImageCount < 0)) {
     throw new MediaModelResolutionError('MEDIA_MODEL_INVALID_REQUIREMENTS', 'requirements.referenceImageCount must be a non-negative safe integer')
   }
-  if (requirements.aspectRatio !== undefined) {
-    normalizeAspectRatio(requirements.aspectRatio, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
-  }
+  effectiveAspectRatio(requirements)
 }
 
 function modelKey(ref: MediaModelRef): string {
@@ -119,11 +132,9 @@ export function matchMediaModelRequirements(
   if (requirements.height !== undefined && !inConstraint(requirements.height, capabilities.dimensions.height)) {
     failures.push(mismatch('MEDIA_MODEL_HEIGHT_UNSUPPORTED', `${model.providerId}/${model.id} does not support height ${requirements.height}`))
   }
-  if (requirements.aspectRatio !== undefined && capabilities.aspectRatios !== 'any') {
-    const ratio = normalizeAspectRatio(requirements.aspectRatio, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
-    if (!capabilities.aspectRatios.includes(ratio)) {
-      failures.push(mismatch('MEDIA_MODEL_ASPECT_RATIO_UNSUPPORTED', `${model.providerId}/${model.id} does not support aspect ratio ${ratio}`))
-    }
+  const ratio = effectiveAspectRatio(requirements)
+  if (ratio !== undefined && capabilities.aspectRatios !== 'any' && !capabilities.aspectRatios.includes(ratio)) {
+    failures.push(mismatch('MEDIA_MODEL_ASPECT_RATIO_UNSUPPORTED', `${model.providerId}/${model.id} does not support aspect ratio ${ratio}`))
   }
   if (requirements.durationMs !== undefined) {
     const duration = capabilities.duration
