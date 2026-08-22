@@ -1,1 +1,2 @@
 trigger Canvas rc2 reconciliation
+synchronize after trusted job install
