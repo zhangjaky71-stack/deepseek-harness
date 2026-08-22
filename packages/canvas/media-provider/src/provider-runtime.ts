@@ -15,6 +15,7 @@ import type {
   MediaProviderRuntimeChange,
   MediaProviderStartResult,
 } from './runtime-types.ts'
+import type {} from './model-registry.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -217,6 +218,8 @@ function wait(ms: number, signal: AbortSignal | undefined, providerId: MediaProv
 
 /** Exact Provider-id runtime registry. N13 chooses the model; this registry only routes the resolved Provider. */
 export class MediaProviderRuntimeRegistry extends Service {
+  static inject = ['mediaModels']
+
   private readonly providers = new Map<MediaProviderId, MediaProvider>()
   private readonly listeners = new Set<(change: MediaProviderRuntimeChange) => void>()
 
@@ -224,9 +227,16 @@ export class MediaProviderRuntimeRegistry extends Service {
     super(ctx, 'mediaProviders')
   }
 
-  /** Register one runtime adapter on the caller fiber. */
+  /** Register one runtime adapter on the caller fiber after its N13 Provider descriptor exists. */
   register(providerId: MediaProviderId, provider: MediaProvider): () => void {
     assertProviderId(providerId)
+    if (this.ctx.mediaModels.getProvider(providerId) === undefined) {
+      throw new MediaProviderError(
+        'MEDIA_PROVIDER_INVALID_REGISTRATION',
+        `Media Provider ${providerId} must exist in the model catalog before its runtime adapter is registered`,
+        { providerId },
+      )
+    }
     const disposeEffect = this.ctx.effect(() => {
       if (this.providers.has(providerId)) {
         throw new MediaProviderError(
@@ -311,7 +321,7 @@ export async function runMediaProviderOperation(
   })
   let cancelPromise: Promise<void> | undefined
   const requestCancel = () => {
-    cancelPromise ??= Promise.resolve(provider.cancel(handle)).catch(() => undefined)
+    cancelPromise ??= Promise.resolve(provider.cancel(handle)).catch((): void => {})
   }
   signal?.addEventListener('abort', requestCancel, { once: true })
   try {
@@ -334,6 +344,12 @@ export async function runMediaProviderOperation(
       }
       await wait(update.retryAfterMs, signal, providerId)
     }
+  } catch (error) {
+    if (signal?.aborted === true) {
+      requestCancel()
+      await cancelPromise
+    }
+    throw error
   } finally {
     signal?.removeEventListener('abort', requestCancel)
   }
