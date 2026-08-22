@@ -17,6 +17,7 @@ import type {
   CanvasFeatureConfig,
   CanvasFeatureName,
   CanvasNodeCatalogEntry,
+  CanvasNodeCatalogSnapshot,
 } from './feature-types.ts'
 import type { MediaWorkflow, WorkflowEditOperation } from './types.ts'
 
@@ -40,7 +41,12 @@ type CatalogDefinition = {
   readonly lifecycle: CanvasNodeCatalogEntry['lifecycle']
   readonly ui: CanvasNodeCatalogEntry['ui']
 }
-interface MediaNodeCatalogSource { list(): readonly CatalogDefinition[] }
+interface MediaNodeCatalogSource {
+  snapshot(): {
+    readonly revision: number
+    readonly definitions: readonly CatalogDefinition[]
+  }
+}
 
 /**
  * Deployment feature policy shared by Canvas Host operations and Browser
@@ -87,23 +93,27 @@ export class CanvasFeatureService extends TypertRemoteService {
   @Remote('get')
   remoteExportGet(): CanvasCapabilities { return structuredClone(this.capabilities) }
 
-  /** Return installed node metadata from the Host registry as a data-only DTO. */
+  /** Return one client-safe installed-node catalog tied to the exact Host registry mutation revision. */
   @Remote('listNodes')
-  remoteExportListNodes(): readonly CanvasNodeCatalogEntry[] {
+  remoteExportListNodes(): CanvasNodeCatalogSnapshot {
     this.assertEnabled('editor')
     const source = this.ctx.get('mediaNodes') as MediaNodeCatalogSource | undefined
     if (source === undefined) throw new Error('canvasFeatures.listNodes: mediaNodes service is required while Canvas Editor is enabled')
-    return source.list().map(definition => ({
-      type: definition.type,
-      version: definition.version,
-      displayName: definition.displayName,
-      inputs: structuredClone(definition.inputs),
-      outputs: structuredClone(definition.outputs),
-      defaultConfig: structuredClone(definition.defaultConfig),
-      ...(definition.execution.feature === undefined ? {} : { feature: definition.execution.feature }),
-      lifecycle: structuredClone(definition.lifecycle),
-      ui: structuredClone(definition.ui),
-    }))
+    const catalog = source.snapshot()
+    return {
+      revision: catalog.revision,
+      entries: catalog.definitions.map(definition => ({
+        type: definition.type,
+        version: definition.version,
+        displayName: definition.displayName,
+        inputs: structuredClone(definition.inputs),
+        outputs: structuredClone(definition.outputs),
+        defaultConfig: structuredClone(definition.defaultConfig),
+        ...(definition.execution.feature === undefined ? {} : { feature: definition.execution.feature }),
+        lifecycle: structuredClone(definition.lifecycle),
+        ui: structuredClone(definition.ui),
+      })),
+    }
   }
 }
 
