@@ -36,29 +36,55 @@ async function registryHarness() {
 }
 
 describe('MediaNodeRegistry', () => {
-  it('rejects duplicate type/version registration without replacing the first definition', async () => {
+  it('rejects duplicate type/version registration without replacing the first definition or advancing revision', async () => {
     const ctx = await registryHarness()
     const first = definition(9)
     ctx.mediaNodes.register(first)
+    expect(ctx.mediaNodes.snapshot().revision).toBe(1)
     expect(() => ctx.mediaNodes.register(definition(9, { displayName: 'Duplicate' }))).toThrow(
       expect.objectContaining<Partial<MediaNodeRegistryError>>({ code: 'MEDIA_NODE_DUPLICATE_DEFINITION' }),
     )
     expect(ctx.mediaNodes.get('prompt', 9)?.displayName).toBe(first.displayName)
+    expect(ctx.mediaNodes.snapshot().revision).toBe(1)
   })
 
-  it('unregisters a plugin-owned definition when the registrant fiber is disposed', async () => {
+  it('versions register, unload, and HMR-style replacement as distinct registry mutations', async () => {
     const ctx = await registryHarness()
-    const plugin = {
+    expect(ctx.mediaNodes.snapshot()).toEqual({ revision: 0, definitions: [] })
+
+    const changes: Array<{ kind: string; revision: number }> = []
+    ctx.mediaNodes.onChange(change => { changes.push({ kind: change.kind, revision: change.revision }) })
+    const plugin = (displayName: string) => ({
       inject: ['mediaNodes'],
       apply(pluginCtx: Context) {
-        pluginCtx.mediaNodes.register(definition(11))
+        pluginCtx.mediaNodes.register(definition(11, { displayName }))
       },
-    }
-    const fiber = ctx.plugin(plugin)
-    await fiber.await()
-    expect(ctx.mediaNodes.get('prompt', 11)).toBeDefined()
-    await fiber.dispose()
-    expect(ctx.mediaNodes.get('prompt', 11)).toBeUndefined()
+    })
+
+    const first = ctx.plugin(plugin('Plugin v1'))
+    await first.await()
+    expect(ctx.mediaNodes.snapshot()).toMatchObject({
+      revision: 1,
+      definitions: [{ version: 11, displayName: 'Plugin v1' }],
+    })
+
+    await first.dispose()
+    expect(ctx.mediaNodes.snapshot()).toEqual({ revision: 2, definitions: [] })
+
+    const replacement = ctx.plugin(plugin('Plugin v2'))
+    await replacement.await()
+    expect(ctx.mediaNodes.snapshot()).toMatchObject({
+      revision: 3,
+      definitions: [{ version: 11, displayName: 'Plugin v2' }],
+    })
+    await replacement.dispose()
+    expect(ctx.mediaNodes.snapshot()).toEqual({ revision: 4, definitions: [] })
+    expect(changes).toEqual([
+      { kind: 'registered', revision: 1 },
+      { kind: 'unregistered', revision: 2 },
+      { kind: 'registered', revision: 3 },
+      { kind: 'unregistered', revision: 4 },
+    ])
   })
 
   it('keeps deprecated definitions resolvable/executable while refusing new creation', async () => {
@@ -101,6 +127,7 @@ describe('MediaNodeRegistry', () => {
       'video.generate',
       'video.image-to-video',
     ])
+    expect(ctx.mediaNodes.snapshot().revision).toBe(7)
     expect(BUILTIN_MEDIA_NODE_DEFINITIONS).toHaveLength(7)
     expect(ctx.mediaNodes.get('image.edit')?.inputs.map(port => port.type)).toEqual(['image', 'text', 'mask'])
     expect(ctx.mediaNodes.get('image.generate')?.outputs[0]?.type).toBe('image-list')
