@@ -5,11 +5,6 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 /** Opaque identity used to deduplicate one Agent-issued Canvas command end to end. */
 export type CanvasCommandId = Branded<'CanvasCommandId'>
 
-/** Brand an already-generated opaque command id. */
-export function CanvasCommandId(value: string): CanvasCommandId {
-  return value as CanvasCommandId
-}
-
 /** The Phase 1 image-generation command understood by the Infinite Canvas bridge. */
 export interface CanvasGenerateCommand {
   readonly commandId: CanvasCommandId
