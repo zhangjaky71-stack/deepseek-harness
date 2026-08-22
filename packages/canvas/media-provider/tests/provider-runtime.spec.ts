@@ -69,7 +69,7 @@ describe('MediaProviderRuntimeRegistry', () => {
     expect(ctx.mediaProviders.list()).toEqual([])
   })
 
-  it('registers on the owning fiber, rejects duplicates, and unregisters on disposal', async () => {
+  it('registers through a caller that injects only mediaProviders, rejects duplicates, and unregisters on disposal', async () => {
     const ctx = await harness()
     const descriptor = provider('fiber-provider')
     ctx.mediaModels.register(descriptor, [model(descriptor.id, 'fiber-model')])
@@ -144,9 +144,10 @@ describe('media Provider operation driver', () => {
     expect(result).toMatchObject({ mode: 'polling', providerTaskId: 'task-1' })
   })
 
-  it('requests Provider cancellation when an async operation is aborted', async () => {
+  it('waits for the single Provider cancellation request to settle when an async operation is aborted', async () => {
     const controller = new AbortController()
     const cancelled: MediaProviderOperationHandle[] = []
+    let cancelSettled = false
     const providerRuntime: MediaProvider = {
       start() {
         return { mode: 'callback', providerTaskId: 'task-cancel' }
@@ -157,14 +158,17 @@ describe('media Provider operation driver', () => {
         if (signal?.aborted === true) throw new Error('sdk abort')
         return { status: 'pending', retryAfterMs: 1 }
       },
-      cancel(handle) {
+      async cancel(handle) {
         cancelled.push(handle)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        cancelSettled = true
       },
     }
 
     await expect(runMediaProviderOperation(providerRuntime, request(), controller.signal)).rejects.toMatchObject({
       code: 'MEDIA_PROVIDER_ABORTED',
     })
+    expect(cancelSettled).toBe(true)
     expect(cancelled).toEqual([{
       providerId: MediaProviderId('runtime-provider'),
       mode: 'callback',
@@ -183,8 +187,8 @@ describe('media Provider operation driver', () => {
     expect(server.message).not.toContain('PRIVATE-PAYLOAD')
   })
 
-  it('rejects malformed Provider completion before downstream materialization', async () => {
-    const bad: MediaProvider = {
+  it('rejects malformed Provider completion and mismatched media metadata before downstream materialization', async () => {
+    const empty: MediaProvider = {
       start() {
         return { mode: 'inline', completion: { outputs: [] } }
       },
@@ -193,7 +197,23 @@ describe('media Provider operation driver', () => {
       },
       cancel() {},
     }
-    await expect(runMediaProviderOperation(bad, request())).rejects.toMatchObject({
+    await expect(runMediaProviderOperation(empty, request())).rejects.toMatchObject({
+      code: 'MEDIA_PROVIDER_INVALID_RESULT',
+    })
+
+    const wrongMediaType: MediaProvider = {
+      start() {
+        return {
+          mode: 'inline',
+          completion: { outputs: [{ kind: 'image', mediaType: 'video/mp4', data: new Uint8Array([1]) }] },
+        }
+      },
+      resume() {
+        throw new Error('not reached')
+      },
+      cancel() {},
+    }
+    await expect(runMediaProviderOperation(wrongMediaType, request())).rejects.toMatchObject({
       code: 'MEDIA_PROVIDER_INVALID_RESULT',
     })
   })
