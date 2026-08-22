@@ -87,6 +87,10 @@ Remote failures are explicit. The Typert Gateway preserves only declared `Typert
 
 Authorization and deployment capability are independent. Authorization answers whether an actor may perform an action; feature policy answers whether the current deployment offers it. `CanvasFeatureService` owns effective Canvas/Editor/History/Video/Variants/Partial Run/Region Edit/Provider Fallback flags. Historical values remain readable when a feature is disabled; flags do not rewrite durable history.
 
+`CanvasFeatureService` has a formal activation dependency on `ctx.settings`. At activation it registers the durable `canvas` Settings namespace with the same feature-config schema: the Cordis/plugin entry config is the composition `base`, and the durable user Settings document overlays that base (with schema defaults beneath both). The namespace declares `applies: 'restart'`, and the service samples `scope.get()` exactly once into its immutable effective capability snapshot for that activation. Later Settings edits are persisted but do not hot-mutate current Host capability; a Host restart or feature-service remount re-registers the namespace and samples the updated durable layer.
+
+The read-only `canvasFeatures` Remote exposes only that effective capability snapshot. Raw composition/user Settings layers and secret metadata never leave the Host through this Remote. This prevents Browser Settings state from becoming a second live capability authority and keeps one deterministic capability value for all Host consumers during an activation.
+
 ## Validation responsibilities
 
 Pure domain invariants validate value relationships. N02 migration validates durable structural compatibility. N03/N04 service + Session invariant enforce transition, commit, provenance, authorization boundary, current-write authority, and durable-data safety. N10/N12 own installed node definitions and executability. N15/N16 own admission/Jobs/Retry/Cancel/Reconciler. N17/N21 own physical image/video asset persistence and authorized binary reads. N23 owns progress, logs, metrics, traces, and additional diagnostic redaction.
