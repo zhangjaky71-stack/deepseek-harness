@@ -1,49 +1,60 @@
-/** Host deployment feature policy and read-only Browser capability Remote. */
+/** Host Canvas feature configuration and read-only capability/node-catalog Remote (`canvasFeatures`). */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import {
+  assertCanvasFeatureEnabled,
+  assertCanvasWorkflowCreatable,
+  assertCanvasWorkflowEditable,
+  assertCanvasWorkflowExecutable,
+  canvasFeatureEnabled,
+  resolveCanvasCapabilities,
+} from './features.ts'
 import type {
   CanvasCapabilities,
   CanvasFeatureConfig,
   CanvasFeatureName,
   CanvasNodeCatalogEntry,
 } from './feature-types.ts'
-import {
-  assertCanvasWorkflowCreatable,
-  assertCanvasWorkflowEditable,
-  assertCanvasWorkflowExecutable,
-  isCanvasFeatureEnabled,
-  resolveCanvasCapabilities,
-} from './features.ts'
 import type { MediaWorkflow, WorkflowEditOperation } from './types.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Context { canvasFeatures: CanvasFeatureService }
+}
+
+/** Harness settings namespace owned by the Canvas deployment feature policy. */
 export const CANVAS_FEATURE_SETTINGS_NAMESPACE = 'canvas'
 const SETTINGS_NAMESPACE = settingsNamespace(CANVAS_FEATURE_SETTINGS_NAMESPACE)
+const toggle = (enabled: boolean) => z.object({ enabled: z.boolean().default(enabled) })
 
-const toggle = (enabled: boolean, description: string) => z.object({
-  enabled: z.boolean().default(enabled).description(description),
-})
+type CatalogDefinition = {
+  readonly type: CanvasNodeCatalogEntry['type']
+  readonly version: number
+  readonly displayName: string
+  readonly inputs: CanvasNodeCatalogEntry['inputs']
+  readonly outputs: CanvasNodeCatalogEntry['outputs']
+  readonly defaultConfig: CanvasNodeCatalogEntry['defaultConfig']
+  readonly execution: { readonly feature?: CanvasFeatureName }
+  readonly lifecycle: CanvasNodeCatalogEntry['lifecycle']
+  readonly ui: CanvasNodeCatalogEntry['ui']
+}
+interface MediaNodeCatalogSource { list(): readonly CatalogDefinition[] }
 
 /**
- * Host-owned deployment capability service. Cordis entry config remains the
- * composition base. When the optional Harness settings provider is present,
- * the same schema is registered as namespace `canvas`; its resolved value is
- * sampled for this service activation and the namespace declares
- * `applies: restart`, so an in-process user edit never silently changes the
- * active capability surface. Restart/remount re-samples the stored section.
+ * Deployment feature policy shared by Canvas Host operations and Browser
+ * capability discovery. Cordis entry config remains the composition base. If
+ * the optional Harness settings provider is mounted, this owner registers the
+ * same schema as namespace `canvas` and samples the resolved user section for
+ * this service activation. The namespace declares `applies: restart`: later
+ * in-process document edits are persisted for the next activation and do not
+ * silently rewrite the already-published capability surface.
  */
 export class CanvasFeatureService extends TypertRemoteService {
   static Config: z<CanvasFeatureConfig> = z.object({
-    canvas: toggle(true, 'Enable the Canvas product surface and Canvas operations.'),
-    editor: toggle(true, 'Enable the workflow Editor UI and Browser editor mutations.'),
-    history: toggle(true, 'Enable Canvas run-history queries.'),
-    video: toggle(false, 'Enable Video workflow creation/execution when the owning runtime is installed.'),
-    variants: toggle(false, 'Enable Canvas variant operations when implemented.'),
-    partialRun: toggle(false, 'Enable partial workflow execution when implemented.'),
-    regionEdit: toggle(false, 'Enable region/mask interaction and editing when implemented.'),
-    providerFallback: toggle(false, 'Enable provider fallback when the owning runtime is installed.'),
+    canvas: toggle(true), editor: toggle(true), history: toggle(true), video: toggle(false),
+    variants: toggle(false), partialRun: toggle(false), regionEdit: toggle(false), providerFallback: toggle(false),
   })
 
   private readonly compositionConfig: CanvasFeatureConfig
@@ -54,9 +65,9 @@ export class CanvasFeatureService extends TypertRemoteService {
     this.compositionConfig = structuredClone(config)
     this.activeCapabilities = resolveCanvasCapabilities(this.compositionConfig)
 
-    // Settings is an OPTIONAL Host service. `ctx.inject` makes the namespace
-    // registration follow the settings provider's lifetime without making
-    // lightweight/custom Canvas compositions depend on a provider.
+    // Settings is deliberately optional. This mirrors other feature owners:
+    // lightweight/custom compositions keep working from entry config alone,
+    // while the standard Host settings provider supplies the user layer.
     ctx.inject(['settings'], (settingsCtx) => {
       const scope = settingsCtx.settings.register(
         SETTINGS_NAMESPACE,
@@ -66,9 +77,9 @@ export class CanvasFeatureService extends TypertRemoteService {
       const sampled = resolveCanvasCapabilities(scope.get())
       this.activeCapabilities = sampled
       settingsCtx.effect(() => () => {
-        // A provider disappearing must not leave a detached settings snapshot
-        // as the active authority. Fall back to the composition layer until a
-        // provider is mounted again (whose injection re-samples its section).
+        // If the settings provider disappears, do not retain a detached user
+        // document as current deployment authority. A later provider mount is
+        // injected again and re-samples its own registered namespace.
         if (this.activeCapabilities === sampled) {
           this.activeCapabilities = resolveCanvasCapabilities(this.compositionConfig)
         }
@@ -76,65 +87,39 @@ export class CanvasFeatureService extends TypertRemoteService {
     })
   }
 
-  /** Effective capabilities for this Host activation. */
-  get capabilities(): CanvasCapabilities {
-    return this.activeCapabilities
-  }
+  /** Effective deployment capability snapshot for this Host activation. */
+  get capabilities(): CanvasCapabilities { return this.activeCapabilities }
 
-  isEnabled(feature: CanvasFeatureName): boolean {
-    return isCanvasFeatureEnabled(this.activeCapabilities, feature)
+  isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.activeCapabilities, feature) }
+  assertEnabled(feature: CanvasFeatureName): void { assertCanvasFeatureEnabled(this.activeCapabilities, feature) }
+  assertWorkflowCreatable(workflow: MediaWorkflow): void { assertCanvasWorkflowCreatable(this.activeCapabilities, workflow) }
+  assertWorkflowEditable(workflow: MediaWorkflow, operations: readonly WorkflowEditOperation[]): void {
+    assertCanvasWorkflowEditable(this.activeCapabilities, workflow, operations)
   }
+  assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.activeCapabilities, workflow) }
 
-  assertEnabled(feature: CanvasFeatureName): void {
-    if (!this.isEnabled(feature)) {
-      const { CanvasFeatureError } = requireFeatureError()
-      throw new CanvasFeatureError(feature)
-    }
-  }
+  /** Browser-readable effective deployment capabilities; raw settings layers never cross this Remote. */
+  @Remote('get')
+  remoteExportGet(): CanvasCapabilities { return structuredClone(this.activeCapabilities) }
 
-  assertWorkflowCreatable(workflow: MediaWorkflow): void {
-    assertCanvasWorkflowCreatable(workflow, this.activeCapabilities)
-  }
-
-  assertWorkflowEditable(current: MediaWorkflow, operations: readonly WorkflowEditOperation[]): void {
-    assertCanvasWorkflowEditable(current, operations, this.activeCapabilities)
-  }
-
-  assertWorkflowExecutable(workflow: MediaWorkflow): void {
-    assertCanvasWorkflowExecutable(workflow, this.activeCapabilities)
-  }
-
-  /** Deployment-global read-only capability snapshot; no Session state or raw settings layers cross this Remote. */
-  @Remote('get', { mode: 'global' })
-  remoteExportGet(): CanvasCapabilities {
-    return structuredClone(this.activeCapabilities)
-  }
-
-  /** Browser-safe installed media-node catalog. Runtime schemas/functions never cross this Remote. */
-  @Remote('listNodes', { mode: 'global' })
+  /** Return installed node metadata from the Host registry as a data-only DTO. */
+  @Remote('listNodes')
   remoteExportListNodes(): readonly CanvasNodeCatalogEntry[] {
     this.assertEnabled('editor')
-    const registry = this.ctx.get('mediaNodes') as {
-      listCatalog?: (capabilities: CanvasCapabilities) => readonly CanvasNodeCatalogEntry[]
-    } | undefined
-    if (registry?.listCatalog === undefined) return []
-    return structuredClone(registry.listCatalog(this.activeCapabilities))
+    const source = this.ctx.get('mediaNodes') as MediaNodeCatalogSource | undefined
+    if (source === undefined) throw new Error('canvasFeatures.listNodes: mediaNodes service is required while Canvas Editor is enabled')
+    return source.list().map(definition => ({
+      type: definition.type,
+      version: definition.version,
+      displayName: definition.displayName,
+      inputs: structuredClone(definition.inputs),
+      outputs: structuredClone(definition.outputs),
+      defaultConfig: structuredClone(definition.defaultConfig),
+      ...(definition.execution.feature === undefined ? {} : { feature: definition.execution.feature }),
+      lifecycle: structuredClone(definition.lifecycle),
+      ui: structuredClone(definition.ui),
+    }))
   }
-}
-
-/** Avoid a feature-service↔features initialization cycle in emitted JS while preserving the public error class. */
-function requireFeatureError(): { CanvasFeatureError: new (feature: CanvasFeatureName) => Error } {
-  // CanvasFeatureError is exported by features.ts and the helper is evaluated
-  // only after module initialization, so the dynamic local binding is safe.
-  return { CanvasFeatureError: class extends Error {
-    readonly code = 'CANVAS_FEATURE_DISABLED'
-    readonly feature: CanvasFeatureName
-    constructor(feature: CanvasFeatureName) {
-      super(`Canvas feature "${feature}" is disabled in this deployment`)
-      this.name = 'CanvasFeatureError'
-      this.feature = feature
-    }
-  } }
 }
 
 export default CanvasFeatureService
