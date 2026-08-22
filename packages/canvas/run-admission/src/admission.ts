@@ -66,6 +66,14 @@ function frozenClone<T>(value: T): T {
   return snapshot
 }
 
+function assertWorkflowIdentity(request: CanvasRunAdmissionRequest): void {
+  if (request.workflowRef.workflowId === request.workflow.id) return
+  throw new CanvasRunAdmissionError(
+    'CANVAS_RUN_INVALID_WORKFLOW',
+    'Canvas run workflow does not match the admitted workflow reference',
+  )
+}
+
 function authorize(request: CanvasRunAdmissionRequest, authority: CanvasRunAuthorizationPort): void {
   const decision = authority.authorize({
     permission: 'canvas.run',
@@ -76,8 +84,8 @@ function authorize(request: CanvasRunAdmissionRequest, authority: CanvasRunAutho
     ...(request.access.correlationId === undefined ? {} : { correlationId: request.access.correlationId }),
     resource: {
       kind: 'workflow',
-      canvasId: request.canvasId,
-      workflowId: request.workflow.id,
+      canvasId: request.workflowRef.canvasId,
+      workflowId: request.workflowRef.workflowId,
     },
   })
   if (decision.allowed) return
@@ -303,9 +311,9 @@ async function costEstimate(
 /**
  * Evaluate every N15 gate and atomically reserve process-local concurrency last.
  * No Provider operation, Run record, Job, or Session event is created here.
- * @param request - immutable run intent plus per-node model requirements and optional partial boundary values.
+ * @param request - exact workflow-revision intent plus per-node model requirements and optional partial boundary values.
  * @param authorities - current N04/N09/N10/N13/N14 authorities plus deployment governance policies.
- * @returns an admission permit whose workflow/plan/identities must be used by N16 and whose lease must be released at terminal settlement.
+ * @returns an admission permit whose exact workflow ref/value, plan, and identities must be used by N16 and whose lease must be released at terminal settlement.
  */
 export async function admitCanvasRun(
   request: CanvasRunAdmissionRequest,
@@ -316,9 +324,11 @@ export async function admitCanvasRun(
   if (request.sessionId.length === 0) {
     throw new CanvasRunAdmissionError('CANVAS_RUN_AUTHORIZATION_UNAVAILABLE', 'Canvas run session id is required')
   }
+  assertWorkflowIdentity(request)
   authorize(request, authorities.authorization)
 
   const workflow = frozenClone(request.workflow)
+  const workflowRef = frozenClone(request.workflowRef)
   const selection = request.selection ?? { mode: 'all' as const }
 
   let validated: ReturnType<typeof assertValidMediaWorkflow>
@@ -341,7 +351,7 @@ export async function admitCanvasRun(
   const resolved = resolveModels(request, providerNodes, validated.definitions, authorities)
   const governanceEvidence: CanvasRunGovernanceEvidence = Object.freeze({
     sessionId: request.sessionId,
-    canvasId: request.canvasId,
+    workflowRef,
     workflow,
     plan,
     access: frozenClone(request.access),
