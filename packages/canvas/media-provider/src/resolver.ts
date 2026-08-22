@@ -3,12 +3,13 @@
 import type {
   MediaModelDescriptor,
   MediaModelMismatch,
-  MediaModelNumericConstraint,
+  MediaModelPolicyResolutionRequest,
   MediaModelRef,
   MediaModelRegistrySnapshot,
   MediaModelResolution,
   MediaModelResolutionErrorCode,
   MediaModelResolutionRequest,
+  MediaModelRequirements,
   MediaNumericConstraint,
   MediaProviderDescriptor,
 } from './types.ts'
@@ -43,19 +44,44 @@ function gcd(left: number, right: number): number {
   return a
 }
 
-/** Normalize a positive integer ratio to lowest terms. */
-export function normalizeMediaAspectRatio(value: string): string {
+function normalizeAspectRatio(value: string, code: MediaModelResolutionErrorCode): string {
   const match = RATIO_PATTERN.exec(value)
   if (match === null) {
-    throw new MediaModelResolutionError('MEDIA_MODEL_INVALID_DESCRIPTOR', `invalid media aspect ratio ${JSON.stringify(value)}`)
+    throw new MediaModelResolutionError(code, `invalid media aspect ratio ${JSON.stringify(value)}`)
   }
   const width = Number(match[1])
   const height = Number(match[2])
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)) {
-    throw new MediaModelResolutionError('MEDIA_MODEL_INVALID_DESCRIPTOR', `media aspect ratio ${JSON.stringify(value)} exceeds safe integer bounds`)
+    throw new MediaModelResolutionError(code, `media aspect ratio ${JSON.stringify(value)} exceeds safe integer bounds`)
   }
   const divisor = gcd(width, height)
   return `${width / divisor}:${height / divisor}`
+}
+
+/** Normalize a descriptor aspect ratio to lowest positive integer terms. */
+export function normalizeMediaAspectRatio(value: string): string {
+  return normalizeAspectRatio(value, 'MEDIA_MODEL_INVALID_DESCRIPTOR')
+}
+
+function assertPositiveRequirement(value: number | undefined, label: string): void {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new MediaModelResolutionError('MEDIA_MODEL_INVALID_REQUIREMENTS', `${label} must be a positive safe integer`)
+  }
+}
+
+/** Validate scalar requirement values before matching any model. */
+export function assertMediaModelRequirements(requirements: MediaModelRequirements): void {
+  assertPositiveRequirement(requirements.width, 'requirements.width')
+  assertPositiveRequirement(requirements.height, 'requirements.height')
+  assertPositiveRequirement(requirements.durationMs, 'requirements.durationMs')
+  if (requirements.referenceImageCount !== undefined
+    && (!Number.isSafeInteger(requirements.referenceImageCount) || requirements.referenceImageCount < 0)) {
+    throw new MediaModelResolutionError('MEDIA_MODEL_INVALID_REQUIREMENTS', 'requirements.referenceImageCount must be a non-negative safe integer')
+  }
+  if (requirements.aspectRatio !== undefined) {
+    normalizeAspectRatio(requirements.aspectRatio, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
+  }
 }
 
 function modelKey(ref: MediaModelRef): string {
@@ -79,8 +105,9 @@ function mismatch(code: MediaModelMismatch['code'], message: string): MediaModel
  */
 export function matchMediaModelRequirements(
   model: MediaModelDescriptor,
-  requirements: MediaModelResolutionRequest['requirements'],
+  requirements: MediaModelRequirements,
 ): readonly MediaModelMismatch[] {
+  assertMediaModelRequirements(requirements)
   const failures: MediaModelMismatch[] = []
   const capabilities = model.capabilities
   if (!capabilities.operations.includes(requirements.capability)) {
@@ -93,7 +120,7 @@ export function matchMediaModelRequirements(
     failures.push(mismatch('MEDIA_MODEL_HEIGHT_UNSUPPORTED', `${model.providerId}/${model.id} does not support height ${requirements.height}`))
   }
   if (requirements.aspectRatio !== undefined && capabilities.aspectRatios !== 'any') {
-    const ratio = normalizeMediaAspectRatio(requirements.aspectRatio)
+    const ratio = normalizeAspectRatio(requirements.aspectRatio, 'MEDIA_MODEL_INVALID_REQUIREMENTS')
     if (!capabilities.aspectRatios.includes(ratio)) {
       failures.push(mismatch('MEDIA_MODEL_ASPECT_RATIO_UNSUPPORTED', `${model.providerId}/${model.id} does not support aspect ratio ${ratio}`))
     }
@@ -156,7 +183,7 @@ function resolveExact(
   return { provider, model }
 }
 
-function validateCandidateOrder(index: CatalogIndex, request: MediaModelResolutionRequest): readonly MediaModelRef[] {
+function validateCandidateOrder(index: CatalogIndex, request: MediaModelPolicyResolutionRequest): readonly MediaModelRef[] {
   const seen = new Set<string>()
   for (const ref of request.routing.candidateOrder) {
     const key = modelKey(ref)
@@ -173,7 +200,7 @@ function validateCandidateOrder(index: CatalogIndex, request: MediaModelResoluti
 
 function compatibleCandidate(
   index: CatalogIndex,
-  request: MediaModelResolutionRequest,
+  request: MediaModelPolicyResolutionRequest,
 ): { readonly provider: MediaProviderDescriptor; readonly model: MediaModelDescriptor } | undefined {
   for (const ref of validateCandidateOrder(index, request)) {
     const exact = resolveExact(index, ref)!
@@ -205,6 +232,7 @@ export function resolveMediaModel(
   snapshot: MediaModelRegistrySnapshot,
   request: MediaModelResolutionRequest,
 ): MediaModelResolution {
+  assertMediaModelRequirements(request.requirements)
   const index = indexSnapshot(snapshot)
   if (request.selection.mode === 'strict') {
     const exact = resolveExact(index, request.selection.preferred)
