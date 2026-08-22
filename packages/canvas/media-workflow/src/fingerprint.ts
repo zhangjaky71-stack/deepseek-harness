@@ -14,7 +14,8 @@ function canonical(value: CanvasJsonValue): string {
     return JSON.stringify(value)
   }
   if (Array.isArray(value)) return `[${value.map(item => canonical(item)).join(',')}]`
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key]!)}`).join(',')}}`
+  const record = value as Readonly<Record<string, CanvasJsonValue>>
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonical(record[key]!)}`).join(',')}}`
 }
 
 /**
