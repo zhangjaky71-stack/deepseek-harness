@@ -63,6 +63,11 @@ export class AppWebEntry {
   }
 
   private async mountApp(ctx: Context): Promise<void> {
+    if (ctx.get('uiRenderer') === undefined) {
+      throw new Error('web boot: uiRenderer service missing after client graph activation')
+    }
+    // Bind the mount to a dependency fiber so a future renderer replacement
+    // unmounts the old React root before the new service remounts it.
     const mounted = ctx.inject(['uiRenderer'], (scope) => {
       scope.effect(() => scope.uiRenderer.mount(this.container), 'web boot: application mount')
     })
