@@ -372,7 +372,12 @@ export async function runMediaProviderOperation(
   })
   let cancelPromise: Promise<void> | undefined
   const requestCancel = () => {
-    cancelPromise ??= Promise.resolve(provider.cancel(handle)).catch((): void => {})
+    if (cancelPromise !== undefined) return
+    try {
+      cancelPromise = Promise.resolve(provider.cancel(handle)).catch((): void => {})
+    } catch {
+      cancelPromise = Promise.resolve()
+    }
   }
   signal?.addEventListener('abort', requestCancel, { once: true })
   try {
