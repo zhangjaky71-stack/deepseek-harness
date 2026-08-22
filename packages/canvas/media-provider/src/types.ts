@@ -84,11 +84,19 @@ export interface MediaModelRequirements {
   readonly requiresAudio?: boolean
 }
 
-/** Explicit caller intent for exact or policy-selected model resolution. */
-export type MediaModelSelection =
+/** Exact caller intent. Strict mode never consults routing candidates and never falls back. */
+export interface MediaModelStrictSelection {
+  readonly mode: 'strict'
+  readonly preferred: MediaModelRef
+}
+
+/** Policy-selected caller intent. */
+export type MediaModelPolicySelection =
   | { readonly mode: 'auto' }
-  | { readonly mode: 'strict'; readonly preferred: MediaModelRef }
   | { readonly mode: 'fallback'; readonly preferred: MediaModelRef }
+
+/** Explicit caller intent for exact or policy-selected model resolution. */
+export type MediaModelSelection = MediaModelStrictSelection | MediaModelPolicySelection
 
 /** Deployment-owned ordered candidates used only for auto/fallback resolution. */
 export interface MediaModelRoutingPolicy {
@@ -125,6 +133,7 @@ export interface MediaModelResolutionWarning {
 /** Stable resolver failures. */
 export type MediaModelResolutionErrorCode =
   | 'MEDIA_MODEL_INVALID_DESCRIPTOR'
+  | 'MEDIA_MODEL_INVALID_REQUIREMENTS'
   | 'MEDIA_MODEL_DUPLICATE_PROVIDER'
   | 'MEDIA_MODEL_DUPLICATE_MODEL'
   | 'MEDIA_MODEL_DUPLICATE_EXECUTION_IDENTITY'
@@ -156,12 +165,21 @@ export type MediaModelRegistryChange =
     readonly models: readonly MediaModelDescriptor[]
   }
 
-/** Complete resolver request over one Registry snapshot. */
-export interface MediaModelResolutionRequest {
+/** Strict exact-model request; no routing policy is consulted. */
+export interface MediaModelStrictResolutionRequest {
   readonly requirements: MediaModelRequirements
-  readonly selection: MediaModelSelection
+  readonly selection: MediaModelStrictSelection
+}
+
+/** Auto/fallback request whose complete candidate preference order is deployment-owned. */
+export interface MediaModelPolicyResolutionRequest {
+  readonly requirements: MediaModelRequirements
+  readonly selection: MediaModelPolicySelection
   readonly routing: MediaModelRoutingPolicy
 }
+
+/** Complete resolver request over one Registry snapshot. */
+export type MediaModelResolutionRequest = MediaModelStrictResolutionRequest | MediaModelPolicyResolutionRequest
 
 /** Concrete provider/model result plus the opaque identity consumed by N12. */
 export interface MediaModelResolution {
