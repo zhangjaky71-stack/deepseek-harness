@@ -35,12 +35,13 @@ class MemorySettings extends SettingsProvider {
 const CANVAS_NS = settingsNamespace(CANVAS_FEATURE_SETTINGS_NAMESPACE)
 
 describe('CanvasFeatureService Harness settings integration', () => {
-  it('uses entry config without requiring a settings provider', async () => {
+  it('uses the Cordis entry config as the composition base under an empty user document', async () => {
     const ctx = new Context()
     contexts.push(ctx)
-    await ctx.plugin(CanvasFeatureService, { video: { enabled: true } })
+    await ctx.plugin(MemorySettings)
+    await ctx.plugin(CanvasFeatureService, { video: { enabled: true }, editor: { enabled: false } })
     expect(ctx.canvasFeatures.capabilities.video.enabled).toBe(true)
-    expect(ctx.get('settings')).toBeUndefined()
+    expect(ctx.canvasFeatures.capabilities.editor.enabled).toBe(false)
   })
 
   it('registers one restart-applied canvas namespace and samples the resolved user layer at activation', async () => {
