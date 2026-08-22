@@ -165,7 +165,7 @@ export function decodeCanvasInteractionContext(value: unknown): CanvasInteractio
   const selectedNodeIds = optionalIds(source.selectedNodeIds, 'canvas-interaction.selectedNodeIds')
   const selectedEdgeIds = optionalIds(source.selectedEdgeIds, 'canvas-interaction.selectedEdgeIds')
   const selectedAssetRefs = parseAssets(source.selectedAssetRefs, 'canvas-interaction.selectedAssetRefs')
-  let focusedOutput: CanvasInteractionContext['focusedOutput']
+  let focusedOutput: NonNullable<CanvasInteractionContext['focusedOutput']> | undefined
   if (source.focusedOutput !== undefined) {
     const focused = record(source.focusedOutput, 'canvas-interaction.focusedOutput')
     exact(focused, ['runId', 'assetIndex'], 'canvas-interaction.focusedOutput')
@@ -174,16 +174,17 @@ export function decodeCanvasInteractionContext(value: unknown): CanvasInteractio
       assetIndex: integer(focused.assetIndex, 'canvas-interaction.focusedOutput.assetIndex'),
     }
   }
+  const region = parseRegion(source.region, 'canvas-interaction.region')
   return {
     canvasId: interactionId(source.canvasId, 'canvas-interaction.canvasId') as CanvasInteractionContext['canvasId'],
     workflowId: interactionId(source.workflowId, 'canvas-interaction.workflowId') as CanvasInteractionContext['workflowId'],
     workflowRevision: integer(source.workflowRevision, 'canvas-interaction.workflowRevision'),
     ...(mode === undefined ? {} : { mode }),
-    ...(selectedNodeIds === undefined ? {} : { selectedNodeIds: selectedNodeIds as CanvasInteractionContext['selectedNodeIds'] }),
-    ...(selectedEdgeIds === undefined ? {} : { selectedEdgeIds: selectedEdgeIds as CanvasInteractionContext['selectedEdgeIds'] }),
-    ...(selectedAssetRefs === undefined ? {} : { selectedAssetRefs }),
+    ...(selectedNodeIds === undefined ? {} : { selectedNodeIds: selectedNodeIds as NonNullable<CanvasInteractionContext['selectedNodeIds']> }),
+    ...(selectedEdgeIds === undefined ? {} : { selectedEdgeIds: selectedEdgeIds as NonNullable<CanvasInteractionContext['selectedEdgeIds']> }),
+    ...(selectedAssetRefs === undefined ? {} : { selectedAssetRefs: selectedAssetRefs as NonNullable<CanvasInteractionContext['selectedAssetRefs']> }),
     ...(focusedOutput === undefined ? {} : { focusedOutput }),
-    ...(source.region === undefined ? {} : { region: parseRegion(source.region, 'canvas-interaction.region') as CanvasRegionSelection }),
+    ...(region === undefined ? {} : { region }),
   }
 }
 
