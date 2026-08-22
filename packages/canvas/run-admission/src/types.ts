@@ -5,12 +5,12 @@ import type {
   CanvasAuthorizationDecision,
   CanvasAuthorizationRequest,
   CanvasFeatureName,
-  CanvasId,
   CanvasImageAssetRef,
   CanvasVideoAssetRef,
   MediaWorkflow,
   WorkflowEdgeId,
   WorkflowNodeId,
+  WorkflowRef,
 } from '@deepseek-ai/dsh-canvas'
 import type {
   MediaNodeExecutionIdentity,
@@ -51,16 +51,19 @@ export type CanvasRunInputAsset = CanvasImageAssetRef | CanvasVideoAssetRef
 
 /** Authorization capability consumed by N15; `CanvasService` satisfies this interface. */
 export interface CanvasRunAuthorizationPort {
+  /** Evaluate the existing N04 authorization vocabulary without mutating Canvas state. */
   authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision
 }
 
 /** Read-only deployment feature policy consumed by N15. */
 export interface CanvasRunFeaturePort {
+  /** Return the restart-applied N09 capability value for one feature. */
   isEnabled(feature: CanvasFeatureName): boolean
 }
 
 /** Availability check for pre-existing boundary assets. N17/N21 will provide the durable implementation. */
 export interface CanvasRunAssetAvailabilityPolicy {
+  /** Return whether one existing asset ref is currently resolvable for execution. */
   isAvailable(asset: CanvasRunInputAsset): Promise<boolean> | boolean
 }
 
@@ -76,17 +79,25 @@ export type CanvasRunCostEstimate =
 
 /** Read-only evidence available to cost/quota/approval/idempotency policies. */
 export interface CanvasRunGovernanceEvidence {
+  /** Target Session identity. */
   readonly sessionId: string
-  readonly canvasId: CanvasId
+  /** Exact admitted Canvas/workflow revision. */
+  readonly workflowRef: WorkflowRef
+  /** Immutable workflow value matching {@link workflowRef}. */
   readonly workflow: MediaWorkflow
+  /** Deterministic N12 execution plan for this request. */
   readonly plan: MediaWorkflowExecutionPlan
+  /** Host-minted N04 actor/source provenance. */
   readonly access: CanvasAccessContext
+  /** N13 resolution for each scheduled Provider-backed node. */
   readonly resolutions: ReadonlyMap<WorkflowNodeId, MediaModelResolution>
+  /** Distinct resolved Provider ids in stable order. */
   readonly providerIds: readonly MediaProviderId[]
 }
 
 /** Deployment-owned estimate for one fully resolved scheduled run. */
 export interface CanvasRunCostEstimator {
+  /** Return a concrete estimate, explicit non-billable result, or unavailable result. */
   estimate(evidence: CanvasRunGovernanceEvidence): Promise<CanvasRunCostEstimate> | CanvasRunCostEstimate
 }
 
@@ -97,6 +108,7 @@ export type CanvasRunQuotaDecision =
 
 /** Deployment quota policy. N15 does not invent a default allowance. */
 export interface CanvasRunQuotaPolicy {
+  /** Decide whether the fully resolved run remains within deployment quota. */
   check(
     evidence: CanvasRunGovernanceEvidence,
     estimate: CanvasRunCostEstimate,
@@ -110,6 +122,7 @@ export type CanvasRunApprovalDecision =
 
 /** Approval policy adapter. Agent and Browser surfaces may adapt their own interaction mechanisms to this seam. */
 export interface CanvasRunApprovalPolicy {
+  /** Decide whether this already-resolved run may proceed. */
   request(
     evidence: CanvasRunGovernanceEvidence,
     estimate: CanvasRunCostEstimate,
@@ -124,6 +137,7 @@ export type CanvasRunIdempotencyDecision =
 
 /** N16 supplies the durable idempotency implementation; N15 only orders and enforces the decision. */
 export interface CanvasRunIdempotencyPolicy {
+  /** Reject an already-admitted/started logical request before concurrency is reserved. */
   check(
     key: string,
     evidence: CanvasRunGovernanceEvidence,
@@ -132,11 +146,13 @@ export interface CanvasRunIdempotencyPolicy {
 
 /** One active in-memory concurrency reservation. Release is idempotent. */
 export interface CanvasRunConcurrencyLease {
+  /** Release every global/session/Provider counter reserved by this admission. */
   release(): void
 }
 
 /** Atomic concurrency/backpressure authority used immediately before a run may start. */
 export interface CanvasRunConcurrencyPolicy {
+  /** Atomically reserve one run across global, Session, and all resolved Provider limits. */
   acquire(
     sessionId: string,
     providerIds: readonly MediaProviderId[],
@@ -156,20 +172,31 @@ export interface CanvasRunAdmissionGovernance {
 
 /** N15 preflight input. Model requests are required only for scheduled Provider-backed nodes. */
 export interface CanvasRunAdmissionRequest {
+  /** Target Session identity used by N04 and concurrency policy. */
   readonly sessionId: string
+  /** Host-minted actor/source provenance. */
   readonly access: CanvasAccessContext
-  readonly canvasId: CanvasId
+  /** Exact current Canvas/workflow revision the caller asks N15 to admit. */
+  readonly workflowRef: WorkflowRef
+  /** Workflow value matching {@link workflowRef}. */
   readonly workflow: MediaWorkflow
+  /** Full or partial N12 scheduling intent. */
   readonly selection?: MediaWorkflowExecutionSelection
+  /** Existing values crossing into a partial scheduled scope. */
   readonly boundaryInputs?: ReadonlyMap<WorkflowEdgeId, MediaNodeExecutionOutput>
+  /** Per-node N13 requests for scheduled Provider-backed nodes. */
   readonly modelRequests: ReadonlyMap<WorkflowNodeId, MediaModelResolutionRequest>
+  /** Durable-layer logical request key; N15 only prechecks it. */
   readonly idempotencyKey: string
+  /** Optional cancellation while admission/queueing is in progress. */
   readonly signal?: AbortSignal
 }
 
 /** Immutable evidence returned after every non-concurrency gate succeeds. */
 export interface CanvasRunAdmissionEvidence extends CanvasRunGovernanceEvidence {
+  /** Exact N13 execution identities N16 must forward to N12. */
   readonly executionIdentities: ReadonlyMap<WorkflowNodeId, MediaNodeExecutionIdentity>
+  /** Cost result already checked by quota/approval policy. */
   readonly costEstimate: CanvasRunCostEstimate
 }
 
