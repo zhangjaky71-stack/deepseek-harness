@@ -63,6 +63,8 @@ export interface CanvasViewInjected extends CanvasInteractionActions {
   /** False when the Host enables Editor but its client-safe node catalog is unavailable. */
   readonly editorReady: boolean
   readonly nodeCatalog: readonly CanvasNodeCatalogEntry[]
+  /** Exact Host registry revision that produced `nodeCatalog`; absent when no catalog was loaded. */
+  readonly nodeCatalogRevision?: number
   readonly hooks: {
     readonly mode: SnapshotStore<CanvasMode>
     readonly interaction: SnapshotStore<CanvasInteractionSelection>
