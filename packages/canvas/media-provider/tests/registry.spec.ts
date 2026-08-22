@@ -45,6 +45,19 @@ describe('MediaModelRegistry', () => {
     ])
   })
 
+  it('contains observer failures after commit and still notifies later observers', async () => {
+    const ctx = await registryHarness()
+    let observedRevision = 0
+    ctx.mediaModels.onChange(() => { throw new Error('observer failed') })
+    ctx.mediaModels.onChange(change => { observedRevision = change.revision })
+    const p = provider('observer-safe')
+
+    expect(() => ctx.mediaModels.register(p, [model(p.id, 'model')])).not.toThrow()
+    expect(ctx.mediaModels.snapshot().revision).toBe(1)
+    expect(ctx.mediaModels.getModel(ref('observer-safe', 'model'))).toBeDefined()
+    expect(observedRevision).toBe(1)
+  })
+
   it('rejects a duplicate Provider without mutating the existing catalog', async () => {
     const ctx = await registryHarness()
     const first = provider('same')
