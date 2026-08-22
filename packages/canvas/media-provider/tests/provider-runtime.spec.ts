@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { MediaProviderId } from '../src/brand.ts'
 import MediaModelRegistry from '../src/model-registry.ts'
 import {
@@ -13,9 +13,12 @@ import type {
   MediaProviderOperationHandle,
   MediaProviderRequest,
 } from '../src/runtime-types.ts'
-import { disposeContexts, model, provider } from './model-fixture.ts'
+import { model, provider } from './model-fixture.ts'
 
-afterEach(disposeContexts)
+const contexts: Context[] = []
+afterEach(async () => {
+  while (contexts.length > 0) await contexts.pop()!.dispose()
+})
 
 const request = (providerId = MediaProviderId('runtime-provider')): MediaProviderRequest => ({
   providerId,
@@ -31,9 +34,8 @@ const request = (providerId = MediaProviderId('runtime-provider')): MediaProvide
 })
 
 async function harness(): Promise<Context> {
-  const ctx = new (await import('@deepseek-ai/cordis')).Context()
-  // Reuse the package test cleanup helper without widening production APIs.
-  ;(await import('./model-fixture.ts')).contexts?.push?.(ctx)
+  const ctx = new Context()
+  contexts.push(ctx)
   await ctx.plugin(MediaModelRegistry)
   await ctx.plugin(MediaProviderRuntimeRegistry)
   return ctx
@@ -181,7 +183,7 @@ describe('media Provider operation driver', () => {
     expect(server.message).not.toContain('PRIVATE-PAYLOAD')
   })
 
-  it('rejects malformed Provider completion before any downstream materialization can occur', async () => {
+  it('rejects malformed Provider completion before downstream materialization', async () => {
     const bad: MediaProvider = {
       start() {
         return { mode: 'inline', completion: { outputs: [] } }
