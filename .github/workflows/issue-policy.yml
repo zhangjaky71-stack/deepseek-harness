@@ -25,35 +25,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/issue-management/policy.mjs pr
-
-  canvas-rc2-reconcile:
-    name: Canvas rc2 reconcile
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'sync/canvas-rc2-trigger')
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: sync/upstream-0.1.1-rc.2-canvas
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Reconcile rc2 files
-        run: python .github/scripts/reconcile-canvas-rc2.py
-      - name: Regenerate lockfile
-        run: pnpm install --lockfile-only --no-frozen-lockfile
-      - name: Commit reconciliation
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --check
-          git add -A
-          if git diff --cached --quiet; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix(canvas): reconcile rc.2 composition and lockfile'
-          git push origin HEAD:sync/upstream-0.1.1-rc.2-canvas
