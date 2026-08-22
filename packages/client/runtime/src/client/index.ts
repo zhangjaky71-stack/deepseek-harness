@@ -1,6 +1,7 @@
 /** Browser runtime services for slots, sessions, workspaces, and connection-stream delivery. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionHandle, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 // Type-only: the ctx.remote merge. Deliberately the gateway's Client half rather
 // than api-remotes': that face imports a Host-tsdown-generated artifact, and this
 // project sits in the Host build graph.
@@ -165,6 +166,15 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'connection/reset'(): void
+    /**
+     * One durable session event arriving on the live mux stream. This is a
+     * transport observation seam, not the history API: opening an old session
+     * does not replay its stored log through this event.
+     * @mode emit
+     * @param sessionId - session whose live stream carried the event.
+     * @param event - decoded durable event, including plugin-extended vocabulary.
+     */
+    'session/live-event'(sessionId: SessionId, event: SessionEvent): void
   }
   interface Context {
     slots: import('./slots.ts').SlotRegistry
@@ -204,6 +214,8 @@ export function apply(ctx: Context): void {
   const loop = connection.start({
     onMuxEnvelope: (envelope) => {
       sessions.handleMuxEnvelope(envelope)
+      const frame = envelope.payload
+      if (frame.type === 'session/event') ctx.emit('session/live-event', frame.sessionId, frame.event)
     },
     onHostEnvelope: (envelope) => {
       sessions.handleHostEnvelope(envelope)
