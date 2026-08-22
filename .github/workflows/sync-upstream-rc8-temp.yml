@@ -1,17 +1,16 @@
 name: Temporary Canvas rc2 reconciliation
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-    paths:
-      - .github/workflows/sync-upstream-rc8-temp.yml
 
 permissions:
   contents: write
 
 jobs:
   reconcile-canvas-rc2:
+    if: github.head_ref == 'sync/canvas-rc2-trigger'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out Canvas rc2 integration branch
@@ -39,7 +38,7 @@ jobs:
           def replace_once(path, old, new):
               p = Path(path)
               text = p.read_text()
-              if new in text and old not in text:
+              if new in text:
                   return
               count = text.count(old)
               if count != 1:
@@ -131,8 +130,6 @@ jobs:
               "    - id: ui-conversation\n      name: '@deepseek-ai/dsh-client-ui-conversation'\n\n" + canvas_client_row,
           )
 
-          # The branch-local helper was intentionally temporary; trusted execution
-          # now comes from this base-branch workflow.
           Path('.github/workflows/canvas-rc2-migration-once.yml').unlink(missing_ok=True)
           PY
 
