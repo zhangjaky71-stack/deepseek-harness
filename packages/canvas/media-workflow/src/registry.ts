@@ -10,6 +10,7 @@ import type {
   MediaNodeLike,
   MediaNodeRegistryChange,
   MediaNodeRegistryErrorCode,
+  MediaNodeRegistrySnapshot,
 } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -92,6 +93,7 @@ export function assertMediaNodeDefinition(definition: MediaNodeDefinition): void
 export class MediaNodeRegistry extends Service {
   private readonly definitions = new Map<string, MediaNodeDefinition>()
   private readonly listeners = new Set<(change: MediaNodeRegistryChange) => void>()
+  private revision = 0
 
   /**
    * Create the process-local definition registry.
@@ -116,11 +118,13 @@ export class MediaNodeRegistry extends Service {
       }
       const stable = stableDefinition(definition)
       this.definitions.set(key, stable)
-      this.emit({ kind: 'registered', definition: stable })
+      this.revision += 1
+      this.emit({ kind: 'registered', revision: this.revision, definition: stable })
       return () => {
         if (this.definitions.get(key) !== stable) return
         this.definitions.delete(key)
-        this.emit({ kind: 'unregistered', definition: stable })
+        this.revision += 1
+        this.emit({ kind: 'unregistered', revision: this.revision, definition: stable })
       }
     }, `mediaNodes.register(${JSON.stringify(key)})`)
     return () => { void disposeEffect() }
@@ -163,6 +167,17 @@ export class MediaNodeRegistry extends Service {
    */
   list(): readonly MediaNodeDefinition[] {
     return [...this.definitions.values()].sort((left, right) => left.type.localeCompare(right.type) || left.version - right.version)
+  }
+
+  /**
+   * Return the current mutation revision and definitions from one synchronous registry read.
+   * @returns immutable snapshot whose revision changes after every successful register/unregister mutation.
+   */
+  snapshot(): MediaNodeRegistrySnapshot {
+    return Object.freeze({
+      revision: this.revision,
+      definitions: Object.freeze([...this.list()]),
+    })
   }
 
   /**
