@@ -1,0 +1,15 @@
+{
+  "id": "workflow-deprecated-v1",
+  "schemaVersion": 1,
+  "name": "Archived pre-registry image workflow",
+  "nodes": [
+    { "id": "prompt", "type": "prompt", "nodeVersion": 1, "config": { "text": "archived fixture" } },
+    { "id": "legacy-generate", "type": "image.create", "nodeVersion": 1, "config": { "count": 1 } },
+    { "id": "output", "type": "output", "nodeVersion": 1, "config": {} }
+  ],
+  "edges": [
+    { "id": "edge-prompt", "sourceNodeId": "prompt", "sourcePort": "text", "targetNodeId": "legacy-generate", "targetPort": "prompt" },
+    { "id": "edge-output", "sourceNodeId": "legacy-generate", "sourcePort": "images", "targetNodeId": "output", "targetPort": "images" }
+  ],
+  "outputNodeIds": ["output"]
+}

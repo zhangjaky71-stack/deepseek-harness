@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../canvas" },
+    { "path": "../media-workflow" },
+    { "path": "../media-provider" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

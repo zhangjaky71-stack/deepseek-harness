@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "workflow-v1",
+  "nodePositions": {
+    "prompt": { "x": 32, "y": 96 },
+    "generate": { "x": 320, "y": 96 },
+    "output": { "x": 608, "y": 96 }
+  },
+  "viewport": { "x": 12, "y": -8, "zoom": 0.9 },
+  "updatedAt": 1787100002000
+}
