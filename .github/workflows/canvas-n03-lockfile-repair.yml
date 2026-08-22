@@ -1,0 +1,39 @@
+name: Canvas N03 lockfile repair
+
+on:
+  push:
+    branches:
+      - fix/canvas-n03-v2.2-durable-authority
+    paths:
+      - .github/workflows/canvas-n03-lockfile-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair-lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n03-v2.2-durable-authority
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Regenerate workspace lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Commit lockfile repair
+        shell: bash
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml; then
+            echo "pnpm-lock.yaml already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          git commit -m "chore(canvas): refresh lockfile for canvas remotes"
+          git push origin HEAD:fix/canvas-n03-v2.2-durable-authority
