@@ -1,7 +1,6 @@
 /** Transport-independent N15 Canvas run-admission coordinator. */
 
-import { CanvasFeatureError } from '@deepseek-ai/dsh-canvas'
-import type { CanvasImageAssetRef, CanvasVideoAssetRef, WorkflowNodeId } from '@deepseek-ai/dsh-canvas'
+import type { WorkflowNodeId } from '@deepseek-ai/dsh-canvas'
 import {
   MediaWorkflowValidationError,
   assertValidMediaWorkflow,
@@ -15,19 +14,20 @@ import {
   type MediaModelResolution,
   type MediaProviderId,
 } from '@deepseek-ai/dsh-media-provider'
-import {
-  MediaProviderRuntimeRegistry,
-} from '@deepseek-ai/dsh-media-provider/runtime'
+import { MediaProviderRuntimeRegistry } from '@deepseek-ai/dsh-media-provider/runtime'
 import { CanvasRunAdmissionError } from './errors.ts'
 import type {
   CanvasRunAdmissionGovernance,
   CanvasRunAdmissionPermit,
   CanvasRunAdmissionRequest,
+  CanvasRunApprovalDecision,
   CanvasRunAuthorizationPort,
   CanvasRunCostEstimate,
   CanvasRunFeaturePort,
   CanvasRunGovernanceEvidence,
+  CanvasRunIdempotencyDecision,
   CanvasRunInputAsset,
+  CanvasRunQuotaDecision,
 } from './types.ts'
 
 /** Current Host authorities required to preflight one run. */
@@ -60,8 +60,8 @@ function deepFreeze(value: unknown): void {
   for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child)
 }
 
-function frozenWorkflow<T>(workflow: T): T {
-  const snapshot = structuredClone(workflow)
+function frozenClone<T>(value: T): T {
+  const snapshot = structuredClone(value)
   deepFreeze(snapshot)
   return snapshot
 }
@@ -90,25 +90,25 @@ function authorize(request: CanvasRunAdmissionRequest, authority: CanvasRunAutho
   throw new CanvasRunAdmissionError('CANVAS_RUN_PERMISSION_DENIED', 'Canvas run permission denied')
 }
 
-function assertFeatures(
-  workflow: CanvasRunAdmissionRequest['workflow'],
+function assertScheduledFeatures(
   selection: NonNullable<CanvasRunAdmissionRequest['selection']>,
+  plan: ReturnType<typeof planMediaWorkflowExecution>,
+  definitions: ReadonlyMap<WorkflowNodeId, ReturnType<MediaNodeRegistry['require']>>,
   features: CanvasRunFeaturePort,
 ): void {
-  try {
-    features.assertWorkflowExecutable(workflow)
-    if (selection.mode !== 'all' && !features.isEnabled('partialRun')) {
-      throw new CanvasFeatureError('partialRun')
-    }
-  } catch (error) {
-    if (error instanceof CanvasFeatureError) {
-      throw new CanvasRunAdmissionError(
-        'CANVAS_RUN_FEATURE_DISABLED',
-        `Canvas run requires disabled feature ${error.feature}`,
-        { cause: error },
-      )
-    }
-    throw error
+  if (!features.isEnabled('canvas')) {
+    throw new CanvasRunAdmissionError('CANVAS_RUN_FEATURE_DISABLED', 'Canvas feature canvas is disabled')
+  }
+  if (selection.mode !== 'all' && !features.isEnabled('partialRun')) {
+    throw new CanvasRunAdmissionError('CANVAS_RUN_FEATURE_DISABLED', 'Canvas feature partialRun is disabled')
+  }
+  for (const nodeId of plan.scheduledNodeIds) {
+    const feature = definitions.get(nodeId)?.execution.feature
+    if (feature === undefined || features.isEnabled(feature)) continue
+    throw new CanvasRunAdmissionError(
+      'CANVAS_RUN_FEATURE_DISABLED',
+      `Canvas run node ${nodeId} requires disabled feature ${feature}`,
+    )
   }
 }
 
@@ -318,9 +318,8 @@ export async function admitCanvasRun(
   }
   authorize(request, authorities.authorization)
 
-  const workflow = frozenWorkflow(request.workflow)
+  const workflow = frozenClone(request.workflow)
   const selection = request.selection ?? { mode: 'all' as const }
-  assertFeatures(workflow, selection, authorities.features)
 
   let validated: ReturnType<typeof assertValidMediaWorkflow>
   let plan: ReturnType<typeof planMediaWorkflowExecution>
@@ -333,6 +332,7 @@ export async function admitCanvasRun(
     }
     throw error
   }
+  assertScheduledFeatures(selection, plan, validated.definitions, authorities.features)
 
   await assertBoundaryAssets(request, plan, validated.definitions, authorities.governance)
   abortIfNeeded(request.signal)
@@ -344,7 +344,7 @@ export async function admitCanvasRun(
     canvasId: request.canvasId,
     workflow,
     plan,
-    access: frozenWorkflow(request.access),
+    access: frozenClone(request.access),
     resolutions: resolved.resolutions,
     providerIds: resolved.providerIds,
   })
@@ -353,7 +353,7 @@ export async function admitCanvasRun(
   const estimate = await costEstimate(governanceEvidence, authorities.governance)
   abortIfNeeded(request.signal)
 
-  let quota
+  let quota: CanvasRunQuotaDecision
   try {
     quota = await authorities.governance.quota.check(governanceEvidence, estimate)
   } catch (error) {
@@ -364,7 +364,7 @@ export async function admitCanvasRun(
   }
 
   abortIfNeeded(request.signal)
-  let approval
+  let approval: CanvasRunApprovalDecision
   try {
     approval = await authorities.governance.approval.request(governanceEvidence, estimate, request.signal)
   } catch (error) {
@@ -378,7 +378,7 @@ export async function admitCanvasRun(
   }
 
   abortIfNeeded(request.signal)
-  let idempotency
+  let idempotency: CanvasRunIdempotencyDecision
   try {
     idempotency = await authorities.governance.idempotency.check(request.idempotencyKey, governanceEvidence)
   } catch (error) {
