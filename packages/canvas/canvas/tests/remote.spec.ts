@@ -13,6 +13,7 @@ import CanvasService, {
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
 import {
   baseWorkflow,
+  currentWriterChange,
   runStartChange,
   runUpdateChange,
   workflowRef,
@@ -61,9 +62,9 @@ function currentCanvas(ctx: Context, agent: Agent): CanvasSnapshot {
 
 function appendCompletedRun(ctx: Context, agent: Agent, id: string): void {
   const before = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runStartChange(before, CanvasRunId(id)))
+  agent.session.append('canvas/change', currentWriterChange(runStartChange(before, CanvasRunId(id))))
   const queued = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runUpdateChange(queued, 'completed'))
+  agent.session.append('canvas/change', currentWriterChange(runUpdateChange(queued, 'completed')))
   currentCanvas(ctx, agent)
 }
 
