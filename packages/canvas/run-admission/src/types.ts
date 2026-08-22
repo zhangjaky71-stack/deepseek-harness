@@ -4,14 +4,14 @@ import type {
   CanvasAccessContext,
   CanvasAuthorizationDecision,
   CanvasAuthorizationRequest,
+  CanvasFeatureName,
   CanvasId,
   CanvasImageAssetRef,
   CanvasVideoAssetRef,
   MediaWorkflow,
   WorkflowEdgeId,
   WorkflowNodeId,
-} from '@deepseek-ai/dsh-canvas/types'
-import type { CanvasFeatureName } from '@deepseek-ai/dsh-canvas/src/feature-types.ts'
+} from '@deepseek-ai/dsh-canvas'
 import type {
   MediaNodeExecutionIdentity,
   MediaNodeExecutionOutput,
@@ -67,6 +67,7 @@ export interface CanvasRunAssetAvailabilityPolicy {
 
 /** Provider-neutral cost estimate. Unknown cost is explicit rather than silently treated as free. */
 export type CanvasRunCostEstimate =
+  | { readonly kind: 'not-applicable' }
   | { readonly kind: 'unavailable' }
   | {
     readonly kind: 'estimated'
