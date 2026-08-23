@@ -51,41 +51,39 @@ jobs:
           pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 220 /tmp/install.log; exit 1; }
           echo "N10 frozen workspace install: PASS"
 
-      - name: Validate repository static gates against N09 baseline
+      - name: Validate repository static gates against exact N09 baseline
         shell: bash
         run: |
           set -euo pipefail
-          set +e
-          pnpm run check:ci:static >/tmp/n10-static.log 2>&1
-          candidate_static=$?
-          set -e
-          if (( candidate_static == 0 )); then
-            echo "N10 repository static gates: PASS"
-          else
-            python - <<'PY'
-          from pathlib import Path
-          import re
-
-          log = Path('/tmp/n10-static.log').read_text(errors='replace')
-          baseline_failed = {
-              'constraints', 'package invariants', 'Cordis config', 'cordis catalog',
-              'client catalog', 'export jsdoc', 'config catalog', 'persistence catalog',
-              'doc graphs', 'package README model experience', 'agent note classification',
-              'agent note format', 'type equivalence', 'translation pairing', 'module graph', 'knip',
-          }
-          actual = set(re.findall(r'^  - FAILED (.+?) \(', log, re.MULTILINE))
-          unexpected = actual - baseline_failed
-          if unexpected:
-              raise SystemExit(f'N10 introduced new failing static gates beyond N09 baseline: {sorted(unexpected)}')
-          if 'run-gates: PASS optional dependency imports' not in log:
-              raise SystemExit('N10 optional-dependency-import gate did not pass')
-          print(f'N10 failing static gate set remains within N09 baseline: {sorted(actual)}')
-          PY
-          fi
-
           rm -rf /tmp/n09-static
           git worktree add --detach /tmp/n09-static origin/fix/canvas-n09-v2.2-settings-authority >/tmp/worktree.log 2>&1
           (cd /tmp/n09-static && pnpm install --frozen-lockfile >/tmp/n09-install.log 2>&1) || { tail -n 220 /tmp/n09-install.log; exit 1; }
+
+          set +e
+          (cd /tmp/n09-static && pnpm run check:ci:static) >/tmp/base-static.log 2>&1
+          base_static_status=$?
+          pnpm run check:ci:static >/tmp/candidate-static.log 2>&1
+          candidate_static_status=$?
+          set -e
+
+          BASE_STATUS="$base_static_status" CANDIDATE_STATUS="$candidate_static_status" python - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          base_status = int(os.environ['BASE_STATUS'])
+          candidate_status = int(os.environ['CANDIDATE_STATUS'])
+          pattern = re.compile(r'^  - FAILED (.+?) \(', re.MULTILINE)
+          base_failed = set(pattern.findall(Path('/tmp/base-static.log').read_text(errors='replace')))
+          candidate_failed = set(pattern.findall(Path('/tmp/candidate-static.log').read_text(errors='replace')))
+          if candidate_status != 0 and not candidate_failed:
+              raise SystemExit('N10 repository static failed without recognized failed-gate summary')
+          if candidate_status != 0 and base_status == 0:
+              raise SystemExit('N10 repository static FAIL while exact validated N09 baseline PASS')
+          unexpected = candidate_failed - base_failed
+          if unexpected:
+              raise SystemExit(f'N10 introduced new failing static gates beyond exact N09 baseline: {sorted(unexpected)}')
+          print(f'N10 full static failed-gate set is within exact N09 baseline: {sorted(candidate_failed)}')
+          PY
 
           gates=(
             constraints
@@ -118,6 +116,7 @@ jobs:
             candidate_status=$?
             set -e
             BASE_STATUS="$base_status" CANDIDATE_STATUS="$candidate_status" GATE="$gate" python - <<'PY'
+          from collections import Counter
           from pathlib import Path
           import os, re
 
@@ -127,9 +126,11 @@ jobs:
           ansi = re.compile(r'\x1b\[[0-9;]*m')
           candidate_root = str(Path.cwd())
           baseline_root = '/tmp/n09-static'
+          paren_location = re.compile(r'(\((?:packages|apps|scripts|docs|\.agents)/[^():]+):\d+(?::\d+)?\)')
+          prefix_location = re.compile(r'^((?:packages|apps|scripts|docs|\.agents)/[^:]+):(?: line )?\d+(?::\d+)?:')
 
-          def normalized(path: str) -> set[str]:
-              out: set[str] = set()
+          def normalized(path: str) -> Counter[str]:
+              out: Counter[str] = Counter()
               for raw in Path(path).read_text(errors='replace').splitlines():
                   line = ansi.sub('', raw).strip()
                   line = line.replace(candidate_root, '<ROOT>').replace(baseline_root, '<ROOT>')
@@ -141,7 +142,9 @@ jobs:
                       continue
                   if gate == 'verify-export-jsdoc' and re.fullmatch(r'verify-export-jsdoc: \d+ JSDoc completeness violation\(s\) \(see AGENTS\.md\):', line):
                       continue
-                  out.add(line)
+                  line = paren_location.sub(lambda match: re.sub(r':\d+(?::\d+)?\)$', ':<LINE>)', match.group(0)), line)
+                  line = prefix_location.sub(lambda match: re.sub(r'(?:: line |:)\d+(?::\d+)?:$', ':<LINE>:', match.group(0)), line)
+                  out[line] += 1
               return out
 
           base = normalized(f'/tmp/base-{gate}.log')
@@ -157,12 +160,13 @@ jobs:
                   print(Path(f'/tmp/base-{gate}.log').read_text(errors='replace'))
                   print(f'=== {gate} N10 candidate ===')
                   print(Path(f'/tmp/candidate-{gate}.log').read_text(errors='replace'))
-                  raise SystemExit(f'{gate}: N10 introduced diagnostics beyond N09 baseline: {sorted(unexpected)}')
-              print(f'{gate}: no new diagnostics beyond N09 baseline ({len(candidate)} candidate / {len(base)} baseline normalized lines)')
+                  details = sorted(unexpected.elements())
+                  raise SystemExit(f'{gate}: N10 introduced diagnostics beyond N09 baseline: {details}')
+              print(f'{gate}: no new diagnostics beyond N09 baseline ({sum(candidate.values())} candidate / {sum(base.values())} baseline normalized lines)')
           PY
           done
           git worktree remove --force /tmp/n09-static
-          echo "N10 targeted static diagnostic differential: PASS"
+          echo "N10 exact-baseline static diagnostic differential: PASS"
 
       - name: Validate Host build
         shell: bash
