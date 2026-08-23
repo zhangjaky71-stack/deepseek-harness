@@ -14,7 +14,7 @@ import {
   createMediaWorkflow,
 } from '../src/index.ts'
 import type { CanvasInteractionContext, CanvasSnapshot } from '../src/index.ts'
-import { CanvasInteractionBridge } from '../src/interaction-bridge.ts'
+import { CanvasInteractionBridge, CanvasInteractionBridgeError } from '../src/interaction-bridge.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
@@ -133,6 +133,52 @@ describe('CanvasInteractionBridge', () => {
       requestId: 'rpc-browser-principal',
       correlationId: 'rpc-browser-principal',
     })
+  })
+
+  it('strictly rejects malformed stage/discard envelopes before business logic', () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const subject = agent(ctx)
+    let reads = 0
+    const bridge = new CanvasInteractionBridge(ctx, {
+      get: () => {
+        reads += 1
+        return currentCanvas()
+      },
+    })
+
+    for (const invalid of [null, [], { rpcId: 'rpc-a' }, { rpcId: 'rpc-a', context: sampled(), extra: true }]) {
+      expect(() => bridge.stage(subject, invalid)).toThrow(
+        expect.objectContaining<Partial<CanvasInteractionBridgeError>>({ code: 'CANVAS_INTERACTION_INVALID_CONTEXT' }),
+      )
+    }
+    expect(() => bridge.stage(subject, { rpcId: 'rpc with spaces', context: sampled() })).toThrow(
+      expect.objectContaining<Partial<CanvasInteractionBridgeError>>({ code: 'CANVAS_INTERACTION_INVALID_RPC_ID' }),
+    )
+    expect(() => bridge.discard(subject, null)).toThrow(
+      expect.objectContaining<Partial<CanvasInteractionBridgeError>>({ code: 'CANVAS_INTERACTION_INVALID_CONTEXT' }),
+    )
+    expect(() => bridge.discard(subject, { rpcId: 'rpc-a', extra: true })).toThrow(
+      expect.objectContaining<Partial<CanvasInteractionBridgeError>>({ code: 'CANVAS_INTERACTION_INVALID_CONTEXT' }),
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('runs decoded-context policy before Host projection reads', () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const subject = agent(ctx)
+    let reads = 0
+    const bridge = new CanvasInteractionBridge(ctx, {
+      get: () => {
+        reads += 1
+        return currentCanvas()
+      },
+    })
+    expect(() => bridge.stage(subject, { rpcId: 'rpc-policy', context: sampled() }, () => {
+      throw new Error('policy rejected decoded context')
+    })).toThrow('policy rejected decoded context')
+    expect(reads).toBe(0)
   })
 
   it('discard prevents an unadmitted staged prompt from leaking into later messages', async () => {

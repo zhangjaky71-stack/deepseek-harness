@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import CanvasService, { CanvasFeatureError } from '@deepseek-ai/dsh-canvas'
 import type { StageCanvasInteractionRequest } from '@deepseek-ai/dsh-canvas'
 import CanvasFeatureService from '../src/feature-service.ts'
@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 function stubAgent(ctx: Context): Agent {
-  const session = Session.create(SessionId('canvas-region-feature'))
+  const session = ctx.sessions.create(SessionId('canvas-region-feature'))
   return {
     id: session.id,
     options: {},
@@ -36,6 +36,7 @@ describe('Canvas interaction feature policy', () => {
   it('rejects direct region staging while regionEdit is disabled', async () => {
     const ctx = new Context()
     contexts.push(ctx)
+    await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(CanvasFeatureService, { regionEdit: { enabled: false } })
     await ctx.plugin(CanvasService)
@@ -52,7 +53,13 @@ describe('Canvas interaction feature policy', () => {
         region: {
           asset: {
             kind: 'image',
-            image: { attachmentId: 'not-even-validated', mediaType: 'image/png', bytes: 1 },
+            image: {
+              attachmentId: 'not-even-host-resolved',
+              mediaType: 'image/png',
+              bytes: 1,
+              width: 1,
+              height: 1,
+            },
           },
           normalizedBounds: { x: 0, y: 0, width: 1, height: 1 },
         },
@@ -61,6 +68,22 @@ describe('Canvas interaction feature policy', () => {
 
     expect(() => ctx.canvasInteraction.remoteExportStage(agent, request)).toThrow(
       expect.objectContaining<Partial<CanvasFeatureError>>({ code: 'CANVAS_FEATURE_DISABLED', feature: 'regionEdit' }),
+    )
+  })
+
+  it('rejects malformed Remote payloads before nested property access', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(CanvasFeatureService)
+    await ctx.plugin(CanvasService)
+    await ctx.plugin(CanvasInteractionService)
+    const agent = stubAgent(ctx)
+    ctx.agents.register(agent)
+
+    expect(() => ctx.canvasInteraction.remoteExportStage(agent, null as unknown as StageCanvasInteractionRequest)).toThrow(
+      expect.objectContaining({ code: 'CANVAS_INTERACTION_INVALID_CONTEXT' }),
     )
   })
 })

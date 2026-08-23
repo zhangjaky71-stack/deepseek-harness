@@ -23,6 +23,8 @@ export class CanvasInteractionContextError extends Error {
 
 type UnknownRecord = Record<string, unknown>
 const MAX_SELECTION_ITEMS = 64
+const MAX_INTERACTION_ID_CHARS = 256
+const INTERACTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+~=-]*$/
 
 function fail(message: string): never {
   throw new CanvasInteractionContextError('CANVAS_INVALID_INTERACTION_CONTEXT', message)
@@ -43,6 +45,19 @@ function string(value: unknown, subject: string): string {
   return value
 }
 
+/** Browser-supplied identifiers become model-visible, so keep them bounded and single-token-like. */
+function interactionId(value: unknown, subject: string): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > MAX_INTERACTION_ID_CHARS
+    || !INTERACTION_ID_PATTERN.test(value)
+  ) {
+    fail(`${subject} must be a bounded opaque identifier`)
+  }
+  return value
+}
+
 function finite(value: unknown, subject: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${subject} must be a finite number`)
   return value
@@ -54,10 +69,10 @@ function integer(value: unknown, subject: string): number {
   return decoded
 }
 
-function optionalStrings(value: unknown, subject: string): readonly string[] | undefined {
+function optionalIds(value: unknown, subject: string): readonly string[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length > MAX_SELECTION_ITEMS) fail(`${subject} must be an array with at most ${MAX_SELECTION_ITEMS} items`)
-  const result = value.map((item, index) => string(item, `${subject}[${index}]`))
+  const result = value.map((item, index) => interactionId(item, `${subject}[${index}]`))
   if (new Set(result).size !== result.length) fail(`${subject} must not contain duplicate ids`)
   return result
 }
@@ -67,7 +82,7 @@ function parseImageRef(value: unknown, subject: string): Readonly<ImageAttachmen
   exact(source, ['attachmentId', 'mediaType', 'bytes', 'width', 'height', 'name'], subject)
   const name = source.name === undefined ? undefined : string(source.name, `${subject}.name`)
   return {
-    attachmentId: string(source.attachmentId, `${subject}.attachmentId`) as ImageAttachmentRef['attachmentId'],
+    attachmentId: interactionId(source.attachmentId, `${subject}.attachmentId`) as ImageAttachmentRef['attachmentId'],
     mediaType: string(source.mediaType, `${subject}.mediaType`) as ImageAttachmentRef['mediaType'],
     bytes: finite(source.bytes, `${subject}.bytes`),
     width: finite(source.width, `${subject}.width`),
@@ -80,7 +95,7 @@ function parseVideoRef(value: unknown, subject: string): VideoAssetRef {
   const source = record(value, subject)
   exact(source, ['assetId', 'mediaType', 'bytes', 'width', 'height', 'durationMs'], subject)
   return {
-    assetId: string(source.assetId, `${subject}.assetId`) as VideoAssetRef['assetId'],
+    assetId: interactionId(source.assetId, `${subject}.assetId`) as VideoAssetRef['assetId'],
     mediaType: string(source.mediaType, `${subject}.mediaType`),
     bytes: finite(source.bytes, `${subject}.bytes`),
     ...(source.width === undefined ? {} : { width: finite(source.width, `${subject}.width`) }),
@@ -147,21 +162,21 @@ export function decodeCanvasInteractionContext(value: unknown): CanvasInteractio
   ], 'canvas-interaction')
   const mode = source.mode
   if (mode !== undefined && mode !== 'minimal' && mode !== 'editor') fail('canvas-interaction.mode must be minimal or editor')
-  const selectedNodeIds = optionalStrings(source.selectedNodeIds, 'canvas-interaction.selectedNodeIds')
-  const selectedEdgeIds = optionalStrings(source.selectedEdgeIds, 'canvas-interaction.selectedEdgeIds')
+  const selectedNodeIds = optionalIds(source.selectedNodeIds, 'canvas-interaction.selectedNodeIds')
+  const selectedEdgeIds = optionalIds(source.selectedEdgeIds, 'canvas-interaction.selectedEdgeIds')
   const selectedAssetRefs = parseAssets(source.selectedAssetRefs, 'canvas-interaction.selectedAssetRefs')
   let focusedOutput: CanvasInteractionContext['focusedOutput']
   if (source.focusedOutput !== undefined) {
     const focused = record(source.focusedOutput, 'canvas-interaction.focusedOutput')
     exact(focused, ['runId', 'assetIndex'], 'canvas-interaction.focusedOutput')
     focusedOutput = {
-      runId: string(focused.runId, 'canvas-interaction.focusedOutput.runId') as CanvasRunId,
+      runId: interactionId(focused.runId, 'canvas-interaction.focusedOutput.runId') as CanvasRunId,
       assetIndex: integer(focused.assetIndex, 'canvas-interaction.focusedOutput.assetIndex'),
     }
   }
   return {
-    canvasId: string(source.canvasId, 'canvas-interaction.canvasId') as CanvasInteractionContext['canvasId'],
-    workflowId: string(source.workflowId, 'canvas-interaction.workflowId') as CanvasInteractionContext['workflowId'],
+    canvasId: interactionId(source.canvasId, 'canvas-interaction.canvasId') as CanvasInteractionContext['canvasId'],
+    workflowId: interactionId(source.workflowId, 'canvas-interaction.workflowId') as CanvasInteractionContext['workflowId'],
     workflowRevision: integer(source.workflowRevision, 'canvas-interaction.workflowRevision'),
     ...(mode === undefined ? {} : { mode }),
     ...(selectedNodeIds === undefined ? {} : { selectedNodeIds: selectedNodeIds as NonNullable<CanvasInteractionContext['selectedNodeIds']> }),

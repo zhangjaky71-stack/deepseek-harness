@@ -39,8 +39,9 @@ export class CanvasInteractionService extends TypertRemoteService {
     request: StageCanvasInteractionRequest,
   ): CanvasInteractionStageReceipt {
     this.ctx.canvasFeatures.assertEnabled('canvas')
-    if (request.context.region !== undefined) this.ctx.canvasFeatures.assertEnabled('regionEdit')
-    return this.bridge.stage(agent, request)
+    return this.bridge.stage(agent, request, (context) => {
+      if (context.region !== undefined) this.ctx.canvasFeatures.assertEnabled('regionEdit')
+    })
   }
 
   /** Roll back an unbound stage when the corresponding ordinary prompt was not admitted. */
