@@ -79,7 +79,7 @@ jobs:
           PY
 
           git add packages/canvas/canvas/tests/interaction-features.spec.ts
-          git diff --cached --check
+          git diff --cached --check -- packages/canvas/canvas/tests/interaction-features.spec.ts
           test -z "$(git ls-files -u)"
           if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
             git commit --no-edit
