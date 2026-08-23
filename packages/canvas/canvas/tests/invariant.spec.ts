@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
   CANVAS_LAYOUT_CHANGE_VERSION,
@@ -12,8 +12,19 @@ import {
   currentWriterChange,
 } from './canvas-fixtures.ts'
 
-async function setup(): Promise<Context> {
+const contexts: Context[] = []
+afterEach(async () => {
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
+})
+
+function context(): Context {
   const ctx = new Context()
+  contexts.push(ctx)
+  return ctx
+}
+
+async function setup(): Promise<Context> {
+  const ctx = context()
   await ctx.plugin(SessionStore)
   await ctx.plugin(InvariantRegistry, { enabled: true })
   await ctx.plugin(CanvasInvariantCompanion)
@@ -34,7 +45,7 @@ describe('Canvas stream invariants', () => {
   })
 
   it('keeps historical metadata v1 replayable while refusing a later direct current write', async () => {
-    const ctx = new Context()
+    const ctx = context()
     await ctx.plugin(SessionStore)
     const session = ctx.sessions.create(SessionId('canvas-invariant-historical-replay'))
     session.append('canvas/change', createChange())
@@ -71,7 +82,7 @@ describe('Canvas stream invariants', () => {
   })
 
   it('rejects a direct current canvas/layout-change without package write authority', async () => {
-    const ctx = new Context()
+    const ctx = context()
     await ctx.plugin(SessionStore)
     const session = ctx.sessions.create(SessionId('canvas-layout-authority'))
     const created = createChange()
@@ -106,7 +117,7 @@ describe('Canvas stream invariants', () => {
   })
 
   it('still validates malformed historical layout relationships during late-load replay', async () => {
-    const ctx = new Context()
+    const ctx = context()
     await ctx.plugin(SessionStore)
     const session = ctx.sessions.create(SessionId('canvas-layout-historical-invalid'))
     const created = createChange()
