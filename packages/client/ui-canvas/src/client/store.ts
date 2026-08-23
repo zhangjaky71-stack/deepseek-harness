@@ -14,12 +14,12 @@ export interface CanvasEditorHistoryEntry {
 
 /** Presentation-only Editor state surviving view remounts for one Session. */
 export interface CanvasEditorState {
-  readonly saveStatus: CanvasSaveStatus
-  readonly draft: CanvasNodeDraft | null
-  readonly undo: readonly CanvasEditorHistoryEntry[]
-  readonly redo: readonly CanvasEditorHistoryEntry[]
-  readonly clipboard: CanvasClipboard | null
-  readonly localPositions: Readonly<Record<string, { readonly x: number; readonly y: number }>>
+  saveStatus: CanvasSaveStatus
+  draft: CanvasNodeDraft | null
+  undo: readonly CanvasEditorHistoryEntry[]
+  redo: readonly CanvasEditorHistoryEntry[]
+  clipboard: CanvasClipboard | null
+  localPositions: Readonly<Record<string, { readonly x: number; readonly y: number }>>
 }
 
 type CanvasEditorActions = {

@@ -26,7 +26,7 @@ const assets = [0, 1, 2, 3].map(index => ({
     height: 360,
     durationMs: 1000,
   },
-})) as NonNullable<CanvasSnapshot['output']>['assets']
+})) as unknown as NonNullable<CanvasSnapshot['output']>['assets']
 
 function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
   return {
@@ -46,7 +46,7 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 describe('Canvas interaction selection store', () => {
@@ -103,7 +103,7 @@ describe('Canvas interaction selection store', () => {
         workflowRevision: 1,
         assets: [assets[3]!],
         primaryAssetIndex: 0,
-      } as NonNullable<CanvasSnapshot['output']>,
+      } as unknown as NonNullable<CanvasSnapshot['output']>,
     })
     const context = buildCanvasInteractionContext(store.faceOf(A).getSnapshot(), next, 'minimal')
     expect(context?.focusedOutput).toBeUndefined()

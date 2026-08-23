@@ -71,8 +71,6 @@ async function bootCanvasComposition(): Promise<{ ctx: Context; dir: string }> {
   writeFileSync(config, [
     "- id: session",
     "  name: '@deepseek-ai/dsh-session'",
-    "- id: invariants",
-    "  name: '@deepseek-ai/dsh-invariants'",
     "- id: agent",
     "  name: '@deepseek-ai/dsh-agent'",
     "- id: session-projection",

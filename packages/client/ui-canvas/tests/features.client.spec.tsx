@@ -43,7 +43,7 @@ function canvasWithVideo(): CanvasSnapshot {
     output: null,
     createdAt: 1,
     updatedAt: 1,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 const emptyInteraction = {
@@ -74,7 +74,7 @@ function canvasViewProps(
   resolvedCapabilities: CanvasCapabilities = capabilities({ editor: false }),
 ): ComponentProps<typeof CanvasView> {
   return {
-    useSession: selector => selector({ openState } as never),
+    useSession: (selector: (value: { openState: typeof openState }) => unknown) => selector({ openState }),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),

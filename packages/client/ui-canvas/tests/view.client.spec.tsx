@@ -23,7 +23,7 @@ function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 const capabilities: CanvasCapabilities = {
@@ -40,7 +40,7 @@ const actions = {
 
 function editorProps(canvas: CanvasSnapshot): ComponentProps<typeof CanvasView> {
   return {
-    useSession: selector => selector({ openState: 'open' } as never),
+    useSession: (selector: (value: { openState: 'open' }) => unknown) => selector({ openState: 'open' }),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof interaction) => unknown) => selector(interaction),
@@ -60,7 +60,7 @@ describe('Canvas view shells', () => {
   it('RUNNING renders only the Cancel primary control and never Run', () => {
     const canvas = base({
       runRevision: 1,
-      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 },
+      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 } as unknown as NonNullable<CanvasSnapshot['run']>,
     })
     const html = renderToStaticMarkup(<MinimalCanvas canvas={canvas} t={t} />)
     expect(html).toContain('data-canvas-action="cancel"')
@@ -75,12 +75,12 @@ describe('Canvas view shells', () => {
       run: {
         id: 'run-old', status: 'completed', workflowId: workflow.id,
         workflowRevision: 1, startedAt: 2, finishedAt: 3,
-      },
+      } as unknown as NonNullable<CanvasSnapshot['run']>,
       output: {
         runId: 'run-old', workflowId: workflow.id, workflowRevision: 1,
         assets: [{ kind: 'video', video: { assetId: 'video-old', mediaType: 'video/mp4', bytes: 100 } }],
         primaryAssetIndex: 0,
-      },
+      } as unknown as NonNullable<CanvasSnapshot['output']>,
     })
     const html = renderToStaticMarkup(<MinimalCanvas canvas={canvas} t={t} />)
     expect(html).toContain('data-canvas-state="DIRTY_READY"')

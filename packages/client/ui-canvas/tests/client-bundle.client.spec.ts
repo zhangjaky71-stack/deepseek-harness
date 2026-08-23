@@ -76,9 +76,13 @@ describe('ui-canvas built client artifact', () => {
     ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
     ctx.provide('conversation', { registerPromptPreparation: () => () => {} } as never)
     ctx.provide('remote', {
-      canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }) },
+      canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }), listNodes: async () => ({ ok: true, value: [] }) },
+      canvas: {},
+      canvasInteraction: {},
     } as never)
     ctx.provide('remote.canvasFeatures', {} as never)
+    ctx.provide('remote.canvas', {} as never)
+    ctx.provide('remote.canvasInteraction', {} as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
     const locale = await import('@deepseek-ai/dsh-client-locale/client')
     ctx.plugin({ inject: [...locale.inject], apply: locale.apply })
@@ -103,13 +107,13 @@ describe('ui-canvas built client artifact', () => {
     expect(enabled.slots.entries('conversation.composer')).toHaveLength(enabled.beforeComposer)
     await enabled.fiber.dispose()
     expect(enabled.slots.entries('conversation.view')).toHaveLength(0)
-    await enabled.ctx.dispose()
+    await enabled.ctx.fiber.dispose()
 
     const disabled = await composed(exports, false)
     expect(disabled.slots.entries('conversation.view')).toHaveLength(0)
     expect(disabled.slots.entries('conversation.composer')).toHaveLength(disabled.beforeComposer)
     await disabled.fiber.dispose()
-    await disabled.ctx.dispose()
+    await disabled.ctx.fiber.dispose()
   })
 
   it.skipIf(code === undefined)('injects plugin-tagged CSS', async () => {

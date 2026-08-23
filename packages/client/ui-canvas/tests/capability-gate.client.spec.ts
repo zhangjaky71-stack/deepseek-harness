@@ -32,7 +32,8 @@ async function harness(get: () => Promise<unknown>) {
   slots.register({
     name: 'root',
     children: { 'conversation.view': { kind: 'list', scope: 'session' } },
-  }, () => null)
+    inject: () => ({}),
+  }, (_p: { renderSlot?: unknown }) => null)
   ctx.provide('sessions', { binding: () => ({ session: {} }) } as never)
   ctx.provide('conversation', { registerPromptPreparation: () => () => {} } as never)
   ctx.provide('locale', {
