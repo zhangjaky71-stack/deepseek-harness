@@ -37,6 +37,42 @@ replace(built, "const root = resolve(packageDir, '../../..')\n", '')
 media_tsconfig = 'packages/canvas/media-workflow/tsconfig.json'
 replace(media_tsconfig, '"outDir": "lib"', '"outDir": "lib/types"')
 
+media_manifest = 'packages/canvas/media-workflow/package.json'
+replace(
+    media_manifest,
+    '  "files": [\n    "lib/**/*.js",',
+    '  "files": [\n    "lib/invariant.js",\n    "lib/**/*.js",',
+)
+
+canvas_manifest = 'packages/canvas/canvas/package.json'
+replace(
+    canvas_manifest,
+    '  "files": [\n    "lib/index.js",',
+    '  "files": [\n    "lib/*.js",\n    "lib/index.js",',
+)
+
+media_tsdown = Path('packages/canvas/media-workflow/tsdown.config.ts')
+if media_tsdown.exists():
+    raise SystemExit('packages/canvas/media-workflow/tsdown.config.ts unexpectedly already exists')
+media_tsdown.write_text(
+    "import { defineConfig } from 'tsdown'\n\n"
+    "export default defineConfig({\n"
+    "  entry: [\n"
+    "    'lib/types/index.js',\n"
+    "    'lib/types/types.js',\n"
+    "    'lib/types/builtins.js',\n"
+    "    'lib/types/invariant.js',\n"
+    "  ],\n"
+    "  outDir: 'lib',\n"
+    "  format: ['esm'],\n"
+    "  platform: 'node',\n"
+    "  target: 'es2024',\n"
+    "  fixedExtension: false,\n"
+    "  dts: false,\n"
+    "  clean: false,\n"
+    "})\n"
+)
+
 ui_canvas_tsdown = Path('packages/client/ui-canvas/tsdown.config.ts')
 if ui_canvas_tsdown.exists():
     raise SystemExit('packages/client/ui-canvas/tsdown.config.ts unexpectedly already exists')
@@ -88,6 +124,49 @@ run_logged 'standalone hygiene regressions' /tmp/standalone.log \
   packages/canvas/canvas/tests/interaction.spec.ts \
   packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 run_logged 'build:lib:host' /tmp/host-build.log pnpm run build:lib:host
+run_logged 'build:lib:client' /tmp/client-build.log pnpm run build:lib:client
+
+python - <<'PY'
+from pathlib import Path
+
+required = {
+    'media-workflow built LIB': [
+        'packages/canvas/media-workflow/lib/index.js',
+        'packages/canvas/media-workflow/lib/builtins.js',
+        'packages/canvas/media-workflow/lib/invariant.js',
+    ],
+    'api-remotes built LIB': [
+        'packages/client/connection/lib/client.js',
+        'packages/client/connection/lib/index.js',
+        'packages/api/remotes/lib/client.js',
+        'packages/core/agent/lib/index.js',
+        'packages/core/session/lib/index.js',
+        'packages/canvas/canvas/lib/index.js',
+        'packages/canvas/canvas/lib/typert.host.js',
+        'packages/goal/goal/lib/index.js',
+        'packages/goal/goal/lib/typert.host.js',
+        'packages/api/gateway/lib/client.js',
+        'packages/api/gateway/lib/index.js',
+        'packages/typert/registry/lib/client.js',
+        'packages/typert/registry/lib/index.js',
+    ],
+}
+
+missing = []
+for group, paths in required.items():
+    absent = [path for path in paths if not Path(path).is_file()]
+    if absent:
+        missing.append((group, absent))
+    else:
+        print(f'=== {group} artifact preflight PASS ({len(paths)} files) ===')
+
+if missing:
+    for group, paths in missing:
+        print(f'=== {group} artifact preflight FAILURE ===')
+        for path in paths:
+            print(f'  missing {path}')
+    raise SystemExit(1)
+PY
 
 set +e
 run_logged 'Canvas REAL Loader' /tmp/canvas-real.log \
@@ -119,8 +198,11 @@ git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 git add -- \
   packages/bundle/base/tests/canvas-real-composition.spec.ts \
+  packages/canvas/canvas/package.json \
   packages/canvas/canvas/src/interaction.ts \
   packages/canvas/canvas/tests/interaction-features.spec.ts \
+  packages/canvas/media-workflow/package.json \
+  packages/canvas/media-workflow/tsdown.config.ts \
   packages/canvas/media-workflow/tests/plugin-node.spec.ts \
   packages/canvas/media-workflow/tests/registry.spec.ts \
   packages/canvas/media-workflow/tests/built-lib.e2e.ts \
@@ -129,5 +211,5 @@ git add -- \
   packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 
 git diff --cached --check
-git commit -m 'fix(canvas): clear host build blockers for N06 validation'
+git commit -m 'fix(canvas): clear final built-package blockers for N06 validation'
 git push origin HEAD:fix/canvas-n06-v2.2-remote-history
