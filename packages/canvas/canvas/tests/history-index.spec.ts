@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { CanvasRunId, type CanvasChange } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
 import { buildCanvasRunHistoryIndex } from '../src/history.ts'
@@ -24,23 +24,24 @@ function appendCanvasChange(session: Session, change: CanvasChange): void {
 }
 
 describe('CanvasRunHistoryIndex', () => {
-  it('fails loud when Session history updates a run before run-start', async () => {
-    const { ctx, session } = await liveSession('history-missing-start')
-    try {
-      const created = currentWriterChange(createChange())
-      appendCanvasChange(session, created)
-      if (created.canvas === null) throw new Error('expected created Canvas')
-      const started = currentWriterChange(runStartChange(created.canvas, CanvasRunId('run-missing-start')))
-      if (started.canvas === null) throw new Error('expected started Canvas')
-      const completed = currentWriterChange(runUpdateChange(started.canvas, 'completed'))
-      appendCanvasChange(session, completed)
+  it('fails loud when persisted history updates a run before run-start', () => {
+    const created = currentWriterChange(createChange())
+    if (created.canvas === null) throw new Error('expected created Canvas')
+    const started = currentWriterChange(runStartChange(created.canvas, CanvasRunId('run-missing-start')))
+    if (started.canvas === null) throw new Error('expected started Canvas')
+    const completed = currentWriterChange(runUpdateChange(started.canvas, 'completed'))
 
-      expect(() => buildCanvasRunHistoryIndex(session.events)).toThrow(
-        /run-update must advance only the current non-terminal run lifecycle/,
-      )
-    } finally {
-      await ctx.fiber.dispose()
-    }
+    // A live Session rejects this corrupt stream earlier through the Canvas
+    // invariant. The history index still needs a fail-loud boundary for a
+    // malformed persisted/replayed carrier, so construct that carrier directly.
+    const events = [
+      { seq: 0, time: created.canvas.updatedAt, type: 'canvas/change', data: created },
+      { seq: 1, time: completed.canvas?.updatedAt ?? created.canvas.updatedAt + 1, type: 'canvas/change', data: completed },
+    ] as SessionEvent[]
+
+    expect(() => buildCanvasRunHistoryIndex(events)).toThrow(
+      /run-update must advance only the current non-terminal run lifecycle/,
+    )
   })
 
   it('supports one rebuild followed by incremental apply and generation-scoped lookup', async () => {
