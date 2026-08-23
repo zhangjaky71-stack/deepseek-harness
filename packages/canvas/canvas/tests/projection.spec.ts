@@ -11,8 +11,9 @@ import CanvasService, {
   WorkflowNodeId,
   applyCanvasLayoutProjection,
   applyCanvasProjection,
+  canvasBrowserAccess,
 } from '@deepseek-ai/dsh-canvas'
-import type { CanvasAccessContext, CanvasLayoutSnapshot, CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
+import type { CanvasLayoutSnapshot, CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
 import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
 interface Bench {
@@ -134,7 +135,7 @@ describe('Canvas Session projections and layout state', () => {
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(CanvasService)
-    const restored = Session.create(SessionId('canvas-projection-restored'), first.session.events)
+    const restored = ctx.sessions.create(SessionId('canvas-projection-restored'), { seed: first.session.events })
     const coldValues = ctx.sessionProjections.snapshot(restored).values
 
     expect(coldValues.canvas).toEqual(edited)
@@ -209,11 +210,12 @@ describe('Canvas Session projections and layout state', () => {
     const session = restricted.sessions.create(SessionId('canvas-layout-denied'))
     const agent = liveAgent(restricted, session)
     const canvas = restricted.canvas.create(agent, { workflow: baseWorkflow() })
-    const human: CanvasAccessContext = { actor: { kind: 'human', id: 'local-user' }, source: 'browser-remote' }
     const deniedBefore = session.seq
-    expect(() => restricted.canvas.saveLayout(agent, layoutFor(canvas), human)).toThrow(
-      expect.objectContaining({ code: 'CANVAS_PERMISSION_DENIED' }),
-    )
+    expect(() => restricted.canvas.saveLayout(
+      agent,
+      layoutFor(canvas),
+      canvasBrowserAccess(String(session.id)),
+    )).toThrow(expect.objectContaining({ code: 'CANVAS_PERMISSION_DENIED' }))
     expect(session.seq).toBe(deniedBefore)
   })
 })
