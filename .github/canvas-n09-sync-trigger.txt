@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
-Attempt: 3 — scoped whitespace check on the sole resolved conflict, then full gates.
+Attempt: 4 — compare N08 baseline static gates with N09 candidate before scoped remediation.
