@@ -99,6 +99,112 @@ replace(
 ''',
     '',
 )
+
+projection_store = 'packages/client/runtime/src/client/sessions/projection-store.ts'
+replace(
+    projection_store,
+    'if (current?.value !== value || current.seq !== baseline.asOfSeq || current.generation !== 0) this.changed(key)',
+    'if (current === undefined || current.value !== value || current.seq !== baseline.asOfSeq || current.generation !== 0) this.changed(key)',
+)
+replace(
+    projection_store,
+    'if (previous?.value !== control.value || previous.seq !== seq || previous.generation !== control.generation) this.changed(key)',
+    'if (previous === undefined || previous.value !== control.value || previous.seq !== seq || previous.generation !== control.generation) this.changed(key)',
+)
+
+canvas_view = 'packages/client/ui-canvas/src/client/CanvasView.tsx'
+replace(
+    canvas_view,
+    "{presentation.showOutput && canvas?.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
+    "{presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
+)
+replace(
+    canvas_view,
+    "onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }} t={t}",
+    "{...(onSelectOutput === undefined ? {} : { onSelect: () => { onSelectOutput(canvas, index) } })} t={t}",
+)
+
+editor_store = 'packages/client/ui-canvas/src/client/store.ts'
+for old, new in [
+    ('  readonly saveStatus: CanvasSaveStatus', '  saveStatus: CanvasSaveStatus'),
+    ('  readonly draft: CanvasNodeDraft | null', '  draft: CanvasNodeDraft | null'),
+    ('  readonly undo: readonly CanvasEditorHistoryEntry[]', '  undo: readonly CanvasEditorHistoryEntry[]'),
+    ('  readonly redo: readonly CanvasEditorHistoryEntry[]', '  redo: readonly CanvasEditorHistoryEntry[]'),
+    ('  readonly clipboard: CanvasClipboard | null', '  clipboard: CanvasClipboard | null'),
+    ('  readonly localPositions: Readonly<Record<string, { readonly x: number; readonly y: number }>>', '  localPositions: Readonly<Record<string, { readonly x: number; readonly y: number }>>'),
+]:
+    replace(editor_store, old, new)
+
+capability_test = 'packages/client/ui-canvas/tests/capability-gate.client.spec.ts'
+replace(
+    capability_test,
+    "  slots.register({\n    name: 'root',\n    children: { 'conversation.view': { kind: 'list', scope: 'session' } },\n  }, () => null)",
+    "  slots.register({\n    name: 'root',\n    children: { 'conversation.view': { kind: 'list', scope: 'session' } },\n    inject: () => ({}),\n  }, (_p: { renderSlot?: unknown }) => null)",
+)
+
+bundle_test = 'packages/client/ui-canvas/tests/client-bundle.client.spec.ts'
+replace(bundle_test, 'await enabled.ctx.dispose()', 'await enabled.ctx.fiber.dispose()')
+replace(bundle_test, 'await disabled.ctx.dispose()', 'await disabled.ctx.fiber.dispose()')
+
+features_test = 'packages/client/ui-canvas/tests/features.client.spec.tsx'
+replace(features_test, '  } as CanvasSnapshot\n}', '  } as unknown as CanvasSnapshot\n}')
+replace(
+    features_test,
+    '    useSession: selector => selector({ openState } as never),',
+    "    useSession: (selector: (value: { openState: typeof openState }) => unknown) => selector({ openState }),",
+)
+
+interaction_test = 'packages/client/ui-canvas/tests/interaction.client.spec.ts'
+replace(
+    interaction_test,
+    ")) as NonNullable<CanvasSnapshot['output']>['assets']",
+    ")) as unknown as NonNullable<CanvasSnapshot['output']>['assets']",
+)
+replace(interaction_test, '  } as CanvasSnapshot\n}', '  } as unknown as CanvasSnapshot\n}')
+replace(
+    interaction_test,
+    "      } as NonNullable<CanvasSnapshot['output']>,",
+    "      } as unknown as NonNullable<CanvasSnapshot['output']>,",
+)
+
+state_test = 'packages/client/ui-canvas/tests/state.client.spec.ts'
+replace(state_test, '  } as CanvasSnapshot\n}', '  } as unknown as CanvasSnapshot\n}')
+replace(
+    state_test,
+    "  } as NonNullable<CanvasSnapshot['run']>\n}",
+    "  } as unknown as NonNullable<CanvasSnapshot['run']>\n}",
+)
+replace(
+    state_test,
+    "} as NonNullable<CanvasSnapshot['output']>",
+    "} as unknown as NonNullable<CanvasSnapshot['output']>",
+)
+
+view_test = 'packages/client/ui-canvas/tests/view.client.spec.tsx'
+replace(view_test, '  } as CanvasSnapshot\n}', '  } as unknown as CanvasSnapshot\n}')
+replace(
+    view_test,
+    "    useSession: selector => selector({ openState: 'open' } as never),",
+    "    useSession: (selector: (value: { openState: 'open' }) => unknown) => selector({ openState: 'open' }),",
+)
+replace(
+    view_test,
+    "      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 },",
+    "      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 } as unknown as NonNullable<CanvasSnapshot['run']>,",
+)
+replace(
+    view_test,
+    "      run: {\n        id: 'run-old', status: 'completed', workflowId: workflow.id,\n        workflowRevision: 1, startedAt: 2, finishedAt: 3,\n      },",
+    "      run: {\n        id: 'run-old', status: 'completed', workflowId: workflow.id,\n        workflowRevision: 1, startedAt: 2, finishedAt: 3,\n      } as unknown as NonNullable<CanvasSnapshot['run']>,",
+)
+replace(
+    view_test,
+    "      output: {\n        runId: 'run-old', workflowId: workflow.id, workflowRevision: 1,\n        assets: [{ kind: 'video', video: { assetId: 'video-old', mediaType: 'video/mp4', bytes: 100 } }],\n        primaryAssetIndex: 0,\n      },",
+    "      output: {\n        runId: 'run-old', workflowId: workflow.id, workflowRevision: 1,\n        assets: [{ kind: 'video', video: { assetId: 'video-old', mediaType: 'video/mp4', bytes: 100 } }],\n        primaryAssetIndex: 0,\n      } as unknown as NonNullable<CanvasSnapshot['output']>,",
+)
+
+layout_test = 'packages/client/ui-layout/tests/service.client.spec.ts'
+replace(layout_test, '    setDetails: vi.fn(),\n', '    setDetails: vi.fn(),\n    setConversation: vi.fn(),\n')
 PY
 
 run_logged() {
@@ -125,6 +231,15 @@ run_logged 'standalone hygiene regressions' /tmp/standalone.log \
   packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 run_logged 'build:lib:host' /tmp/host-build.log pnpm run build:lib:host
 run_logged 'build:lib:client' /tmp/client-build.log pnpm run build:lib:client
+run_logged 'client hygiene regressions' /tmp/client-regressions.log \
+  pnpm exec vitest run \
+  packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+  packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+  packages/client/ui-canvas/tests/features.client.spec.tsx \
+  packages/client/ui-canvas/tests/interaction.client.spec.ts \
+  packages/client/ui-canvas/tests/state.client.spec.ts \
+  packages/client/ui-canvas/tests/view.client.spec.tsx \
+  packages/client/ui-layout/tests/service.client.spec.ts
 
 python - <<'PY'
 from pathlib import Path
@@ -207,7 +322,17 @@ git add -- \
   packages/canvas/media-workflow/tests/registry.spec.ts \
   packages/canvas/media-workflow/tests/built-lib.e2e.ts \
   packages/canvas/media-workflow/tsconfig.json \
+  packages/client/runtime/src/client/sessions/projection-store.ts \
   packages/client/ui-canvas/tsdown.config.ts \
+  packages/client/ui-canvas/src/client/CanvasView.tsx \
+  packages/client/ui-canvas/src/client/store.ts \
+  packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+  packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+  packages/client/ui-canvas/tests/features.client.spec.tsx \
+  packages/client/ui-canvas/tests/interaction.client.spec.ts \
+  packages/client/ui-canvas/tests/state.client.spec.ts \
+  packages/client/ui-canvas/tests/view.client.spec.tsx \
+  packages/client/ui-layout/tests/service.client.spec.ts \
   packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 
 git diff --cached --check
