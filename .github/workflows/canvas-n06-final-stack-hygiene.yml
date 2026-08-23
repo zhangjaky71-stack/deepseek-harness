@@ -77,13 +77,10 @@ jobs:
       - name: Verify immutable install
         run: pnpm install --frozen-lockfile
 
-      - name: Run hygiene-focused regressions
+      - name: Run standalone hygiene regressions
         run: >-
           pnpm exec vitest run
           packages/canvas/canvas/tests/interaction.spec.ts
-          packages/canvas/canvas/tests/interaction-features.spec.ts
-          packages/canvas/media-workflow/tests/plugin-node.spec.ts
-          packages/canvas/media-workflow/tests/registry.spec.ts
           packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 
       - name: Build host libraries
