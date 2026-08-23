@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N10 validation. Do not merge.
-Attempt: 3 — scoped JSDoc remediation for N10-touched exports, then full baseline-differential validation and gated push.
+Attempt: 4 — preserve full diagnostic comparison while ignoring the improving export-JSDoc summary count; continue all static/build/test/invariant gates.
