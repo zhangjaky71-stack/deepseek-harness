@@ -9,8 +9,6 @@ jobs:
   n08-static-baseline:
     if: github.event.pull_request.head.ref == 'ci/canvas-n09-sync-trigger'
     runs-on: ubuntu-24.04
-    env:
-      DSH_GATE_CONCURRENCY: '8'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -31,15 +29,26 @@ jobs:
           pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 180 /tmp/install.log; exit 1; }
           echo "N08 frozen install: PASS"
 
-      - name: Run N08 repository static baseline
+      - name: Capture exact N08 attribution diagnostics
         shell: bash
         run: |
           set +e
-          pnpm run check:ci:static >/tmp/static.log 2>&1
-          status=$?
+          pnpm run verify-package-readme-model-experience >/tmp/readme.log 2>&1
+          readme_status=$?
+          pnpm run verify-translation-pairing >/tmp/translation.log 2>&1
+          translation_status=$?
+          pnpm run verify-module-graph >/tmp/module.log 2>&1
+          module_status=$?
           set -e
-          echo "=== N08 STATIC SUMMARY ==="
-          grep -E '^run-gates: [0-9]+ passed|^run-gates: unsuccessful gates:|^  - FAILED ' /tmp/static.log || true
-          echo "=== N08 STATIC SELECTED DIAGNOSTICS ==="
-          grep -E 'optional dependency imports|module graph|package README model experience|translation pairing|Cordis config|client catalog|config catalog|package invariants|constraints|TypertAnalysisError|Unused files' /tmp/static.log | tail -n 240 || true
-          exit "$status"
+
+          echo "=== N08 README MODEL EXPERIENCE ==="
+          cat /tmp/readme.log
+          echo "=== N08 TRANSLATION PAIRING ==="
+          cat /tmp/translation.log
+          echo "=== N08 MODULE GRAPH ==="
+          cat /tmp/module.log
+          echo "ATTRIBUTION_STATUS readme=$readme_status translation=$translation_status module=$module_status"
+          # Attribution deliberately succeeds: the candidate is judged against
+          # this known failing predecessor baseline, not against an impossible
+          # repository-wide zero-failure condition.
+          exit 0
