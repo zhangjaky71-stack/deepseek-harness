@@ -1,0 +1,40 @@
+name: Canvas N06 built validation
+
+on:
+  pull_request:
+    branches:
+      - ci/canvas-n06-built-base
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  n06-built:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Verify immutable install
+        run: pnpm install --frozen-lockfile
+      - name: Build host libraries
+        id: build_host
+        continue-on-error: true
+        run: pnpm run build:lib:host
+      - name: Run REAL Loader and built-LIB smoke
+        if: steps.build_host.outcome == 'success'
+        run: >-
+          pnpm exec vitest run
+          packages/bundle/base/tests/canvas-real-composition.spec.ts
+          packages/api/remotes/tests/built-lib.e2e.ts
+      - name: Verify built package invariants
+        if: steps.build_host.outcome == 'success'
+        run: pnpm run verify-built-package-invariants
+      - name: Fail when host build is blocked
+        if: steps.build_host.outcome != 'success'
+        run: |
+          echo 'N06 built validation blocked because build:lib:host failed; REAL Loader and built-LIB were intentionally not counted.'
+          exit 1
