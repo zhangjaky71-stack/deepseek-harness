@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N10 validation. Do not merge.
-Attempt: 6 — validate corrected bilingual N10 Agent Note format and continue exact-baseline static, build, focused tests, invariants, and gated push.
+Attempt: 7 — validate bilingual N10 Agent Note language switchers and continue exact-baseline static, build, focused tests, invariants, and gated push.
