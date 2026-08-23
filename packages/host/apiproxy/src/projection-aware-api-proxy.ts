@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { inspectApiRemoteSession } from '@deepseek-ai/dsh-api-remotes'
-import type { ApiProxy, SessionProjectionsBlock } from './api/index.ts'
+import type { ApiProxy, RpcResponse, SessionProjectionsBlock } from './api/index.ts'
 import {
   createApiProxy as createCoreApiProxy,
   type ApiProxyDefaults,
@@ -81,34 +81,37 @@ async function exactTailProjectionBaseline(
   return detachedProjectionBaseline(ctx, sessionId, inspected.events)
 }
 
-/** Replace or remove a successful tail page's projections using exact identity. */
-async function secureTailResponse<T extends {
-  readonly result: { readonly ok: true; readonly value: { readonly events: readonly { readonly event: { readonly seq: number } }[]; readonly projections?: unknown } }
-}>(
+interface TailProjectionValue {
+  readonly events: readonly { readonly event: { readonly seq: number } }[]
+  readonly projections?: SessionProjectionsBlock
+}
+
+/** Replace or remove a tail page's projections while preserving the complete RPC envelope. */
+async function secureTailResponse<T extends TailProjectionValue>(
   ctx: Context,
   sessionId: SessionId,
-  response: T,
+  response: RpcResponse<T>,
   label: string,
-): Promise<T> {
+): Promise<RpcResponse<T>> {
+  if (!response.result.ok) return response
+  const value = response.result.value
   try {
-    const projections = await exactTailProjectionBaseline(ctx, sessionId, response.result.value.events)
+    const projections = await exactTailProjectionBaseline(ctx, sessionId, value.events)
+    const secured = projections === undefined
+      ? withoutProjections(value)
+      : { ...withoutProjections(value), projections }
     return {
       ...response,
-      result: {
-        ok: true,
-        value: projections === undefined
-          ? withoutProjections(response.result.value)
-          : { ...withoutProjections(response.result.value), projections },
-      },
-    } as T
+      result: { ok: true, value: secured as T },
+    }
   } catch (error) {
     ctx.logger.warn(
       `${label}: exact-identity projections for "${sessionId}" failed: ${String(error)}`,
     )
     return {
       ...response,
-      result: { ok: true, value: withoutProjections(response.result.value) },
-    } as T
+      result: { ok: true, value: withoutProjections(value) as T },
+    }
   }
 }
 
