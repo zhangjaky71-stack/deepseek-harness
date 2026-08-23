@@ -75,5 +75,11 @@ export interface CanvasNodeCatalogEntry {
   }
 }
 
+/** One client-safe catalog read tied to the exact Host registry mutation revision that produced it. */
+export interface CanvasNodeCatalogSnapshot {
+  readonly revision: number
+  readonly entries: readonly CanvasNodeCatalogEntry[]
+}
+
 /** Stable feature-policy failure surfaced before a disabled operation starts. */
 export type CanvasFeatureErrorCode = 'CANVAS_FEATURE_DISABLED'

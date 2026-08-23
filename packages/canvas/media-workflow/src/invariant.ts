@@ -10,8 +10,8 @@ const PACKAGE_NAME = '@deepseek-ai/dsh-media-workflow'
 
 /** Cordis companion plugin name. */
 export const name = 'media-workflow-invariant'
-/** Invariant service and media-node registry must exist before installation. */
-export const inject = ['invariants', 'mediaNodes']
+/** The companion only needs the invariant registry; its installer owns the mediaNodes dependency. */
+export const inject = ['invariants']
 
 function validate(definition: MediaNodeDefinition, fail: InvariantFailure): void {
   try {

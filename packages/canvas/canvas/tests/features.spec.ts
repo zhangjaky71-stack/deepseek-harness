@@ -196,4 +196,41 @@ describe('Canvas deployment feature policy', () => {
     expect(first.editor.enabled).toBe(false)
     expect(first.history.enabled).toBe(false)
   })
+
+  it('projects the exact current media-node registry revision into each client-safe catalog read', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(MemorySettings)
+    let revision = 17
+    let displayName = 'Plugin Demo v1'
+    ctx.provide('mediaNodes', {
+      snapshot: () => ({
+        revision,
+        definitions: [{
+          type: 'plugin.demo',
+          version: 3,
+          displayName,
+          inputs: [{ name: 'prompt', type: 'text', required: true }],
+          outputs: [{ name: 'image', type: 'image', required: true }],
+          defaultConfig: { strength: 0.5 },
+          execution: {},
+          lifecycle: { deprecated: false, creatable: true, executable: true },
+          ui: { category: 'plugin', icon: 'plugin-demo', inspectorKind: 'plugin-demo' },
+        }],
+      }),
+    } as never)
+    await ctx.plugin(CanvasFeatureService)
+
+    expect(ctx.canvasFeatures.remoteExportListNodes()).toEqual({
+      revision: 17,
+      entries: [expect.objectContaining({ type: 'plugin.demo', version: 3, displayName: 'Plugin Demo v1' })],
+    })
+
+    revision = 19
+    displayName = 'Plugin Demo v2'
+    expect(ctx.canvasFeatures.remoteExportListNodes()).toEqual({
+      revision: 19,
+      entries: [expect.objectContaining({ type: 'plugin.demo', version: 3, displayName: 'Plugin Demo v2' })],
+    })
+  })
 })

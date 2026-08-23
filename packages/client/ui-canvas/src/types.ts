@@ -63,6 +63,8 @@ export interface CanvasViewInjected extends CanvasInteractionActions {
   /** False when the Host enables Editor but its client-safe node catalog is unavailable. */
   readonly editorReady: boolean
   readonly nodeCatalog: readonly CanvasNodeCatalogEntry[]
+  /** Exact Host registry revision that produced `nodeCatalog`; absent when no catalog was loaded. */
+  readonly nodeCatalogRevision?: number
   readonly hooks: {
     readonly mode: SnapshotStore<CanvasMode>
     readonly interaction: SnapshotStore<CanvasInteractionSelection>
@@ -71,4 +73,5 @@ export interface CanvasViewInjected extends CanvasInteractionActions {
   readonly commitOperations: (operations: readonly WorkflowEditOperation[], expectedWorkflowRevision: number) => Promise<CanvasWorkflowWriteResult>
   readonly saveLayout: (request: SaveCanvasLayoutRequest) => Promise<CanvasLayoutWriteResult>
 }
+/** Canvas projection value accepted by presentation-state derivation. */
 export type CanvasPresentationInput = CanvasSnapshot | null

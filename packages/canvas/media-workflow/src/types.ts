@@ -81,10 +81,16 @@ export interface MediaNodeDefinitionRef {
   readonly version: number
 }
 
-/** Registration lifecycle notification. */
+/** Atomic view of one registry revision and the definitions installed at that revision. */
+export interface MediaNodeRegistrySnapshot {
+  readonly revision: number
+  readonly definitions: readonly MediaNodeDefinition[]
+}
+
+/** Registration lifecycle notification with the resulting registry revision. */
 export type MediaNodeRegistryChange =
-  | { readonly kind: 'registered'; readonly definition: MediaNodeDefinition }
-  | { readonly kind: 'unregistered'; readonly definition: MediaNodeDefinition }
+  | { readonly kind: 'registered'; readonly revision: number; readonly definition: MediaNodeDefinition }
+  | { readonly kind: 'unregistered'; readonly revision: number; readonly definition: MediaNodeDefinition }
 
 /** Stable registry failures. */
 export type MediaNodeRegistryErrorCode =

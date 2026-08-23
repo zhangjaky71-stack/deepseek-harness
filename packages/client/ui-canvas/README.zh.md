@@ -20,6 +20,8 @@ Browser 对部署级 Canvas capability 采取 fail-closed 策略。Plugin 会等
 
 写能力与只读渲染有意解耦。Canvas 已启用后，Projection 驱动的 Minimal surface 不要求 `remote.canvas` mutation transport 常驻；mutation transport 缺失或重连时，写操作会返回明确的 offline/save 结果，而不是抹掉可读 Projection。如果 Editor 已启用但 node catalog discovery 失败，本次 activation 会禁用 Editor，同时保留 Minimal 只读产品面。
 
+Editor Catalog discovery 成功时，Host 会返回一个 `CanvasNodeCatalogSnapshot { revision, entries }`。`nodeCatalogRevision` 就是生成这些 entries 的精确 process-local `ctx.mediaNodes` Registry revision；Browser 只保留 Host 值，不生成 local catalog revision，也不维护第二套 Registry authority。Discovery 失败时不宣称任何 revision。该 revision 只标识当前 Host Registry lifetime 中的一次 snapshot，不能把它当 durable generation 跨 Host restart 比较。
+
 `editor.enabled=false` 时，即使 Browser-local Mode Store 里仍保存着 `editor`，Surface 也会强制使用 Minimal，并且不渲染 Mode Switch。已有本地偏好不会被重写，因此未来部署重新开启 Editor 时仍可沿用普通的 local preference 语义，不需要 Session mutation。
 
 关闭能力不会删除历史数据。尤其是当 `video.enabled=false` 时，历史 `video.generate` 或 `video.image-to-video` Node 仍会在 Editor 中显示，但标记为“当前部署不可用”；已有 Video Output Reference 也继续可见。这样能明确区分“当前不能使用该能力”和“历史 Workflow/Result 已不存在”。
@@ -88,3 +90,4 @@ Feature discovery 本身不增加任何模型 Token。Canvas 被关闭时 Browse
 - **Media card 只是 metadata placeholder** — 真实图片／视频展示依赖授权 Asset delivery。
 - **Save status 仍是静态 skeleton** — Draft/Autosave 延后处理；UI 仍不建立第二套 durable source。
 - **Mode 与 Selection 有意保持 Local** — 它们只存在于 Browser client 挂载生命周期，不通过 Session History 同步；只有真正被某次 Turn 消费的模型可见 Context 会写入 Log。
+- **Node Catalog 是 activation-scoped，不是 live subscription** — N10 会保留已加载 snapshot 的 exact Host revision identity，但不会轮询或把 Registry 变化 push 到已挂载 Browser surface。

@@ -30,7 +30,7 @@ function capabilities(enabled: boolean): CanvasCapabilities {
 
 async function harness(
   get: () => Promise<unknown>,
-  listNodes: () => Promise<unknown> = async () => ({ ok: true, value: [] }),
+  listNodes: () => Promise<unknown> = async () => ({ ok: true, value: { revision: 0, entries: [] } }),
 ) {
   const ctx = new Context()
   contexts.push(ctx)
@@ -101,7 +101,7 @@ async function settingsHarness(get: () => Promise<unknown>) {
   ctx.provide('settingsScope', { bind: () => scope } as never)
   ctx.provide('connection', {} as never)
   ctx.provide('remote', {
-    canvasFeatures: { get, listNodes: async () => ({ ok: true, value: [] }) },
+    canvasFeatures: { get, listNodes: async () => ({ ok: true, value: { revision: 0, entries: [] } }) },
   } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
   const fiber = ctx.plugin({ inject, apply })
@@ -142,6 +142,20 @@ describe('ui-canvas Host capability gate', () => {
     expect(slots.entries('settings.section')).toHaveLength(0)
   })
 
+  it('retains the exact Host registry revision with the client-safe Editor catalog', async () => {
+    const { slots } = await harness(
+      async () => ({ ok: true, value: capabilities(true) }),
+      async () => ({ ok: true, value: { revision: 23, entries: [] } }),
+    )
+    await settle()
+    const entry = slots.entries('shell.main')[0]
+    expect(entry).toBeDefined()
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    expect(injected.editorReady).toBe(true)
+    expect(injected.nodeCatalog).toEqual([])
+    expect(injected.nodeCatalogRevision).toBe(23)
+  })
+
   it('keeps Minimal available when the optional Editor catalog fails', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { slots } = await harness(
@@ -154,6 +168,7 @@ describe('ui-canvas Host capability gate', () => {
     const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(false)
     expect(injected.nodeCatalog).toEqual([])
+    expect(injected.nodeCatalogRevision).toBeUndefined()
     expect(error).toHaveBeenCalledOnce()
   })
 

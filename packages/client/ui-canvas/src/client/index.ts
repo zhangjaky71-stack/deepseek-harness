@@ -8,6 +8,7 @@ import type {
   CanvasInteractionStageReceipt,
   CanvasLayoutMutationReceipt,
   CanvasNodeCatalogEntry,
+  CanvasNodeCatalogSnapshot,
   CanvasSnapshot,
   CanvasWorkflowMutationReceipt,
   DiscardCanvasInteractionRequest,
@@ -44,7 +45,7 @@ interface CanvasInteractionRemote {
 }
 interface CanvasFeatureRemote {
   get(): Promise<RemoteResult<CanvasCapabilities>>
-  listNodes(): Promise<RemoteResult<readonly CanvasNodeCatalogEntry[]>>
+  listNodes(): Promise<RemoteResult<CanvasNodeCatalogSnapshot>>
 }
 interface CanvasMutationRemote {
   editWorkflow(sessionId: SessionId, ref: NonNullable<ReturnType<typeof workflowRef>>, operations: readonly WorkflowEditOperation[]): Promise<RemoteResult<CanvasWorkflowMutationReceipt>>
@@ -132,12 +133,14 @@ export function apply(ctx: ClientContext): void {
         if (!capabilities.canvas.enabled) return
 
         let nodeCatalog: readonly CanvasNodeCatalogEntry[] = []
+        let nodeCatalogRevision: number | undefined
         let editorReady = capabilities.editor.enabled
         if (capabilities.editor.enabled) {
           try {
             const catalog = await featureRemote.listNodes()
             if (!catalog.ok) throw new Error(`${catalog.error.code}: ${catalog.error.message}`)
-            nodeCatalog = catalog.value
+            nodeCatalog = catalog.value.entries
+            nodeCatalogRevision = catalog.value.revision
           } catch (error) {
             editorReady = false
             console.error('[ui-canvas] node catalog discovery failed; Editor disabled:', error)
@@ -153,6 +156,7 @@ export function apply(ctx: ClientContext): void {
             if (featureCtx.sessions.binding(sessionId)?.session === undefined) throw new Error(`ui-canvas: session "${sessionId}" is unavailable`)
             return {
               capabilities, editorReady, nodeCatalog,
+              ...(nodeCatalogRevision === undefined ? {} : { nodeCatalogRevision }),
               hooks: { mode: modes.faceOf(sessionId), interaction: interactions.faceOf(sessionId) },
               setMode: mode => { modes.set(sessionId, mode) },
               selectNode: (canvas, nodeId) => { interactions.selectNode(sessionId, canvas, nodeId) },

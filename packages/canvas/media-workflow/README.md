@@ -8,6 +8,8 @@ English | [中文](README.zh.md)
 
 The default export is `MediaNodeRegistry`, mounted as `ctx.mediaNodes`. Definitions are keyed by `(type, version)` and registration is effect-scoped to the calling plugin fiber. Registering the same key twice fails; unloading/HMR of the registrant removes exactly the definition that fiber installed. Registry consumers therefore see one live source of node metadata rather than copying switch statements into each subsystem.
 
+The registry also owns a process-local monotonic mutation `revision`. `snapshot()` returns `{ revision, definitions }` from one synchronous read, with definitions in the same stable type/version order as `list()`. Every successful registration and exact unregistration advances the revision once; validation/duplicate failures do not advance it. HMR-style unload followed by re-registration is therefore represented by two distinct mutations rather than silently replacing metadata under one catalog identity. The revision belongs to the current Registry instance and is rebuildable, not durable Session state or a cross-restart generation number.
+
 A `MediaNodeDefinition` declares:
 
 - semantic `type` and positive integer `version`;
@@ -21,6 +23,8 @@ A `MediaNodeDefinition` declares:
 The registry deliberately stores no React component, browser callback, Provider client, secret, model id, mutable deployment state, or binary media. Zod schema objects remain plugin-owned metadata by reference; the remaining registered definition data is frozen into a stable snapshot so a caller cannot mutate registry behavior after registration.
 
 `parseConfig()` resolves the exact node version and applies that definition's schema/defaults. `assertCreatable()` rejects definitions that must stay readable but cannot be newly authored. `assertExecutable()` enforces intrinsic lifecycle only; N12 combines it with graph validation and N09 deployment feature state before actual execution.
+
+The Host `canvasFeatures.listNodes()` seam projects one client-safe `{ revision, entries }` catalog from the Registry snapshot. Runtime schemas/functions remain Host-only. A Browser consumer preserves the returned Host revision with the entries it loaded; it must not fabricate a local revision or maintain a second node-registry authority. If catalog discovery fails, no Host revision is claimed and consumers may degrade presentation independently of historical workflow readability.
 
 ## Port vocabulary
 
@@ -61,15 +65,19 @@ This keeps registry lifetime process-local and rebuildable. Definition metadata 
 
 ## Model Experience
 
-None directly. The package registers no model-facing tool and contributes no prompt text. N18 may use the same definitions to summarize nodes and advertise only currently creatable capabilities, but that model surface is not implemented here.
+### Registry metadata is not directly model-visible
+
+#### What the model sees
+
+Nothing from this package by itself. `MediaNodeRegistry` and its client-safe catalog remain Host/runtime metadata; a future model-facing consumer such as N18 may select and render those definitions, and that consumer owns the resulting model-visible text.
 
 #### Token effect
 
-Zero direct tokens.
+Zero standing or turn-local tokens are added by this package itself; tokens are incurred only if a downstream model-facing consumer renders selected registry metadata.
 
 #### KV Cache effect
 
-None.
+None from this package directly because it installs no prompt prefix or tool schema. Any cache effect belongs to the downstream consumer that renders registry metadata.
 
 ## Known Limitations and Deferred Work
 
@@ -78,3 +86,4 @@ None.
 - **No Provider/model registry** — N13/N14 resolve execution capability to concrete models/providers.
 - **No Agent Canvas tools** — N18 consumes definitions for summaries/tool availability.
 - **No runtime execution from `executable=true` alone** — intrinsic lifecycle is one admission input; N09 feature policy and later run governance still apply.
+- **Registry revision is not durable** — it identifies mutation order only within the current Registry instance. A Host restart rebuilds the registry; Browser consumers must treat a newly fetched snapshot as authoritative rather than compare revision numbers across Host lifetimes.

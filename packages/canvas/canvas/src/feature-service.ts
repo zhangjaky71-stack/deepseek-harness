@@ -17,6 +17,7 @@ import type {
   CanvasFeatureConfig,
   CanvasFeatureName,
   CanvasNodeCatalogEntry,
+  CanvasNodeCatalogSnapshot,
 } from './feature-types.ts'
 import type { MediaWorkflow, WorkflowEditOperation } from './types.ts'
 
@@ -40,7 +41,12 @@ type CatalogDefinition = {
   readonly lifecycle: CanvasNodeCatalogEntry['lifecycle']
   readonly ui: CanvasNodeCatalogEntry['ui']
 }
-interface MediaNodeCatalogSource { list(): readonly CatalogDefinition[] }
+interface MediaNodeCatalogSource {
+  snapshot(): {
+    readonly revision: number
+    readonly definitions: readonly CatalogDefinition[]
+  }
+}
 
 /**
  * Deployment feature policy shared by Canvas Host operations and Browser
@@ -63,6 +69,7 @@ export class CanvasFeatureService extends TypertRemoteService {
     variants: toggle(false), partialRun: toggle(false), regionEdit: toggle(false), providerFallback: toggle(false),
   })
 
+  /** Immutable effective deployment capability snapshot sampled at activation. */
   readonly capabilities: CanvasCapabilities
 
   constructor(ctx: Context, config: CanvasFeatureConfig = {}) {
@@ -75,35 +82,71 @@ export class CanvasFeatureService extends TypertRemoteService {
     this.capabilities = resolveCanvasCapabilities(scope.get())
   }
 
+  /**
+   * Test whether one deployment feature is enabled in the activation snapshot.
+   * @param feature - deployment feature to inspect.
+   * @returns whether the feature is enabled for this activation.
+   */
   isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.capabilities, feature) }
+
+  /**
+   * Require one deployment feature to be enabled.
+   * @param feature - deployment feature to require.
+   */
   assertEnabled(feature: CanvasFeatureName): void { assertCanvasFeatureEnabled(this.capabilities, feature) }
+
+  /**
+   * Require the deployment capabilities needed to author a workflow.
+   * @param workflow - workflow whose authoring requirements are checked.
+   */
   assertWorkflowCreatable(workflow: MediaWorkflow): void { assertCanvasWorkflowCreatable(this.capabilities, workflow) }
+
+  /**
+   * Require the deployment capabilities needed by one workflow edit.
+   * @param workflow - workflow being edited.
+   * @param operations - requested atomic edit operations.
+   */
   assertWorkflowEditable(workflow: MediaWorkflow, operations: readonly WorkflowEditOperation[]): void {
     assertCanvasWorkflowEditable(this.capabilities, workflow, operations)
   }
+
+  /**
+   * Require the deployment capabilities needed to execute a workflow.
+   * @param workflow - workflow whose execution requirements are checked.
+   */
   assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.capabilities, workflow) }
 
-  /** Browser-readable effective deployment capabilities; raw settings layers never cross this Remote. */
+  /**
+   * Return Browser-readable effective deployment capabilities without raw settings layers.
+   * @returns cloned capability snapshot for the current Host activation.
+   */
   @Remote('get')
   remoteExportGet(): CanvasCapabilities { return structuredClone(this.capabilities) }
 
-  /** Return installed node metadata from the Host registry as a data-only DTO. */
+  /**
+   * Return one client-safe installed-node catalog tied to the exact Host registry mutation revision.
+   * @returns atomic Host registry revision and data-only node catalog entries.
+   */
   @Remote('listNodes')
-  remoteExportListNodes(): readonly CanvasNodeCatalogEntry[] {
+  remoteExportListNodes(): CanvasNodeCatalogSnapshot {
     this.assertEnabled('editor')
     const source = this.ctx.get('mediaNodes') as MediaNodeCatalogSource | undefined
     if (source === undefined) throw new Error('canvasFeatures.listNodes: mediaNodes service is required while Canvas Editor is enabled')
-    return source.list().map(definition => ({
-      type: definition.type,
-      version: definition.version,
-      displayName: definition.displayName,
-      inputs: structuredClone(definition.inputs),
-      outputs: structuredClone(definition.outputs),
-      defaultConfig: structuredClone(definition.defaultConfig),
-      ...(definition.execution.feature === undefined ? {} : { feature: definition.execution.feature }),
-      lifecycle: structuredClone(definition.lifecycle),
-      ui: structuredClone(definition.ui),
-    }))
+    const catalog = source.snapshot()
+    return {
+      revision: catalog.revision,
+      entries: catalog.definitions.map(definition => ({
+        type: definition.type,
+        version: definition.version,
+        displayName: definition.displayName,
+        inputs: structuredClone(definition.inputs),
+        outputs: structuredClone(definition.outputs),
+        defaultConfig: structuredClone(definition.defaultConfig),
+        ...(definition.execution.feature === undefined ? {} : { feature: definition.execution.feature }),
+        lifecycle: structuredClone(definition.lifecycle),
+        ui: structuredClone(definition.ui),
+      })),
+    }
   }
 }
 

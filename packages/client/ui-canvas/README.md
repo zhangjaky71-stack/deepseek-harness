@@ -20,6 +20,8 @@ The Browser fails closed on deployment-level Canvas capability. The plugin waits
 
 Write availability is intentionally separate from read rendering. Once Canvas is enabled, the projected Minimal surface does not require `remote.canvas` mutation transport to remain visible. If mutation transport is absent or reconnecting, write operations return explicit offline/save outcomes instead of erasing the readable projection. If Editor is enabled but node-catalog discovery fails, Editor is disabled for that activation and the Minimal read surface remains available.
 
+When Editor catalog discovery succeeds, the Host returns one `CanvasNodeCatalogSnapshot { revision, entries }`. `nodeCatalogRevision` is the exact process-local `ctx.mediaNodes` Registry revision that produced the loaded entries; the Browser preserves that Host value and never generates a local catalog revision or second Registry authority. If discovery fails, no revision is claimed. The revision identifies one snapshot within the current Host Registry lifetime only and must not be compared as a durable generation across Host restarts.
+
 `editor.enabled=false` makes the surface Minimal-only even if the browser-local mode store still contains `editor`; the mode switch is not rendered. The stored preference is not rewritten, so a later deployment that re-enables Editor can reuse normal local preference semantics without a Session mutation.
 
 Disabled feature data is not erased. In particular, a historical `video.generate` or `video.image-to-video` node remains visible in Editor when `video.enabled=false`, but is marked `Unavailable in this deployment`. Existing video output references also remain visible. This distinguishes “cannot use this capability now” from “the historical workflow/result no longer exists.”
@@ -88,3 +90,4 @@ No standing prefix is added. Interaction context is turn-local user-role plugin 
 - **Media cards are metadata placeholders** — actual image/video rendering requires authorized asset delivery.
 - **Save status is static** — draft/autosave behavior is deferred; the UI still creates no second durable source.
 - **Mode and selection are intentionally local** — they survive only in the mounted browser client lifetime and are not synchronized through Session history; only model-visible context actually consumed by a turn is logged.
+- **Node catalog is activation-scoped, not live-subscribed** — N10 preserves exact Host revision identity for the loaded snapshot but does not poll or push Registry changes into an already-mounted Browser surface.
