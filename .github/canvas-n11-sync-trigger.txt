@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11 validation. Do not merge.
-Attempt: 4 — rerun full validation after Agent Note format and bilingual pairing remediation.
+Attempt: 5 — rerun full validation after N11 Client build typing remediation.
