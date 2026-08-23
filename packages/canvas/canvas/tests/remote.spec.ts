@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -8,6 +8,8 @@ import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import CanvasService, {
   CanvasAuthorizationService,
   CanvasRunId,
+  type CanvasAuthorizationDecision,
+  type CanvasAuthorizationRequest,
 } from '@deepseek-ai/dsh-canvas'
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
 import { withCanvasWritePermit } from '../src/write-authority.ts'
@@ -18,6 +20,19 @@ import {
   runUpdateChange,
   workflowRef,
 } from './canvas-fixtures.ts'
+
+class BoundaryAuthorizationService extends Service {
+  readonly requests: CanvasAuthorizationRequest[] = []
+
+  constructor(ctx: Context) {
+    super(ctx, 'canvasAuthorization')
+  }
+
+  authorize(request: CanvasAuthorizationRequest): CanvasAuthorizationDecision {
+    this.requests.push(structuredClone(request))
+    return { allowed: true }
+  }
+}
 
 function liveAgent(ctx: Context, sessionId: string): Agent {
   const session = ctx.sessions.create(SessionId(sessionId))
@@ -136,6 +151,40 @@ describe('Canvas Typert Remote contract and history API', () => {
     )).toThrow(expect.objectContaining({ code: 'CANVAS_PERMISSION_DENIED' }))
     expect(agent.session.seq).toBe(before)
     expect(currentCanvas(ctx, agent)).toEqual(created)
+  })
+
+  it('rejects malformed weak mutation DTOs before authorization or business logic', async () => {
+    const { ctx, agent } = await harness()
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    await ctx.plugin(BoundaryAuthorizationService)
+    const policy = ctx.get('canvasAuthorization') as unknown as BoundaryAuthorizationService
+
+    expect(() => ctx.canvas.remoteExportEditWorkflow(
+      agent,
+      { canvasId: created.id } as never,
+      [{ op: 'rename-workflow', name: 'never reached' }],
+    )).toThrow(expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }))
+    expect(policy.requests).toHaveLength(0)
+
+    expect(() => ctx.canvas.remoteExportEditWorkflow(
+      agent,
+      workflowRef(created),
+      [{ op: 'unsupported-op' }] as never,
+    )).toThrow(expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }))
+    expect(policy.requests).toHaveLength(0)
+
+    expect(() => ctx.canvas.remoteExportReplaceWorkflow(
+      agent,
+      workflowRef(created),
+      { id: 'workflow-main' } as never,
+    )).toThrow(expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }))
+    expect(policy.requests).toHaveLength(0)
+
+    expect(() => ctx.canvas.remoteExportClear(
+      agent,
+      { canvasId: created.id, workflowId: 'workflow-main', workflowRevision: 0 } as never,
+    )).toThrow(expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }))
+    expect(policy.requests).toHaveLength(0)
   })
 
   it('pages newest-first by stable run-start Session cursor even when a later run is appended', async () => {

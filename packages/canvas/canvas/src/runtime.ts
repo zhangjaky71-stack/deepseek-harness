@@ -516,20 +516,21 @@ export class CanvasService extends TypertRemoteService {
   }
 
   replaceWorkflow(agent: Agent, ref: WorkflowRef, workflow: MediaWorkflow, access?: CanvasAccessContext): CanvasSnapshot {
+    const validatedRef = workflowRefInput(ref)
+    let replacement: MediaWorkflow
+    try {
+      replacement = cloneWorkflow(workflow)
+      assertMediaWorkflow(replacement)
+    } catch {
+      invalidEdit('Canvas replacement workflow is invalid')
+    }
     const prepared = this.prepare(agent, 'canvas.edit', access)
     const features = this.featurePolicy()
     features?.assertEnabled('canvas')
     this.assertBrowserEditorEnabled(prepared.access, features)
-    const replacement = cloneWorkflow(workflow)
-    try {
-      assertMediaWorkflow(replacement)
-    } catch (error) {
-      if (error instanceof CanvasDomainError) invalidEdit('Canvas replacement workflow is invalid')
-      throw error
-    }
     features?.assertWorkflowCreatable(replacement)
     this.assertWorkflowAuditSafe(replacement)
-    const current = this.expectCurrentWorkflow(prepared.cache, workflowRefInput(ref))
+    const current = this.expectCurrentWorkflow(prepared.cache, validatedRef)
     if (replacement.id !== current.workflow.id) {
       throw new CanvasServiceError(
         `replacement workflow "${replacement.id}" does not match current workflow "${current.workflow.id}"`,
@@ -545,12 +546,13 @@ export class CanvasService extends TypertRemoteService {
     operations: readonly WorkflowEditOperation[],
     access?: CanvasAccessContext,
   ): CanvasSnapshot {
+    const validatedRef = workflowRefInput(ref)
+    const validatedOperations = workflowEditOperations(operations)
     const prepared = this.prepare(agent, 'canvas.edit', access)
     const features = this.featurePolicy()
     features?.assertEnabled('canvas')
     this.assertBrowserEditorEnabled(prepared.access, features)
-    const current = this.expectCurrentWorkflow(prepared.cache, workflowRefInput(ref))
-    const validatedOperations = workflowEditOperations(operations)
+    const current = this.expectCurrentWorkflow(prepared.cache, validatedRef)
     features?.assertWorkflowEditable(current.workflow, validatedOperations)
     const workflow = applyWorkflowOperations(current.workflow, validatedOperations)
     this.assertWorkflowAuditSafe(workflow)
@@ -665,9 +667,9 @@ export class CanvasService extends TypertRemoteService {
   }
 
   clear(agent: Agent, ref: WorkflowRef, access?: CanvasAccessContext): void {
+    const validatedRef = workflowRefInput(ref)
     const prepared = this.prepare(agent, 'canvas.edit', access)
     this.assertFeature('canvas')
-    const validatedRef = workflowRefInput(ref)
     const current = this.expectCurrentWorkflow(prepared.cache, validatedRef)
     if (current.run !== null && !isCanvasRunTerminal(current.run.status)) {
       throw new CanvasServiceError('Canvas cannot be cleared while its current run is non-terminal', 'CANVAS_INVALID_EDIT')
