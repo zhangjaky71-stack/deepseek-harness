@@ -27,21 +27,71 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Merge validated N08 predecessor
+      - name: Merge validated N08 predecessor and resolve the one owned conflict
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin fix/canvas-n08-v2.2-interaction-context fix/canvas-n09-v2.2-settings-authority
-          git merge --no-edit origin/fix/canvas-n08-v2.2-interaction-context
-          git diff --check
+
+          set +e
+          git merge --no-edit origin/fix/canvas-n08-v2.2-interaction-context >/tmp/merge.log 2>&1
+          merge_status=$?
+          set -e
+          if (( merge_status != 0 )); then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            expected='packages/canvas/canvas/tests/interaction-features.spec.ts'
+            if [[ "$conflicts" != "$expected" ]]; then
+              cat /tmp/merge.log
+              echo "Unexpected N08->N09 conflict set: $conflicts"
+              exit "$merge_status"
+            fi
+            git checkout --ours -- "$expected"
+          fi
+
+          # N09 owns the Settings-provider fixture; N08 owns the live SessionStore
+          # correction. Compose both semantics instead of selecting an entire side.
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/canvas/canvas/tests/interaction-features.spec.ts')
+          text = path.read_text()
+          text = text.replace(
+              "import { Session, SessionId } from '@deepseek-ai/dsh-session'",
+              "import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'",
+          )
+          text = text.replace(
+              'while (contexts.length > 0) await contexts.pop()!.dispose()',
+              'while (contexts.length > 0) await contexts.pop()!.fiber.dispose()',
+          )
+          text = text.replace(
+              "  const session = Session.create(SessionId('canvas-region-feature'))",
+              "  const session = ctx.sessions.create(SessionId('canvas-region-feature'))",
+          )
+          anchor = '  await ctx.plugin(AgentRegistry)\n'
+          desired = '  await ctx.plugin(SessionStore)\n  await ctx.plugin(AgentRegistry)\n'
+          if desired not in text:
+              if text.count(anchor) != 1:
+                  raise SystemExit(f'interaction-features: expected one boot AgentRegistry anchor, found {text.count(anchor)}')
+              text = text.replace(anchor, desired, 1)
+          path.write_text(text)
+          PY
+
+          git add packages/canvas/canvas/tests/interaction-features.spec.ts
+          git diff --cached --check
           test -z "$(git ls-files -u)"
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git commit --no-edit
+          fi
           git merge-base --is-ancestor origin/fix/canvas-n08-v2.2-interaction-context HEAD
           echo "DSH_ARCHIVE_BASE_REF=$(git rev-parse origin/fix/canvas-n08-v2.2-interaction-context)" >> "$GITHUB_ENV"
           grep -Fq "static inject = ['settings']" packages/canvas/canvas/src/feature-service.ts
+          grep -Fq "await ctx.plugin(MemorySettings)" packages/canvas/canvas/tests/interaction-features.spec.ts
+          grep -Fq "await ctx.plugin(SessionStore)" packages/canvas/canvas/tests/interaction-features.spec.ts
+          grep -Fq "ctx.sessions.create(SessionId('canvas-region-feature'))" packages/canvas/canvas/tests/interaction-features.spec.ts
           test -f packages/client/ui-canvas/src/client/CanvasSettingsSection.tsx
-          echo "N08->N09 merge and settings-authority assertions: PASS"
+          echo "N08->N09 semantic merge and settings-authority assertions: PASS"
 
       - name: Reconcile N09 workspace lock importers
         shell: bash
@@ -144,7 +194,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add pnpm-lock.yaml
+          git add pnpm-lock.yaml packages/canvas/canvas/tests/interaction-features.spec.ts
           if ! git diff --cached --quiet; then
             git commit --amend --no-edit
           fi
