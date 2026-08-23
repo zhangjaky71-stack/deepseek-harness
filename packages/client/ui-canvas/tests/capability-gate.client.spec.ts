@@ -146,7 +146,7 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(true)
     expect(injected.nodeCatalog).toEqual([])
     expect(injected.nodeCatalogRevision).toBe(23)
@@ -161,7 +161,7 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(false)
     expect(injected.nodeCatalog).toEqual([])
     expect(injected.nodeCatalogRevision).toBeUndefined()
