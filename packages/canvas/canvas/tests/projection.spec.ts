@@ -143,7 +143,7 @@ describe('Canvas Session projections and layout state', () => {
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(CanvasService)
-    const restored = Session.create(SessionId('canvas-projection-restored'), first.session.events)
+    const restored = ctx.sessions.create(SessionId('canvas-projection-restored'), { seed: first.session.events })
     const coldValues = ctx.sessionProjections.snapshot(restored).values
 
     expect(coldValues.canvas).toEqual(edited)

@@ -585,17 +585,7 @@ export class CanvasService extends TypertRemoteService {
   }
 
   private canBrowserReadProjection(sessionId: string | undefined, value: unknown): boolean {
-    if (sessionId === undefined) {
-      if (this.ctx.get('canvasAuthorization') !== undefined || this.authorizationMode === 'required-external') return false
-      const access = canvasBrowserAccess('detached-session')
-      return this.fallbackAuthorization.authorize({
-        permission: 'canvas.read',
-        actor: access.actor,
-        source: access.source,
-        sessionId: 'detached-session',
-        resource: this.projectionAuthorizationResource(value),
-      }).allowed
-    }
+    if (sessionId === undefined) return false
     const session = this.ctx.sessions.get(sessionId as Session['id'])
     const access = canvasBrowserAccess(sessionId)
     if (session === undefined) {
