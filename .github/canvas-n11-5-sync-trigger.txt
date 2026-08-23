@@ -1,0 +1,2 @@
+Temporary trigger for repository-pinned N11.5 validation. Do not merge.
+Attempt: 1 — ordinary final-N11 to N11.5 merge probe only; print exact conflict set on failure.
