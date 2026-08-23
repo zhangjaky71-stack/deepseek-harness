@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N10 validation. Do not merge.
-Attempt: 9 — validate N10 Browser fixture cast remediation, then rerun exact-baseline static, Host/Client builds, focused regressions, built invariants, and gated push.
+Attempt: 10 — validate media-workflow invariant companion dependency remediation, then rerun exact-baseline static, Host/Client builds, focused regressions, built invariants, and gated push.
