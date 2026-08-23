@@ -29,26 +29,17 @@ jobs:
           pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 180 /tmp/install.log; exit 1; }
           echo "N08 frozen install: PASS"
 
-      - name: Capture exact N08 attribution diagnostics
+      - name: Capture N08 package-boundary attribution diagnostics
         shell: bash
         run: |
           set +e
-          pnpm run verify-package-readme-model-experience >/tmp/readme.log 2>&1
-          readme_status=$?
-          pnpm run verify-translation-pairing >/tmp/translation.log 2>&1
-          translation_status=$?
-          pnpm run verify-module-graph >/tmp/module.log 2>&1
-          module_status=$?
+          gates=(constraints verify-package-invariants verify-cordis-config verify-client-catalog verify-config-catalog)
+          for gate in "${gates[@]}"; do
+            echo "=== N08 $gate ==="
+            pnpm run "$gate" >"/tmp/$gate.log" 2>&1
+            status=$?
+            cat "/tmp/$gate.log"
+            echo "ATTRIBUTION_GATE $gate status=$status"
+          done
           set -e
-
-          echo "=== N08 README MODEL EXPERIENCE ==="
-          cat /tmp/readme.log
-          echo "=== N08 TRANSLATION PAIRING ==="
-          cat /tmp/translation.log
-          echo "=== N08 MODULE GRAPH ==="
-          cat /tmp/module.log
-          echo "ATTRIBUTION_STATUS readme=$readme_status translation=$translation_status module=$module_status"
-          # Attribution deliberately succeeds: the candidate is judged against
-          # this known failing predecessor baseline, not against an impossible
-          # repository-wide zero-failure condition.
           exit 0
