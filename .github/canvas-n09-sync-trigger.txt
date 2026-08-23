@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
-Attempt: 7 — baseline-aware static comparison plus full build/test/invariant gates.
+Attempt: 8 — N09 context-teardown compatibility fix plus baseline-aware full validation.
