@@ -10,7 +10,7 @@ import { apply, inject } from '../src/client/index.ts'
 const contexts: Context[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 function capabilities(enabled: boolean): CanvasCapabilities {
@@ -36,7 +36,8 @@ async function harness(
   slots.register({
     name: 'root',
     children: { 'shell.main': { kind: 'single', scope: 'session' } },
-  }, () => null)
+    inject: () => ({}),
+  }, (_p: { renderSlot?: unknown }) => null)
   ctx.provide('sessions', {
     list: { getSnapshot: () => ({ ids: [], current: undefined }), subscribe: () => () => {} },
     binding: () => ({ session: {} }),
@@ -50,6 +51,7 @@ async function harness(
   // hidden just because mutation transport is absent.
   ctx.provide('remote', { canvasFeatures: { get, listNodes } } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
+  ctx.provide('remote.canvas', {} as never)
   const fiber = ctx.plugin({ inject, apply })
   await fiber.await()
   return { ctx, slots, fiber }
@@ -81,7 +83,7 @@ describe('ui-canvas Host capability gate', () => {
     await settle()
     const entry = slots.entries('shell.main')[0]
     expect(entry).toBeDefined()
-    const injected = (entry!.inject as (sessionId: never) => CanvasViewInjected)('session-a' as never)
+    const injected = (entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)('session-a' as never)
     expect(injected.editorReady).toBe(false)
     expect(injected.nodeCatalog).toEqual([])
     expect(error).toHaveBeenCalledOnce()
