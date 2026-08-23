@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N07 predecessor sync validation. Do not merge.
-Attempt: 6 — scoped N06 TypeScript carry-forward fixes plus full N07 gates.
+Attempt: 6b — same scoped carry-forward fixes; retrigger after workflow propagation.
