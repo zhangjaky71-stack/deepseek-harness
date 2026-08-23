@@ -1,0 +1,106 @@
+name: Canvas N06 final-stack hygiene
+
+on:
+  pull_request:
+    branches:
+      - fix/canvas-n06-v2.2-remote-history
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  final-stack-hygiene:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n06-v2.2-remote-history
+          fetch-depth: 0
+
+      - name: Apply cross-node host-build hygiene fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: replacement count for {old!r} is {actual}, expected {count}')
+              file.write_text(text.replace(old, new, count))
+
+          interaction = 'packages/canvas/canvas/src/interaction.ts'
+          replace(
+              interaction,
+              "selectedNodeIds: selectedNodeIds as CanvasInteractionContext['selectedNodeIds']",
+              "selectedNodeIds: selectedNodeIds as NonNullable<CanvasInteractionContext['selectedNodeIds']>",
+          )
+          replace(
+              interaction,
+              "selectedEdgeIds: selectedEdgeIds as CanvasInteractionContext['selectedEdgeIds']",
+              "selectedEdgeIds: selectedEdgeIds as NonNullable<CanvasInteractionContext['selectedEdgeIds']>",
+          )
+
+          for path in [
+              'packages/canvas/canvas/tests/interaction-features.spec.ts',
+              'packages/canvas/media-workflow/tests/plugin-node.spec.ts',
+              'packages/canvas/media-workflow/tests/registry.spec.ts',
+          ]:
+              replace(path, 'await contexts.pop()!.dispose()', 'await contexts.pop()!.fiber.dispose()')
+
+          built = 'packages/canvas/media-workflow/tests/built-lib.e2e.ts'
+          replace(built, "const root = resolve(packageDir, '../../..')\n", '')
+
+          prompt = 'packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts'
+          file = Path(prompt)
+          text = file.read_text()
+          anchor = "import { describe, expect, it } from 'vitest'\n"
+          if text.count(anchor) != 1:
+              raise SystemExit(f'{prompt}: import anchor count={text.count(anchor)}')
+          text = text.replace(anchor, anchor + "import { SessionId } from '@deepseek-ai/dsh-session'\n", 1)
+          text = text.replace("sessionId: 'session-preparation',", "sessionId: SessionId('session-preparation'),", 1)
+          file.write_text(text)
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify immutable install
+        run: pnpm install --frozen-lockfile
+
+      - name: Run hygiene-focused regressions
+        run: >-
+          pnpm exec vitest run
+          packages/canvas/canvas/tests/interaction-features.spec.ts
+          packages/canvas/media-workflow/tests/plugin-node.spec.ts
+          packages/canvas/media-workflow/tests/registry.spec.ts
+          packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
+
+      - name: Build host libraries
+        run: pnpm run build:lib:host
+
+      - name: Run REAL Loader and built-LIB smoke
+        run: >-
+          pnpm exec vitest run
+          packages/bundle/base/tests/canvas-real-composition.spec.ts
+          packages/api/remotes/tests/built-lib.e2e.ts
+
+      - name: Verify built package invariants
+        run: pnpm run verify-built-package-invariants
+
+      - name: Commit validated final-stack hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/canvas-n06-final-stack-hygiene.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(canvas): clear host build blockers for N06 validation'
+          git push origin HEAD:fix/canvas-n06-v2.2-remote-history
