@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
-Attempt: 6 — exact N08 package/config boundary attribution before final candidate gates.
+Attempt: 7 — baseline-aware static comparison plus full build/test/invariant gates.
