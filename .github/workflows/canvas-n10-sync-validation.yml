@@ -139,6 +139,8 @@ jobs:
                       continue
                   if line.startswith('ELIFECYCLE') or line.startswith('ERR_PNPM'):
                       continue
+                  if gate == 'verify-export-jsdoc' and re.fullmatch(r'verify-export-jsdoc: \d+ JSDoc completeness violation\(s\) \(see AGENTS\.md\):', line):
+                      continue
                   out.add(line)
               return out
 
