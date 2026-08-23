@@ -40,6 +40,49 @@ jobs:
           grep -Fq "shell.main" packages/client/ui-canvas/src/client/CanvasView.tsx
           echo "N07->N08 merge and ownership assertions: PASS"
 
+      - name: Align N08 feature-policy fixture with live SessionStore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/canvas/canvas/tests/interaction-features.spec.ts')
+          text = path.read_text()
+
+          old_import = "import { Session, SessionId } from '@deepseek-ai/dsh-session'"
+          new_import = "import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'"
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          elif new_import not in text:
+              raise SystemExit('interaction-features: session import shape not recognized')
+
+          old_session = "  const session = Session.create(SessionId('canvas-region-feature'))"
+          new_session = "  const session = ctx.sessions.create(SessionId('canvas-region-feature'))"
+          if old_session in text:
+              text = text.replace(old_session, new_session, 1)
+          elif new_session not in text:
+              raise SystemExit('interaction-features: stub session shape not recognized')
+
+          agent_plugin = '    await ctx.plugin(AgentRegistry)'
+          session_plugin = '    await ctx.plugin(SessionStore)\n'
+          current = text.count(session_plugin)
+          if current == 0:
+              count = text.count(agent_plugin)
+              if count != 2:
+                  raise SystemExit(f'interaction-features: expected 2 AgentRegistry anchors, found {count}')
+              text = text.replace(agent_plugin, session_plugin + agent_plugin)
+          elif current != 2:
+              raise SystemExit(f'interaction-features: expected 0 or 2 SessionStore plugins, found {current}')
+
+          path.write_text(text)
+          PY
+
+          git diff --check -- packages/canvas/canvas/tests/interaction-features.spec.ts
+          test "$(grep -c "await ctx.plugin(SessionStore)" packages/canvas/canvas/tests/interaction-features.spec.ts)" -eq 2
+          grep -Fq "ctx.sessions.create(SessionId('canvas-region-feature'))" packages/canvas/canvas/tests/interaction-features.spec.ts
+          echo "N08 live SessionStore test fixture: PASS"
+
       - name: Install immutable workspace
         shell: bash
         run: |
@@ -92,4 +135,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git add packages/canvas/canvas/tests/interaction-features.spec.ts
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+          fi
           git push origin HEAD:fix/canvas-n08-v2.2-interaction-context
