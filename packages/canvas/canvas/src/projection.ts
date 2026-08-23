@@ -89,8 +89,7 @@ export function registerCanvasProjections(ctx: Context, canRead?: CanvasProjecti
     stateVersion: 1,
   })
   if (canRead !== undefined) {
-    const guardedRead = (sessionId: string | undefined): boolean => sessionId !== undefined && canRead(sessionId)
-    ctx.sessionProjections.registerReadGuard('canvas', context => guardedRead(context.sessionId))
-    ctx.sessionProjections.registerReadGuard('canvasLayout', context => guardedRead(context.sessionId))
+    ctx.sessionProjections.registerReadGuard('canvas', context => context.sessionId !== undefined && canRead(context.sessionId))
+    ctx.sessionProjections.registerReadGuard('canvasLayout', context => context.sessionId !== undefined && canRead(context.sessionId))
   }
 }
