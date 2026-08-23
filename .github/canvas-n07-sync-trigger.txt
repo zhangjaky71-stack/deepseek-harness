@@ -1,0 +1,1 @@
+Temporary trigger for repository-pinned N07 predecessor sync validation. Do not merge.
