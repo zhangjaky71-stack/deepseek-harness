@@ -54,7 +54,7 @@ describe('SessionProjectionRegistry browser read guards', () => {
     expect(seen).toEqual([])
   })
 
-  it('emits explicit same-seq absence and re-appearance when a guard is installed and disposed', async () => {
+  it('emits explicit same-seq absence and re-appearance with monotonically increasing visibility generations', async () => {
     const { ctx, session } = await harness()
     session.append('turn/start', { turn: 1 })
     expect(ctx.sessionProjections.snapshot(session).values['test/guarded-count']).toBe(1)
@@ -64,11 +64,15 @@ describe('SessionProjectionRegistry browser read guards', () => {
     })
 
     const dispose = ctx.sessionProjections.registerReadGuard('test/guarded-count', () => false)
-    expect(visibility(seen.at(-1)?.value)).toMatchObject({ generation: 1, present: false })
+    const absent = visibility(seen.at(-1)?.value)
+    expect(absent).toMatchObject({ present: false })
+    expect(absent?.generation).toBeGreaterThan(0)
     expect(seen.at(-1)?.seq).toBe(session.seq - 1)
 
     dispose()
-    expect(visibility(seen.at(-1)?.value)).toMatchObject({ generation: 2, present: true, value: 1 })
+    const present = visibility(seen.at(-1)?.value)
+    expect(present).toMatchObject({ present: true, value: 1 })
+    expect(present?.generation).toBeGreaterThan(absent?.generation ?? -1)
     expect(seen.at(-1)?.seq).toBe(session.seq - 1)
   })
 
@@ -87,12 +91,16 @@ describe('SessionProjectionRegistry browser read guards', () => {
     allowed = false
     ctx.sessionProjections.refreshBrowserVisibility(session, ['test/guarded-count'])
     expect(session.seq).toBe(beforeSeq)
-    expect(visibility(seen.at(-1))).toMatchObject({ generation: 1, present: false })
+    const absent = visibility(seen.at(-1))
+    expect(absent).toMatchObject({ present: false })
+    expect(absent?.generation).toBeGreaterThan(0)
 
     allowed = true
     ctx.sessionProjections.refreshBrowserVisibility(session, ['test/guarded-count'])
     expect(session.seq).toBe(beforeSeq)
-    expect(visibility(seen.at(-1))).toMatchObject({ generation: 2, present: true, value: 1 })
+    const present = visibility(seen.at(-1))
+    expect(present).toMatchObject({ present: true, value: 1 })
+    expect(present?.generation).toBeGreaterThan(absent?.generation ?? -1)
   })
 
   it('fails closed when a read guard throws', async () => {

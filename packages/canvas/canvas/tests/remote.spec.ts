@@ -10,8 +10,10 @@ import CanvasService, {
   CanvasRunId,
 } from '@deepseek-ai/dsh-canvas'
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
+import { withCanvasWritePermit } from '../src/write-authority.ts'
 import {
   baseWorkflow,
+  currentWriterChange,
   runStartChange,
   runUpdateChange,
   workflowRef,
@@ -58,11 +60,17 @@ function currentCanvas(ctx: Context, agent: Agent): CanvasSnapshot {
   return canvas
 }
 
+function appendCurrentChange(agent: Agent, change: ReturnType<typeof currentWriterChange>): void {
+  withCanvasWritePermit(agent.session, 'canvas/change', change, () => {
+    agent.session.append('canvas/change', change)
+  })
+}
+
 function appendCompletedRun(ctx: Context, agent: Agent, id: string): void {
   const before = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runStartChange(before, CanvasRunId(id)))
+  appendCurrentChange(agent, currentWriterChange(runStartChange(before, CanvasRunId(id))))
   const queued = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runUpdateChange(queued, 'completed'))
+  appendCurrentChange(agent, currentWriterChange(runUpdateChange(queued, 'completed')))
   currentCanvas(ctx, agent)
 }
 
