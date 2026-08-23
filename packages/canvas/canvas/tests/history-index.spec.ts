@@ -1,8 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import { CanvasRunId } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
 import { buildCanvasRunHistoryIndex } from '../src/history.ts'
+import { withCanvasWritePermit } from '../src/write-authority.ts'
 import {
   createChange,
   runStartChange,
@@ -15,17 +16,23 @@ async function liveSession(rawId: string) {
   return { ctx, session: ctx.sessions.create(SessionId(rawId)) }
 }
 
+function appendCanvasChange(session: Session, change: unknown): void {
+  withCanvasWritePermit(session, 'canvas/change', change, () => {
+    session.append('canvas/change', change as never)
+  })
+}
+
 describe('CanvasRunHistoryIndex', () => {
   it('fails loud when Session history updates a run before run-start', async () => {
     const { ctx, session } = await liveSession('history-missing-start')
     try {
       const created = createChange()
-      session.append('canvas/change', created)
+      appendCanvasChange(session, created)
       if (created.canvas === null) throw new Error('expected created Canvas')
       const started = runStartChange(created.canvas, CanvasRunId('run-missing-start'))
       if (started.canvas === null) throw new Error('expected started Canvas')
       const completed = runUpdateChange(started.canvas, 'completed')
-      session.append('canvas/change', completed)
+      appendCanvasChange(session, completed)
 
       expect(() => buildCanvasRunHistoryIndex(session.events)).toThrow(
         /run-update must advance only the current non-terminal run lifecycle/,
@@ -39,16 +46,16 @@ describe('CanvasRunHistoryIndex', () => {
     const { ctx, session } = await liveSession('history-incremental')
     try {
       const created = createChange()
-      session.append('canvas/change', created)
+      appendCanvasChange(session, created)
       if (created.canvas === null) throw new Error('expected created Canvas')
 
       const index = buildCanvasRunHistoryIndex(session.events)
       const started = runStartChange(created.canvas, CanvasRunId('run-incremental'))
-      session.append('canvas/change', started)
+      appendCanvasChange(session, started)
       index.apply(session.events.at(-1)!)
       if (started.canvas === null) throw new Error('expected started Canvas')
       const completed = runUpdateChange(started.canvas, 'completed')
-      session.append('canvas/change', completed)
+      appendCanvasChange(session, completed)
       index.apply(session.events.at(-1)!)
 
       const page = index.list({ canvasId: created.canvas.id, limit: 20 })
