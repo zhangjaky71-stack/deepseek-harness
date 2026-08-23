@@ -76,6 +76,15 @@ jobs:
           text = text.replace("sessionId: 'session-preparation',", "sessionId: SessionId('session-preparation'),", 1)
           file.write_text(text)
 
+          real = 'packages/bundle/base/tests/canvas-real-composition.spec.ts'
+          replace(
+              real,
+              '''    "- id: invariants",
+    "  name: '@deepseek-ai/dsh-invariants'",
+''',
+              '',
+          )
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -147,7 +156,11 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm exec vitest run packages/canvas/media-workflow/tests/built-lib.e2e.ts > /tmp/media-built.log 2>&1
+          source=packages/canvas/media-workflow/tests/built-lib.e2e.ts
+          tmp=packages/canvas/media-workflow/tests/built-lib.e2e.spec.ts
+          cp "$source" "$tmp"
+          trap 'rm -f "$tmp"' EXIT
+          pnpm exec vitest run "$tmp" > /tmp/media-built.log 2>&1
           code=$?
           echo "MEDIA_BUILT_EXIT=$code"
           if [ "$code" -ne 0 ]; then
@@ -163,7 +176,11 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm exec vitest run packages/api/remotes/tests/built-lib.e2e.ts > /tmp/remotes-built.log 2>&1
+          source=packages/api/remotes/tests/built-lib.e2e.ts
+          tmp=packages/api/remotes/tests/built-lib.e2e.spec.ts
+          cp "$source" "$tmp"
+          trap 'rm -f "$tmp"' EXIT
+          pnpm exec vitest run "$tmp" > /tmp/remotes-built.log 2>&1
           code=$?
           echo "REMOTES_BUILT_EXIT=$code"
           if [ "$code" -ne 0 ]; then
@@ -191,6 +208,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- \
+            packages/bundle/base/tests/canvas-real-composition.spec.ts \
             packages/canvas/canvas/src/interaction.ts \
             packages/canvas/canvas/tests/interaction-features.spec.ts \
             packages/canvas/media-workflow/tests/plugin-node.spec.ts \
