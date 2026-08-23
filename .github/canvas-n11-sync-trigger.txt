@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11 validation. Do not merge.
-Attempt: 5 — rerun full validation after N11 Client build typing remediation.
+Attempt: 6 — rerun full validation after aligning feature-capability regression fixture with authoritative Host node catalog.
