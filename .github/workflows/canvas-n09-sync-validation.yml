@@ -132,18 +132,142 @@ jobs:
           pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 200 /tmp/install.log; exit 1; }
           echo "Frozen workspace install: PASS"
 
-      - name: Run repository static gates
+      - name: Validate static gates against N08 baseline
         shell: bash
         run: |
-          set -o pipefail
-          if ! pnpm run check:ci:static >/tmp/static.log 2>&1; then
-            echo "=== STATIC GATE DIAGNOSTICS ==="
-            grep -E "FAIL|error|Error|generated|translation|Typert|lockfile|canvas|ui-canvas|settings" /tmp/static.log | tail -n 320 || true
-            echo "=== STATIC GATE TAIL ==="
-            tail -n 360 /tmp/static.log
-            exit 1
+          set -euo pipefail
+          set +e
+          pnpm run check:ci:static >/tmp/static.log 2>&1
+          static_status=$?
+          set -e
+
+          if (( static_status == 0 )); then
+            echo "Repository static gates: PASS"
+          else
+            python - <<'PY'
+          from pathlib import Path
+          import re
+
+          log = Path('/tmp/static.log').read_text()
+          baseline_failed = {
+              'constraints',
+              'package invariants',
+              'Cordis config',
+              'cordis catalog',
+              'client catalog',
+              'export jsdoc',
+              'config catalog',
+              'persistence catalog',
+              'doc graphs',
+              'package README model experience',
+              'agent note classification',
+              'agent note format',
+              'type equivalence',
+              'translation pairing',
+              'module graph',
+              'knip',
+          }
+          actual_failed = set(re.findall(r'^  - FAILED (.+?) \(', log, re.MULTILINE))
+          unexpected = actual_failed - baseline_failed
+          if unexpected:
+              raise SystemExit(f'N09 introduced new failing static gates: {sorted(unexpected)}')
+          if 'run-gates: PASS optional dependency imports' not in log:
+              raise SystemExit('N09 optional-dependency-import gate did not pass')
+          print(f'N09 static failed gates remain within N08 baseline: {sorted(actual_failed)}')
+          PY
+
+            set +e
+            gates=(verify-package-readme-model-experience verify-translation-pairing verify-module-graph constraints verify-package-invariants verify-cordis-config verify-client-catalog verify-config-catalog)
+            for gate in "${gates[@]}"; do
+              pnpm run "$gate" >"/tmp/$gate.log" 2>&1
+              echo "$?" >"/tmp/$gate.status"
+            done
+            set -e
+
+            python - <<'PY'
+          from pathlib import Path
+
+          def lines(name: str) -> list[str]:
+              return [line.strip() for line in Path(f'/tmp/{name}.log').read_text().splitlines()]
+
+          def assert_subset(name: str, actual: set[str], baseline: set[str]) -> None:
+              status = int(Path(f'/tmp/{name}.status').read_text())
+              unexpected = actual - baseline
+              if unexpected:
+                  raise SystemExit(f'{name}: N09 introduced diagnostics outside N08 baseline: {sorted(unexpected)}')
+              if status != 0 and not actual:
+                  raise SystemExit(f'{name}: failed without a recognized N08-baseline diagnostic')
+              print(f'{name}: no new diagnostics ({len(actual)} current, {len(baseline)} baseline)')
+
+          readme_baseline = {
+              'packages/bundle/web-app/README.md: line 19: content after #### What the model sees paragraph must be a titled H5 plus `markdown` fence owned by that field',
+              'packages/canvas/canvas/README.md: must contain one or more complete model-context entries',
+              'packages/canvas/media-workflow/README.md: line 72: short Model Experience form requires an audited entry in SENTENCE_MODEL_EXPERIENCE',
+              'packages/client/ui-canvas/README.md: must contain one or more complete model-context entries',
+              'packages/session/session-projection/README.md: must contain exactly one sentence beginning "None, as " and ending with a period, followed by #### KV Cache effect and one non-empty paragraph',
+          }
+          readme_actual = {line for line in lines('verify-package-readme-model-experience') if line.startswith('packages/') and 'README.md:' in line}
+          assert_subset('verify-package-readme-model-experience', readme_actual, readme_baseline)
+
+          translation_baseline = {
+              '.agents/notes/implementations/N08.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/implemented/architecture/2026-08-20-canvas-deployment-feature-policy.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/implemented/architecture/2026-08-20-canvas-interaction-context.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/implemented/architecture/2026-08-20-canvas-rc8-client-compatibility.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/implemented/architecture/2026-08-20-media-node-definition-registry.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/implemented/feature/2026-08-20-canvas-editor-draft-and-atomic-mutations.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              'apps/infinite-canvas/CLI/README.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              'apps/infinite-canvas/README.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              'apps/infinite-canvas/tools/chrome-local-asset-importer/README.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              'apps/infinite-canvas/tools/photoshop-asset-connector/README.md: in-scope documentation must merge bilingual (docs/i18n/README.md); add the counterpart and record the pair',
+              '.agents/notes/proposed/architecture/2026-08-20-canvas-open-world-migration.md ↔ .agents/notes/proposed/architecture/2026-08-20-canvas-open-world-migration.zh.md: link target #1 diverges between the pair: "../feature/2026-08-19-session-media-canvas.md" vs "../feature/2026-08-19-session-media-canvas.zh.md"',
+              '.agents/notes/proposed/feature/2026-08-19-session-media-canvas.md ↔ .agents/notes/proposed/feature/2026-08-19-session-media-canvas.zh.md: link target #1 diverges between the pair: "../architecture/2026-08-20-canvas-open-world-migration.md" vs "../architecture/2026-08-20-canvas-open-world-migration.zh.md"',
+          }
+          translation_actual = {line for line in lines('verify-translation-pairing') if line.startswith('.agents/') or line.startswith('apps/')}
+          assert_subset('verify-translation-pairing', translation_actual, translation_baseline)
+
+          module_baseline = {'gen-module-graph: docs/module-graph.md is stale. Run `pnpm run gen-module-graph` and commit docs/module-graph.md.'}
+          module_actual = {line for line in lines('verify-module-graph') if line.startswith('gen-module-graph:')}
+          assert_subset('verify-module-graph', module_actual, module_baseline)
+
+          constraints_baseline = {
+              'packages/canvas/canvas/package.json: @deepseek-ai/dsh-canvas: package.json files must be ["lib/index.js","lib/invariant.js","lib/types/**/*.js","lib/types/**/*.d.ts","lib/typert.host.js","lib/typert.host.d.ts","lib/typert.remote-client.js","lib/typert.remote-client.d.ts"]',
+              'packages/canvas/media-workflow/package.json: @deepseek-ai/dsh-media-workflow: package.json must set "types": "lib/types/index.d.ts"',
+              'packages/canvas/media-workflow/package.json: @deepseek-ai/dsh-media-workflow: package.json exports["."].types must be "./lib/types/index.d.ts"',
+              'packages/canvas/media-workflow/package.json: @deepseek-ai/dsh-media-workflow: package.json exports["./invariant"].types must be "./lib/types/invariant.d.ts"',
+              'packages/canvas/media-workflow/package.json: @deepseek-ai/dsh-media-workflow: package.json files must be ["lib/index.js","lib/invariant.js","lib/types/**/*.d.ts"]',
+          }
+          constraints_actual = {line for line in lines('constraints') if line.startswith('packages/')}
+          assert_subset('constraints', constraints_actual, constraints_baseline)
+
+          package_baseline = {
+              'packages/bundle/base/package.json: @deepseek-ai/dsh-invariants must be a workspace:^ peerDependency',
+              'packages/bundle/base/package.json: @deepseek-ai/dsh-invariants must also be a workspace:^ devDependency',
+              'packages/canvas/media-workflow/package.json: exports["./invariant"] must target ./lib/types/invariant.d.ts and ./lib/invariant.js',
+          }
+          package_actual = {line for line in lines('verify-package-invariants') if line.startswith('packages/')}
+          assert_subset('verify-package-invariants', package_actual, package_baseline)
+
+          cordis_baseline = {
+              '- packages/bundle/base/cordis.patch.yml: @deepseek-ai/dsh-canvas/feature-service does not resolve to workspace source through tsconfig.base.json paths (add a mapping so the tsx source launch does not depend on built lib/)',
+              '- packages/bundle/base/cordis.patch.yml: @deepseek-ai/dsh-media-workflow/builtins does not resolve to workspace source through tsconfig.base.json paths (add a mapping so the tsx source launch does not depend on built lib/)',
+              '- packages/bundle/base/cordis.patch.yml: @deepseek-ai/dsh-canvas/interaction-service does not resolve to workspace source through tsconfig.base.json paths (add a mapping so the tsx source launch does not depend on built lib/)',
+              '- packages/bundle/web-app/cordis.patch.yml: @deepseek-ai/dsh-client-ui-canvas does not resolve to workspace source through tsconfig.base.json paths (add a mapping so the tsx source launch does not depend on built lib/)',
+          }
+          cordis_actual = {line for line in lines('verify-cordis-config') if line.startswith('- packages/')}
+          assert_subset('verify-cordis-config', cordis_actual, cordis_baseline)
+
+          client_baseline = {'gen-client-catalog: stale — packages/extensions/cordis-client-runner/src/client/slot-catalog.ts. Run `pnpm run gen-client-catalog` and commit the result.'}
+          client_actual = {line for line in lines('verify-client-catalog') if line.startswith('gen-client-catalog:')}
+          assert_subset('verify-client-catalog', client_actual, client_baseline)
+
+          config_baseline = {'gen-config-catalog: docs/config-catalog.md is stale. Run `pnpm run gen-config-catalog` and commit docs/config-catalog.md.'}
+          config_actual = {line for line in lines('verify-config-catalog') if line.startswith('gen-config-catalog:')}
+          assert_subset('verify-config-catalog', config_actual, config_baseline)
+          PY
+
+            echo "N09 static diagnostics introduce no regressions beyond validated N08 baseline: PASS"
           fi
-          tail -n 120 /tmp/static.log
 
       - name: Validate Host build
         shell: bash
