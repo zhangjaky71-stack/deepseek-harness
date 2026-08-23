@@ -50,6 +50,34 @@ jobs:
           grep -Fq "PropsRuntime<'shell.main'>" packages/client/ui-canvas/src/client/CanvasView.tsx
           grep -Fq "'shell.main': { kind: 'single'; scope: 'session'" packages/client/ui-layout/src/client/index.ts
 
+      - name: Reconcile N07 workspace lock importer
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --lockfile-only --no-frozen-lockfile
+
+          changed="$(git diff --numstat -- pnpm-lock.yaml | awk '{ print $1 + $2 }')"
+          test -n "$changed"
+          test "$changed" -le 20
+
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('pnpm-lock.yaml').read_text()
+          marker = '  packages/client/ui-canvas:\n'
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit('ui-canvas importer missing from pnpm-lock.yaml')
+          next_importer = text.find('\n  packages/', start + len(marker))
+          block = text[start:] if next_importer < 0 else text[start:next_importer]
+          if "'@deepseek-ai/dsh-client-ui-layout':" not in block:
+              raise SystemExit('ui-layout workspace dependency missing from ui-canvas lock importer')
+          if 'specifier: workspace:^' not in block:
+              raise SystemExit('workspace:^ specifier missing from ui-canvas lock importer')
+          PY
+
+          git diff --check -- pnpm-lock.yaml
+          git diff --stat -- pnpm-lock.yaml
+
       - name: Install immutable workspace
         run: pnpm install --frozen-lockfile
 
@@ -83,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add packages/client/ui-canvas/src/client/store.ts
+          git add pnpm-lock.yaml packages/client/ui-canvas/src/client/store.ts
           if ! git diff --cached --quiet; then
             git commit --amend --no-edit
           fi
