@@ -83,32 +83,95 @@ jobs:
           cache: pnpm
 
       - name: Verify immutable install
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set +e
+          pnpm install --frozen-lockfile > /tmp/install.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== immutable install failure (tail) ==='
+            tail -n 120 /tmp/install.log
+            exit "$code"
+          fi
+          echo 'immutable install PASS'
 
       - name: Run standalone hygiene regressions
-        run: >-
-          pnpm exec vitest run
-          packages/canvas/canvas/tests/interaction.spec.ts
-          packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run \
+            packages/canvas/canvas/tests/interaction.spec.ts \
+            packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts \
+            > /tmp/standalone.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== standalone regression failure (tail) ==='
+            tail -n 160 /tmp/standalone.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/standalone.log
 
       - name: Build host libraries
         id: host_build
-        run: pnpm run build:lib:host
+        shell: bash
+        run: |
+          set +e
+          pnpm run build:lib:host > /tmp/host-build.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== host build failure (tail) ==='
+            tail -n 180 /tmp/host-build.log
+            exit "$code"
+          fi
+          echo 'build:lib:host PASS'
 
       - name: Run Canvas REAL Loader composition
         id: canvas_real
         if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
-        run: pnpm exec vitest run packages/bundle/base/tests/canvas-real-composition.spec.ts
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run packages/bundle/base/tests/canvas-real-composition.spec.ts > /tmp/canvas-real.log 2>&1
+          code=$?
+          echo "CANVAS_REAL_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== Canvas REAL Loader failure (tail) ==='
+            tail -n 160 /tmp/canvas-real.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/canvas-real.log
 
       - name: Run media-workflow built-LIB smoke
         id: media_built
         if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
-        run: pnpm exec vitest run packages/canvas/media-workflow/tests/built-lib.e2e.ts
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run packages/canvas/media-workflow/tests/built-lib.e2e.ts > /tmp/media-built.log 2>&1
+          code=$?
+          echo "MEDIA_BUILT_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== media-workflow built-LIB failure (tail) ==='
+            tail -n 160 /tmp/media-built.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/media-built.log
 
       - name: Run api-remotes built-LIB smoke
         id: remotes_built
         if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
-        run: pnpm exec vitest run packages/api/remotes/tests/built-lib.e2e.ts
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run packages/api/remotes/tests/built-lib.e2e.ts > /tmp/remotes-built.log 2>&1
+          code=$?
+          echo "REMOTES_BUILT_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== api-remotes built-LIB failure (tail) ==='
+            tail -n 160 /tmp/remotes-built.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/remotes-built.log
 
       - name: Verify built package invariants
         if: >-
