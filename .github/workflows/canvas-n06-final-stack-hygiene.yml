@@ -92,41 +92,35 @@ jobs:
           packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
 
       - name: Build host libraries
+        id: host_build
         run: pnpm run build:lib:host
 
       - name: Run Canvas REAL Loader composition
         id: canvas_real
-        continue-on-error: true
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
         run: pnpm exec vitest run packages/bundle/base/tests/canvas-real-composition.spec.ts
 
       - name: Run media-workflow built-LIB smoke
         id: media_built
-        continue-on-error: true
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
         run: pnpm exec vitest run packages/canvas/media-workflow/tests/built-lib.e2e.ts
 
       - name: Run api-remotes built-LIB smoke
         id: remotes_built
-        continue-on-error: true
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
         run: pnpm exec vitest run packages/api/remotes/tests/built-lib.e2e.ts
 
-      - name: Require all REAL and built-LIB smoke gates
-        env:
-          CANVAS_REAL_OUTCOME: ${{ steps.canvas_real.outcome }}
-          MEDIA_BUILT_OUTCOME: ${{ steps.media_built.outcome }}
-          REMOTES_BUILT_OUTCOME: ${{ steps.remotes_built.outcome }}
-        run: |
-          set -euo pipefail
-          printf 'canvas REAL Loader: %s\n' "$CANVAS_REAL_OUTCOME"
-          printf 'media-workflow built-LIB: %s\n' "$MEDIA_BUILT_OUTCOME"
-          printf 'api-remotes built-LIB: %s\n' "$REMOTES_BUILT_OUTCOME"
-          test "$CANVAS_REAL_OUTCOME" = success
-          test "$MEDIA_BUILT_OUTCOME" = success
-          test "$REMOTES_BUILT_OUTCOME" = success
-
       - name: Verify built package invariants
+        if: >-
+          ${{ !cancelled()
+          && steps.host_build.outcome == 'success'
+          && steps.canvas_real.outcome == 'success'
+          && steps.media_built.outcome == 'success'
+          && steps.remotes_built.outcome == 'success' }}
         run: pnpm run verify-built-package-invariants
 
       - name: Commit validated final-stack hygiene
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
