@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CanvasCapabilities, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
-import { CanvasView, WorkflowEditorShell } from '../src/client/CanvasView.tsx'
+import { CanvasView } from '../src/client/CanvasView.tsx'
 
 const t = ((key: string) => key) as never
 
@@ -52,16 +52,36 @@ const emptyInteraction = {
   selectedAssetRefs: [],
 } as const
 
+const editorState = {
+  saveStatus: 'saved' as const,
+  draft: null,
+  undo: [],
+  redo: [],
+  clipboard: null,
+  localPositions: {},
+}
+
+const editorActions = {
+  setSaveStatus: () => {}, setDraft: () => {}, setDraftName: () => {}, setDraftConfig: () => {},
+  markDraftClean: () => {}, recordCommand: () => {}, completeUndo: () => {}, completeRedo: () => {},
+  clearHistory: () => {}, setClipboard: () => {}, setLocalPosition: () => {}, mergeLocalPositions: () => {},
+  clearLocalPositions: () => {},
+}
+
 function canvasViewProps(
   canvas: CanvasSnapshot | null | undefined,
   openState: 'cold' | 'loading' | 'open' | 'error' = 'open',
+  resolvedCapabilities: CanvasCapabilities = capabilities({ editor: false }),
 ): ComponentProps<typeof CanvasView> {
   return {
     useSession: selector => selector({ openState } as never),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),
-    capabilities: capabilities({ editor: false }),
+    useStore: (selector: (value: typeof editorState) => unknown) => selector(editorState),
+    actions: editorActions,
+    capabilities: resolvedCapabilities,
+    nodeCatalog: [],
     setMode: () => {},
     selectNode: () => {},
     selectNodes: () => {},
@@ -70,6 +90,8 @@ function canvasViewProps(
     selectOutput: () => {},
     setRegion: () => {},
     clearSelection: () => {},
+    commitOperations: async () => ({ ok: true, workflowRevision: 1 }),
+    saveLayout: async () => ({ ok: true, layoutRevision: 1 }),
     t,
   } as unknown as ComponentProps<typeof CanvasView>
 }
@@ -78,7 +100,7 @@ describe('Canvas feature-capability presentation', () => {
   it('forces Minimal and hides the mode switch when Editor is disabled', () => {
     const html = renderToStaticMarkup(<CanvasView {...canvasViewProps(canvasWithVideo())} />)
     expect(html).not.toContain('mode.editor')
-    expect(html).not.toContain('editor.title')
+    expect(html).not.toContain('editor.shortcuts')
     expect(html).toContain('minimal.output')
   })
 
@@ -92,14 +114,9 @@ describe('Canvas feature-capability presentation', () => {
     expect(unavailable).not.toContain('projection.loading')
   })
 
-  it('keeps a historical Video node visible while marking it unavailable', () => {
+  it('keeps a historical Video node visible while marking it unavailable in the real Editor path', () => {
     const html = renderToStaticMarkup(
-      <WorkflowEditorShell
-        canvas={canvasWithVideo()}
-        layout={null}
-        capabilities={capabilities({ video: false })}
-        t={t}
-      />,
+      <CanvasView {...canvasViewProps(canvasWithVideo(), 'open', capabilities({ editor: true, video: false }))} />,
     )
     expect(html).toContain('video.generate')
     expect(html).toContain('data-unavailable="true"')
@@ -108,12 +125,7 @@ describe('Canvas feature-capability presentation', () => {
 
   it('does not mark the same Video node unavailable when Video is enabled', () => {
     const html = renderToStaticMarkup(
-      <WorkflowEditorShell
-        canvas={canvasWithVideo()}
-        layout={null}
-        capabilities={capabilities({ video: true })}
-        t={t}
-      />,
+      <CanvasView {...canvasViewProps(canvasWithVideo(), 'open', capabilities({ editor: true, video: true }))} />,
     )
     expect(html).toContain('video.generate')
     expect(html).not.toContain('data-unavailable="true"')
