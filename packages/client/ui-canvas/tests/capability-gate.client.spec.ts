@@ -9,7 +9,7 @@ import { apply, inject } from '../src/client/index.ts'
 const contexts: Context[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 function capabilities(enabled: boolean): CanvasCapabilities {
@@ -39,8 +39,15 @@ async function harness(get: () => Promise<unknown>) {
     register: () => () => {},
     bind: () => ((key: string) => key),
   } as never)
-  ctx.provide('remote', { canvasFeatures: { get } } as never)
+  ctx.provide('remote', {
+    canvasFeatures: {
+      get,
+      listNodes: async () => ({ ok: true, value: [] }),
+    },
+    canvas: {},
+  } as never)
   ctx.provide('remote.canvasFeatures', {} as never)
+  ctx.provide('remote.canvas', {} as never)
   const fiber = ctx.plugin({ inject, apply })
   await fiber.await()
   return { ctx, slots, fiber }
