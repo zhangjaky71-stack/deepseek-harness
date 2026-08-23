@@ -148,6 +148,34 @@ describe('ApiProxy detached projection read identity', () => {
     expect(seen.at(-1)).toBe(String(id))
   })
 
+  it('uses the exact persisted cut when an attached live Session advances past the served history page', async () => {
+    const { ctx, id, proxy, attach } = await harness()
+    const seen: Array<string | undefined> = []
+    let advanced = false
+    ctx.sessionProjections.registerReadGuard('detached-identity/value', (context) => {
+      seen.push(context.sessionId)
+      if (context.sessionId === undefined && !advanced) {
+        const live = attach()
+        live.append('detached-identity/set', { value: 'live-ahead' })
+        advanced = true
+      }
+      return context.sessionId === String(id)
+    })
+
+    const response = await proxy.sessions.history({
+      rpcId: RpcId('live-ahead-persisted-exact'),
+      payload: { sessionId: id },
+    })
+    expect(response.result.ok).toBe(true)
+    if (!response.result.ok) throw new Error('history unexpectedly failed')
+    expect(advanced).toBe(true)
+    expect(response.result.value.events.at(-1)?.event.seq).toBe(0)
+    expect(response.result.value.projections?.values['detached-identity/value'])
+      .toBe('visible-only-to-target')
+    expect(seen).toContain(undefined)
+    expect(seen.at(-1)).toBe(String(id))
+  })
+
   it('removes the whole detached projection baseline when the exact-identity recompute no longer matches the served log cut', async () => {
     const { ctx, id, proxy, triggerDrift } = await harness()
     ctx.sessionProjections.registerReadGuard('detached-identity/value', (context) => {
