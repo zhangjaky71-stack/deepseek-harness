@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import CanvasService, {
   CanvasFeatureError,
   CanvasVariantId,
@@ -20,6 +21,16 @@ const contexts: Context[] = []
 afterEach(async () => {
   while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
+
+class MemorySettings extends SettingsProvider {
+  private readonly doc: Record<string, unknown> = {}
+  get writable(): boolean { return true }
+  protected load(): Promise<Record<string, unknown>> { return Promise.resolve(structuredClone(this.doc)) }
+  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
+    this.doc[ns] = structuredClone(section)
+    return Promise.resolve()
+  }
+}
 
 function videoWorkflow(): MediaWorkflow {
   const video = WorkflowNodeId('video')
@@ -62,6 +73,7 @@ async function canvasHarness() {
   contexts.push(ctx)
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
+  await ctx.plugin(MemorySettings)
   await ctx.plugin(CanvasService)
   const agent = stubAgent(ctx, `canvas-feature-${Math.random()}`)
   ctx.agents.register(agent)
@@ -175,6 +187,7 @@ describe('Canvas deployment feature policy', () => {
   it('returns a detached read-only capability snapshot over the global Remote method', async () => {
     const ctx = new Context()
     contexts.push(ctx)
+    await ctx.plugin(MemorySettings)
     await ctx.plugin(CanvasFeatureService, { editor: { enabled: false }, history: { enabled: false } })
     const first = ctx.canvasFeatures.remoteExportGet()
     const second = ctx.canvasFeatures.remoteExportGet()

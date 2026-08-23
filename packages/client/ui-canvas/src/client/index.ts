@@ -1,7 +1,9 @@
-/** Browser Canvas plugin: dynamic main surface, graceful capability degradation, Remote mutations, and request-local interaction context. */
+/** Browser Canvas plugin: dynamic main surface, graceful capability degradation, Remote mutations, request-local interaction context, and deployment settings. */
 
 import type {
   CanvasCapabilities,
+  CanvasFeatureConfig,
+  CanvasFeatureName,
   CanvasInteractionDiscardReceipt,
   CanvasInteractionStageReceipt,
   CanvasLayoutMutationReceipt,
@@ -18,6 +20,8 @@ import type {} from '@deepseek-ai/dsh-canvas/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { CanvasSettingsSection } from './CanvasSettingsSection.tsx'
 import { CanvasView } from './CanvasView.tsx'
 import { CanvasInteractionStore } from './interaction-store.ts'
 import { buildCanvasInteractionContext } from './interaction.ts'
@@ -52,12 +56,35 @@ interface RemoteRoot {
   readonly canvas?: CanvasMutationRemote
 }
 
+const CANVAS_SETTINGS_NAMESPACE = 'canvas'
+
 export const inject = ['slots', 'sessions', 'locale', 'conversation']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-canvas: dictionaries')
   const modes = new CanvasModeStore()
   const interactions = new CanvasInteractionStore()
+
+  // Settings is optional for Canvas rendering and intentionally independent
+  // from `canvas.enabled`: a disabled deployment must still let a loopback
+  // user edit the next-start configuration. Binding waits for the transport
+  // services the settings scope resolves through the CALLER context.
+  ctx.inject(['settingsScope', 'connection', 'remote'], (settingsCtx) => {
+    const scope = settingsCtx.settingsScope.bind<CanvasFeatureConfig>({ namespace: CANVAS_SETTINGS_NAMESPACE })
+    const t = settingsCtx.locale.bind(NS)
+    settingsCtx.slots.inject('settings.section', () => settingsCtx.slots.register({
+      name: 'settings.section',
+      id: 'canvas',
+      order: 20,
+      label: () => t('settings.nav'),
+      locale: NS,
+      inject: () => ({
+        hooks: { settings: scope },
+        setFeature: (feature: CanvasFeatureName, enabled: boolean) => { void scope.set(feature, { enabled }) },
+        resetFeature: (feature: CanvasFeatureName) => { void scope.unset(feature) },
+      }),
+    }, CanvasSettingsSection))
+  })
 
   // Mode and interaction rows deliberately survive view remounts, but not a
   // Session leaving the client catalog or a plugin/HMR replacement.

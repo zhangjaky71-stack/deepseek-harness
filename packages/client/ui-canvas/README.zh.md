@@ -26,6 +26,14 @@ Browser 对部署级 Canvas capability 采取 fail-closed 策略。Plugin 会等
 
 Send-time Interaction Preparer 只会在 Canvas capability 已启用的 scope 内注册。`regionEdit.enabled=false` 时，如果 Browser-local store 中还残留旧 Region Selection，会在 stage 一条其它方面合法的 Prompt 前先剥掉 Region；Host 同时会独立拒绝直接携带 Region 的 stage 调用，因此 UI 过滤只是交互友好层，不是安全或 enforcement 边界。
 
+## 部署 Settings
+
+当 Harness Settings UI 存在时，`ui-canvas` 会独立绑定 durable `canvas` Settings namespace，并为全部 8 个部署 Feature Flag 贡献 Canvas Settings 区块。这个 Settings contribution 有意放在当前 `canvas.enabled` 产品面 scope 之外：即使当前 Host effective capability 为 `canvas.enabled=false`，Settings 区块仍然可见，用户因此可以为下一次 activation 重新开启 Canvas，而不会因为关闭产品面后连恢复开关也一起消失。
+
+Settings 编辑是 restart-applied configuration，不是 live capability channel。切换 checkbox 会通过 `SettingsScope.set()` 写入 user layer；**Reset** 使用 `SettingsScope.unset()` 删除该 user override，使值重新继承 composition/schema。当前 Canvas 产品面和 affordance 在本次 activation 内仍只服从 Host `remote.canvasFeatures` 的 effective snapshot。因此保存 checkbox 并不会让当前已关闭的 Host 假装 Canvas 或 Editor 已经生效；更新后的值会在 Host/Feature Service restart 或 remount 后生效。
+
+Settings 集成对 Canvas 渲染是可选依赖。若 `settingsScope` 或 Settings UI shell 不存在，则不贡献 Canvas Settings 区块；Capability-gated Canvas 渲染仍照旧只依赖 Host Feature Remote。
+
 ## Interaction Selection 与 Agent Turn
 
 N08 新增一套独立的 per-session Browser-local interaction store。Editor 的 Node/Edge card，以及 Minimal/Editor 的 Output Candidate 都可以被选择；后续 Region/Mask Editor 可以通过同一套 `CanvasRegionSelection` seam 接入。Selection 属于 presentation context，不是 Canvas Domain State：选择、清除或聚焦都不会 append Session Event、改变 Projection，也不会推进 Canvas revision。

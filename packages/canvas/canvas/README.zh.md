@@ -87,6 +87,10 @@ Remote failure 是显式边界。Typert Gateway 只保留声明过的 `TypertBus
 
 Authorization 与 deployment capability 相互独立。Authorization 回答 actor 是否有权执行；Feature Policy 回答当前部署是否提供该能力。`CanvasFeatureService` 拥有 Canvas/Editor/History/Video/Variants/Partial Run/Region Edit/Provider Fallback effective flag。历史值在 feature disabled 时仍保持可读；Flag 不改写 durable history。
 
+`CanvasFeatureService` 对 `ctx.settings` 有正式 activation dependency。激活时，它使用同一套 Feature Config schema 注册 durable `canvas` Settings namespace：Cordis/plugin entry config 作为 composition `base`，durable user Settings document 覆盖该 base，schema default 位于两者之下。该 namespace 声明 `applies: 'restart'`；Service 在本次 activation 中只调用一次 `scope.get()`，把结果冻结为 immutable effective capability snapshot。之后的 Settings 编辑会持久化，但不会 hot-mutate 当前 Host capability；Host restart 或 Feature Service remount 后会重新注册 namespace 并采样更新后的 durable layer。
+
+只读 `canvasFeatures` Remote 只暴露这份 effective capability snapshot。Raw composition/user Settings layer 与 secret metadata 都不会通过该 Remote 离开 Host。这样可以避免 Browser Settings 状态变成第二套 live capability authority，并保证一次 activation 内所有 Host consumer 读取同一个确定的 capability value。
+
 ## Validation Responsibilities
 
 Pure Domain Invariant 校验 value relationship；N02 Migration 校验 durable structural compatibility；N03/N04 Service + Session Invariant 负责 transition、commit、provenance、authorization boundary、current-write authority 和 durable-data safety；N10/N12 负责已安装 Node Definition 与 executability；N15/N16 负责 admission/Jobs/Retry/Cancel/Reconciler；N17/N21 负责物理 Image/Video asset persistence 与 authorized binary read；N23 负责 progress、logs、metrics、traces 和额外 diagnostic redaction。

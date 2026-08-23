@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
   assertCanvasFeatureEnabled,
@@ -23,6 +24,9 @@ declare module '@deepseek-ai/cordis' {
   interface Context { canvasFeatures: CanvasFeatureService }
 }
 
+/** Harness settings namespace owned by the Canvas deployment feature policy. */
+export const CANVAS_FEATURE_SETTINGS_NAMESPACE = 'canvas'
+const SETTINGS_NAMESPACE = settingsNamespace(CANVAS_FEATURE_SETTINGS_NAMESPACE)
 const toggle = (enabled: boolean) => z.object({ enabled: z.boolean().default(enabled) })
 
 type CatalogDefinition = {
@@ -38,8 +42,22 @@ type CatalogDefinition = {
 }
 interface MediaNodeCatalogSource { list(): readonly CatalogDefinition[] }
 
-/** Deployment feature policy shared by Canvas Host operations and Browser capability discovery. */
+/**
+ * Deployment feature policy shared by Canvas Host operations and Browser
+ * capability discovery. The settings service is an activation dependency so
+ * a Host never publishes a base-only capability snapshot and then mutates it
+ * when settings arrives later. The same Schemastery Config supplies schema
+ * defaults and validates both the Cordis composition base and the durable
+ * `canvas` user section.
+ *
+ * The namespace is `applies: restart`: this service samples the resolved value
+ * exactly once at activation. Later document edits are durable but do not
+ * rewrite the current capability surface. Restarting/remounting the service
+ * re-resolves the stored user layer over the composition base.
+ */
 export class CanvasFeatureService extends TypertRemoteService {
+  static inject = ['settings']
+
   static Config: z<CanvasFeatureConfig> = z.object({
     canvas: toggle(true), editor: toggle(true), history: toggle(true), video: toggle(false),
     variants: toggle(false), partialRun: toggle(false), regionEdit: toggle(false), providerFallback: toggle(false),
@@ -49,7 +67,12 @@ export class CanvasFeatureService extends TypertRemoteService {
 
   constructor(ctx: Context, config: CanvasFeatureConfig = {}) {
     super(ctx, 'canvasFeatures')
-    this.capabilities = resolveCanvasCapabilities(config)
+    const scope = ctx.settings.register(
+      SETTINGS_NAMESPACE,
+      CanvasFeatureService.Config,
+      { base: structuredClone(config), applies: 'restart' },
+    )
+    this.capabilities = resolveCanvasCapabilities(scope.get())
   }
 
   isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.capabilities, feature) }
@@ -60,7 +83,7 @@ export class CanvasFeatureService extends TypertRemoteService {
   }
   assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.capabilities, workflow) }
 
-  /** Browser-readable effective deployment capabilities. */
+  /** Browser-readable effective deployment capabilities; raw settings layers never cross this Remote. */
   @Remote('get')
   remoteExportGet(): CanvasCapabilities { return structuredClone(this.capabilities) }
 
