@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { AbstractApiClient } from '../src/fetch/client.ts'
 
 class PromptPreparationClient extends AbstractApiClient {
@@ -23,7 +24,7 @@ class PromptPreparationClient extends AbstractApiClient {
 }
 
 const payload = {
-  sessionId: 'session-preparation',
+  sessionId: SessionId('session-preparation'),
   mode: 'queue' as const,
   content: [{ type: 'text' as const, text: 'modify this' }],
 }

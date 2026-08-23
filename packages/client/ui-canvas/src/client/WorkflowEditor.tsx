@@ -1,6 +1,6 @@
 /** N11 workflow editor over Session Projection, atomic Host CAS, and independent layout persistence. */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
   CanvasCapabilities, CanvasNodeCatalogEntry, CanvasSnapshot, CurrentCanvasLayoutSnapshot, MediaWorkflow,
@@ -10,6 +10,11 @@ import type { PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CanvasInteractionSelection, CanvasLayoutWriteResult, CanvasViewInjected, CanvasWorkflowWriteResult } from '../types.ts'
 import { mergedLayoutPositions, toCanvasFlow } from './adapters.ts'
 import { commandFor, copySelection, createNodeDraft, deleteSelectionOperations, nodeDraftOperations, pasteClipboard } from './draft.ts'
+import {
+  reconcileLayoutReceipt,
+  reconcileProjectedLayoutRevision,
+  type CanvasLayoutRevisionClock,
+} from './layout-revision.ts'
 import { createCanvasEditorStore } from './store.ts'
 import { ConnectionPanel, type CanvasPortEndpoint } from './ConnectionPanel.tsx'
 import { NodeInspector } from './NodeInspector.tsx'
@@ -42,7 +47,22 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
   const saveStatus = useStore(state => state.saveStatus); const draft = useStore(state => state.draft); const undo = useStore(state => state.undo); const redo = useStore(state => state.redo); const clipboard = useStore(state => state.clipboard); const localPositions = useStore(state => state.localPositions)
   const selectedNodeId = interaction.selectedNodeIds[0]; const selectedNode = selectedNodeId === undefined ? undefined : workflow.nodes.find(node => node.id === selectedNodeId)
   const flow = toCanvasFlow(workflow, compatibleLayout, localPositions); const drag = useRef<DragState | null>(null)
-  const layoutRevision = useRef(compatibleLayout?.layoutRevision ?? 0)
+  const projectedLayoutRevision = compatibleLayout?.layoutRevision ?? 0
+  const layoutRevision = useRef<CanvasLayoutRevisionClock>({
+    canvasId: canvas.id,
+    workflowId: workflow.id,
+    revision: projectedLayoutRevision,
+  })
+  const syncLayoutRevision = useCallback(() => {
+    const next = reconcileProjectedLayoutRevision(
+      layoutRevision.current,
+      canvas.id,
+      workflow.id,
+      projectedLayoutRevision,
+    )
+    layoutRevision.current = next
+    return next.revision
+  }, [canvas.id, projectedLayoutRevision, workflow.id])
   const setFailure = useCallback((result: Exclude<CanvasWorkflowWriteResult | CanvasLayoutWriteResult, { ok: true }>) => { actions.setSaveStatus(result.status) }, [actions])
   const commitCommand = useCallback(async (command: ReturnType<typeof commandFor>, expectedRevision: number): Promise<CanvasWorkflowWriteResult> => {
     actions.setSaveStatus('saving'); const result = await props.commitOperations(command.forward, expectedRevision)
@@ -50,9 +70,9 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
     actions.recordCommand(command, result.workflowRevision); actions.setSaveStatus('saved'); return result
   }, [actions, props.commitOperations, setFailure])
 
-  useEffect(() => {
-    layoutRevision.current = compatibleLayout?.layoutRevision ?? 0
-  }, [canvas.id, compatibleLayout?.layoutRevision, workflow.id])
+  useLayoutEffect(() => {
+    syncLayoutRevision()
+  }, [syncLayoutRevision])
   useEffect(() => {
     if (selectedNodeId === undefined) { if (draft !== null) actions.setDraft(null); return }
     const refresh = draft === null || draft.nodeId !== selectedNodeId || (!draft.dirty && draft.baseWorkflowRevision !== canvas.workflowRevision)
@@ -71,17 +91,22 @@ export function WorkflowEditor(props: WorkflowEditorProps) {
   }, [actions, canvas.workflowRevision, commitCommand, draft, t, workflow])
 
   const persistPositions = useCallback(async (positions: SaveCanvasLayoutRequest['nodePositions']) => {
+    const canvasId = canvas.id
+    const workflowId = workflow.id
+    const expectedLayoutRevision = syncLayoutRevision()
     actions.setSaveStatus('saving')
     const result = await props.saveLayout({
-      canvasId: canvas.id,
-      workflowId: workflow.id,
-      expectedLayoutRevision: layoutRevision.current,
+      canvasId,
+      workflowId,
+      expectedLayoutRevision,
       nodePositions: positions,
     })
     if (!result.ok) { setFailure(result); return false }
-    layoutRevision.current = result.layoutRevision
+    const current = layoutRevision.current
+    if (current.canvasId !== canvasId || current.workflowId !== workflowId) return false
+    layoutRevision.current = reconcileLayoutReceipt(current, canvasId, workflowId, result.layoutRevision)
     actions.clearLocalPositions(); actions.setSaveStatus('saved'); return true
-  }, [actions, canvas.id, props.saveLayout, setFailure, workflow.id])
+  }, [actions, canvas.id, props.saveLayout, setFailure, syncLayoutRevision, workflow.id])
   const copy = useCallback(() => { actions.setClipboard(copySelection(workflow, interaction.selectedNodeIds, compatibleLayout) ?? null) }, [actions, compatibleLayout, interaction.selectedNodeIds, workflow])
   const paste = useCallback(async () => {
     if (clipboard === null) return

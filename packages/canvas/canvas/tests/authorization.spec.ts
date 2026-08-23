@@ -116,7 +116,7 @@ describe('Canvas Host authorization and audit', () => {
       human,
     )).toThrow(expect.objectContaining<Partial<CanvasServiceError>>({ code: 'CANVAS_PERMISSION_DENIED' }))
     expect(session.seq).toBe(before)
-    expect(ctx.canvas.get(agent)).toEqual(created)
+    expect(ctx.canvas.get(agent, human)).toEqual(created)
   })
 
   it('supports configurable run authorization with typed resource scope', async () => {

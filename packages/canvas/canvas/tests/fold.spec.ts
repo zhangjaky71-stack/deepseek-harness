@@ -83,10 +83,12 @@ describe('Canvas durable fold', () => {
   it('keeps historical run-complete replay compatible while current vocabulary uses run-update', () => {
     const state = emptyCanvasFoldState()
     applyCanvasChange(state, createChange())
-    if (state.canvas === null) throw new Error('expected Canvas')
-    applyCanvasChange(state, runStartChange(state.canvas))
-    if (state.canvas === null) throw new Error('expected run')
-    expect(() => applyCanvasChange(state, runCompleteChange(state.canvas))).not.toThrow()
+    const created = state.canvas
+    if (created === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(created))
+    const started = state.canvas
+    if (started === null) throw new Error('expected run')
+    expect(() => applyCanvasChange(state, runCompleteChange(started))).not.toThrow()
     expect(state.canvas?.run?.status).toBe('completed')
   })
 
@@ -151,16 +153,19 @@ describe('Canvas durable fold', () => {
   it('rejects reusing a run id anywhere in the Session, including after completion and clear/re-create', () => {
     const state = emptyCanvasFoldState()
     applyCanvasChange(state, createChange(CanvasId('canvas-a')))
-    if (state.canvas === null) throw new Error('expected Canvas')
-    applyCanvasChange(state, runStartChange(state.canvas, CanvasRunId('run-reused')))
-    if (state.canvas === null) throw new Error('expected run')
-    applyCanvasChange(state, runUpdateChange(state.canvas, 'completed'))
+    const firstCanvas = state.canvas
+    if (firstCanvas === null) throw new Error('expected Canvas')
+    applyCanvasChange(state, runStartChange(firstCanvas, CanvasRunId('run-reused')))
+    const firstRun = state.canvas
+    if (firstRun === null) throw new Error('expected run')
+    applyCanvasChange(state, runUpdateChange(firstRun, 'completed'))
     applyCanvasChange(state, {
       kind: 'canvas/change', version: 1, operation: 'clear', canvas: null, meta: { schemaVersion: 1 },
     })
     applyCanvasChange(state, createChange(CanvasId('canvas-b')))
-    if (state.canvas === null) throw new Error('expected second Canvas')
-    expect(() => applyCanvasChange(state, runStartChange(state.canvas, CanvasRunId('run-reused')))).toThrow(
+    const secondCanvas = state.canvas
+    if (secondCanvas === null) throw new Error('expected second Canvas')
+    expect(() => applyCanvasChange(state, runStartChange(secondCanvas, CanvasRunId('run-reused')))).toThrow(
       'cannot be reused',
     )
   })

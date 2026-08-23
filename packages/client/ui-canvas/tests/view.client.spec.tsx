@@ -22,14 +22,14 @@ function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 describe('Canvas Minimal surface', () => {
   it('RUNNING renders only the Cancel primary control and never Run', () => {
     const canvas = base({
       runRevision: 1,
-      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 },
+      run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 } as unknown as NonNullable<CanvasSnapshot['run']>,
     })
     const html = renderToStaticMarkup(<MinimalCanvas canvas={canvas} t={t} />)
     expect(html).toContain('data-canvas-action="cancel"')
@@ -44,12 +44,12 @@ describe('Canvas Minimal surface', () => {
       run: {
         id: 'run-old', status: 'completed', workflowId: workflow.id,
         workflowRevision: 1, startedAt: 2, finishedAt: 3,
-      },
+      } as unknown as NonNullable<CanvasSnapshot['run']>,
       output: {
         runId: 'run-old', workflowId: workflow.id, workflowRevision: 1,
         assets: [{ kind: 'video', video: { assetId: 'video-old', mediaType: 'video/mp4', bytes: 100 } }],
         primaryAssetIndex: 0,
-      },
+      } as unknown as NonNullable<CanvasSnapshot['output']>,
     })
     const html = renderToStaticMarkup(<MinimalCanvas canvas={canvas} t={t} />)
     expect(html).toContain('data-canvas-state="DIRTY_READY"')
