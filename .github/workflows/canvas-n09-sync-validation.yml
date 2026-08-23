@@ -1,0 +1,151 @@
+name: Canvas N09 sync validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  canvas-n09-sync:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n09-sync-trigger'
+    runs-on: ubuntu-24.04
+    env:
+      DSH_GATE_CONCURRENCY: '8'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n09-v2.2-settings-authority
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Merge validated N08 predecessor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/canvas-n08-v2.2-interaction-context fix/canvas-n09-v2.2-settings-authority
+          git merge --no-edit origin/fix/canvas-n08-v2.2-interaction-context
+          git diff --check
+          test -z "$(git ls-files -u)"
+          git merge-base --is-ancestor origin/fix/canvas-n08-v2.2-interaction-context HEAD
+          echo "DSH_ARCHIVE_BASE_REF=$(git rev-parse origin/fix/canvas-n08-v2.2-interaction-context)" >> "$GITHUB_ENV"
+          grep -Fq "static inject = ['settings']" packages/canvas/canvas/src/feature-service.ts
+          test -f packages/client/ui-canvas/src/client/CanvasSettingsSection.tsx
+          echo "N08->N09 merge and settings-authority assertions: PASS"
+
+      - name: Reconcile N09 workspace lock importers
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --lockfile-only --no-frozen-lockfile >/tmp/lock.log 2>&1 || { tail -n 180 /tmp/lock.log; exit 1; }
+          changed="$(git diff --numstat -- pnpm-lock.yaml | awk '{ print $1 + $2 }')"
+          test -n "$changed"
+          test "$changed" -le 40
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path('pnpm-lock.yaml').read_text()
+          def importer(name: str) -> str:
+              marker = f'  {name}:\n'
+              start = text.find(marker)
+              if start < 0:
+                  raise SystemExit(f'missing lock importer: {name}')
+              end = text.find('\n  packages/', start + len(marker))
+              return text[start:] if end < 0 else text[start:end]
+
+          host = importer('packages/canvas/canvas')
+          client = importer('packages/client/ui-canvas')
+          if "'@deepseek-ai/dsh-settings':" not in host:
+              raise SystemExit('dsh-settings missing from Canvas lock importer')
+          if "'@deepseek-ai/dsh-client-ui-settings':" not in client:
+              raise SystemExit('dsh-client-ui-settings missing from ui-canvas lock importer')
+          if host.count('specifier: workspace:^') < 1 or client.count('specifier: workspace:^') < 1:
+              raise SystemExit('expected workspace dependency specifier missing from N09 lock importers')
+          PY
+          git diff --check -- pnpm-lock.yaml
+          echo "N09 lock importer reconciliation: PASS (${changed} changed lines)"
+
+      - name: Install immutable workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 200 /tmp/install.log; exit 1; }
+          echo "Frozen workspace install: PASS"
+
+      - name: Run repository static gates
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! pnpm run check:ci:static >/tmp/static.log 2>&1; then
+            echo "=== STATIC GATE DIAGNOSTICS ==="
+            grep -E "FAIL|error|Error|generated|translation|Typert|lockfile|canvas|ui-canvas|settings" /tmp/static.log | tail -n 320 || true
+            echo "=== STATIC GATE TAIL ==="
+            tail -n 360 /tmp/static.log
+            exit 1
+          fi
+          tail -n 120 /tmp/static.log
+
+      - name: Validate Host build
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run build:lib:host >/tmp/host-build.log 2>&1 || { tail -n 300 /tmp/host-build.log; exit 1; }
+          echo "Host build: PASS"
+
+      - name: Validate Client build
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! pnpm run build:lib:client >/tmp/client-build.log 2>&1; then
+            echo "=== CLIENT BUILD DIAGNOSTICS ==="
+            grep -E "error TS[0-9]+|ERROR|Error:|ELIFECYCLE|ERR_PNPM|ui-canvas|settings" /tmp/client-build.log | tail -n 320 || true
+            echo "=== CLIENT BUILD TAIL ==="
+            tail -n 340 /tmp/client-build.log
+            exit 1
+          fi
+          echo "Client build: PASS"
+
+      - name: Run N09 focused and predecessor regressions
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            packages/canvas/canvas/tests/feature-settings.spec.ts \
+            packages/canvas/canvas/tests/features.spec.ts \
+            packages/canvas/canvas/tests/interaction-features.spec.ts \
+            packages/canvas/canvas/tests/interaction.spec.ts \
+            packages/canvas/canvas/tests/interaction-bridge.spec.ts \
+            packages/client/ui-canvas/tests/settings.client.spec.tsx \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/features.client.spec.tsx \
+            packages/client/ui-canvas/tests/interaction.client.spec.ts \
+            packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+            packages/bundle/base/tests/canvas-real-composition.spec.ts >/tmp/n09-tests.log 2>&1 || { tail -n 420 /tmp/n09-tests.log; exit 1; }
+          tail -n 180 /tmp/n09-tests.log
+
+      - name: Validate built package invariants
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run verify-built-package-invariants >/tmp/invariants.log 2>&1 || { tail -n 280 /tmp/invariants.log; exit 1; }
+          tail -n 120 /tmp/invariants.log
+
+      - name: Push only after all gates pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add pnpm-lock.yaml
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+          fi
+          git push origin HEAD:fix/canvas-n09-v2.2-settings-authority
