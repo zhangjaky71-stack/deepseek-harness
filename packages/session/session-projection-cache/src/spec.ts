@@ -28,17 +28,22 @@ export const checkpointRow = z.object({
 })
 
 /**
- * The stored-log identity a record is bound to: the immutable header fields
- * that distinguish one session lifecycle from another under the same id. A
- * session id names a slot, not a lifecycle — a deleted-then-recreated id, or
- * a persistence root swapped under a surviving cache, would otherwise let an
- * old row pass every watermark check and seed state folded from an unrelated
- * log. Reads validate this against the live header (listing) or the stored
- * header (cold read) before accepting any row.
+ * The stored-log identity a record is bound to: every immutable SessionHeader
+ * field except the SessionId, which is already the table key. A session id
+ * names a slot, not a lifecycle — a deleted-then-recreated id, changed seed
+ * lineage, or persistence root swapped under a surviving cache must not let an
+ * old row seed state folded from an unrelated log. Reads validate this witness
+ * against the live header (listing) or stored header (cold read).
  */
 export const checkpointIdentity = z.object({
+  version: z.number().int().nonnegative(),
   createdAt: z.number().int().nonnegative(),
   cwd: z.string().optional(),
+  parentSession: z.string().optional(),
+  seedLength: z.number().int().nonnegative().optional(),
+  origin: z.literal('subagent').optional(),
+  delegationDepth: z.number().int().nonnegative().optional(),
+  agentPreset: z.string().optional(),
 })
 
 /** The identity fields a record is bound to, inferred from {@link checkpointIdentity}. */
@@ -65,6 +70,6 @@ export type CheckpointRecord = z.infer<typeof checkpointRecord>
  */
 export const projectionCacheDomainSpec = defineDomain({
   name: 'session_projcache',
-  version: 3,
+  version: 4,
   tables: { sessions: domainTable<SessionId, CheckpointRecord>(checkpointRecord) },
 })
