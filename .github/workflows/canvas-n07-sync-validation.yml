@@ -32,7 +32,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin fix/canvas-n06-v2.2-remote-history fix/canvas-n07-v2.2-dynamic-surface
-          git merge --no-edit -X ours origin/fix/canvas-n06-v2.2-remote-history
+          git merge --no-edit -X ours origin/fix/canvas-n06-v2.2-remote-history >/tmp/merge.log 2>&1 || { cat /tmp/merge.log; exit 1; }
 
           # N06 made CanvasEditorState mutable for the store action draft. N07 adds
           # one new generation-owner field that must follow the same rule.
@@ -49,12 +49,13 @@ jobs:
           git merge-base --is-ancestor origin/fix/canvas-n06-v2.2-remote-history HEAD
           grep -Fq "PropsRuntime<'shell.main'>" packages/client/ui-canvas/src/client/CanvasView.tsx
           grep -Fq "'shell.main': { kind: 'single'; scope: 'session'" packages/client/ui-layout/src/client/index.ts
+          echo "N06->N07 merge and ownership assertions: PASS"
 
       - name: Reconcile N07 workspace lock importer
         shell: bash
         run: |
           set -euo pipefail
-          pnpm install --lockfile-only --no-frozen-lockfile
+          pnpm install --lockfile-only --no-frozen-lockfile >/tmp/lock.log 2>&1 || { tail -n 120 /tmp/lock.log; exit 1; }
 
           changed="$(git diff --numstat -- pnpm-lock.yaml | awk '{ print $1 + $2 }')"
           test -n "$changed"
@@ -76,36 +77,61 @@ jobs:
           PY
 
           git diff --check -- pnpm-lock.yaml
-          git diff --stat -- pnpm-lock.yaml
+          echo "N07 lock importer reconciliation: PASS (${changed} changed lines)"
 
       - name: Install immutable workspace
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 160 /tmp/install.log; exit 1; }
+          echo "Frozen workspace install: PASS"
 
       - name: Validate inherited Host build
-        run: pnpm run build:lib:host
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run build:lib:host >/tmp/host-build.log 2>&1 || { tail -n 220 /tmp/host-build.log; exit 1; }
+          echo "Host build: PASS"
 
       - name: Validate N07 Client build
-        run: pnpm run build:lib:client
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! pnpm run build:lib:client >/tmp/client-build.log 2>&1; then
+            echo "=== CLIENT BUILD DIAGNOSTICS ==="
+            grep -E "error TS[0-9]+|ERROR|Error:|ELIFECYCLE|ERR_PNPM|ui-canvas|ui-layout" /tmp/client-build.log | tail -n 240 || true
+            echo "=== CLIENT BUILD TAIL ==="
+            tail -n 260 /tmp/client-build.log
+            exit 1
+          fi
+          echo "Client build: PASS"
 
       - name: Run N07 focused regressions
-        run: >-
-          pnpm exec vitest run
-          packages/client/ui-canvas/tests/capability-gate.client.spec.ts
-          packages/client/ui-canvas/tests/client-bundle.client.spec.ts
-          packages/client/ui-canvas/tests/features.client.spec.tsx
-          packages/client/ui-canvas/tests/interaction.client.spec.ts
-          packages/client/ui-canvas/tests/mode-store.client.spec.ts
-          packages/client/ui-canvas/tests/store.client.spec.ts
-          packages/client/ui-canvas/tests/view.client.spec.tsx
-          packages/client/ui-canvas/tests/layout-revision.client.spec.ts
-          packages/client/ui-canvas/tests/state.client.spec.ts
-          packages/client/ui-layout/tests/app-frame.client.spec.tsx
-          packages/client/ui-layout/tests/apply.client.spec.ts
-          packages/client/ui-layout/tests/service.client.spec.ts
-          packages/bundle/base/tests/canvas-real-composition.spec.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+            packages/client/ui-canvas/tests/features.client.spec.tsx \
+            packages/client/ui-canvas/tests/interaction.client.spec.ts \
+            packages/client/ui-canvas/tests/mode-store.client.spec.ts \
+            packages/client/ui-canvas/tests/store.client.spec.ts \
+            packages/client/ui-canvas/tests/view.client.spec.tsx \
+            packages/client/ui-canvas/tests/layout-revision.client.spec.ts \
+            packages/client/ui-canvas/tests/state.client.spec.ts \
+            packages/client/ui-layout/tests/app-frame.client.spec.tsx \
+            packages/client/ui-layout/tests/apply.client.spec.ts \
+            packages/client/ui-layout/tests/service.client.spec.ts \
+            packages/bundle/base/tests/canvas-real-composition.spec.ts >/tmp/n07-tests.log 2>&1 || { tail -n 300 /tmp/n07-tests.log; exit 1; }
+          tail -n 80 /tmp/n07-tests.log
 
       - name: Validate built package invariants
-        run: pnpm run verify-built-package-invariants
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run verify-built-package-invariants >/tmp/invariants.log 2>&1 || { tail -n 240 /tmp/invariants.log; exit 1; }
+          tail -n 80 /tmp/invariants.log
 
       - name: Commit and push only after all gates pass
         shell: bash
