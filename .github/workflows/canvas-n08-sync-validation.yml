@@ -1,0 +1,95 @@
+name: Canvas N08 sync validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  canvas-n08-sync:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n08-sync-trigger'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n08-v2.2-interaction-context
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Merge validated N07 predecessor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/canvas-n07-v2.2-dynamic-surface fix/canvas-n08-v2.2-interaction-context
+          git merge --no-edit origin/fix/canvas-n07-v2.2-dynamic-surface
+          git diff --check
+          test -z "$(git ls-files -u)"
+          git merge-base --is-ancestor origin/fix/canvas-n07-v2.2-dynamic-surface HEAD
+          grep -Fq "CanvasInteractionBridge" packages/canvas/canvas/src/interaction-bridge.ts
+          grep -Fq "shell.main" packages/client/ui-canvas/src/client/CanvasView.tsx
+          echo "N07->N08 merge and ownership assertions: PASS"
+
+      - name: Install immutable workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 180 /tmp/install.log; exit 1; }
+          echo "Frozen workspace install: PASS"
+
+      - name: Validate inherited Host build
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run build:lib:host >/tmp/host-build.log 2>&1 || { tail -n 260 /tmp/host-build.log; exit 1; }
+          echo "Host build: PASS"
+
+      - name: Validate inherited Client build
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! pnpm run build:lib:client >/tmp/client-build.log 2>&1; then
+            echo "=== CLIENT BUILD DIAGNOSTICS ==="
+            grep -E "error TS[0-9]+|ERROR|Error:|ELIFECYCLE|ERR_PNPM|ui-canvas|canvas/src/interaction" /tmp/client-build.log | tail -n 260 || true
+            echo "=== CLIENT BUILD TAIL ==="
+            tail -n 280 /tmp/client-build.log
+            exit 1
+          fi
+          echo "Client build: PASS"
+
+      - name: Run N08 focused and predecessor regressions
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            packages/canvas/canvas/tests/interaction.spec.ts \
+            packages/canvas/canvas/tests/interaction-bridge.spec.ts \
+            packages/canvas/canvas/tests/interaction-features.spec.ts \
+            packages/client/ui-canvas/tests/interaction.client.spec.ts \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+            packages/bundle/base/tests/canvas-real-composition.spec.ts >/tmp/n08-tests.log 2>&1 || { tail -n 360 /tmp/n08-tests.log; exit 1; }
+          tail -n 140 /tmp/n08-tests.log
+
+      - name: Validate built package invariants
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run verify-built-package-invariants >/tmp/invariants.log 2>&1 || { tail -n 260 /tmp/invariants.log; exit 1; }
+          tail -n 100 /tmp/invariants.log
+
+      - name: Push only after all gates pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:fix/canvas-n08-v2.2-interaction-context
