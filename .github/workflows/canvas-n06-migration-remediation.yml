@@ -1,0 +1,84 @@
+name: Canvas N06 migration remediation
+
+on:
+  pull_request:
+    branches:
+      - fix/canvas-n06-v2.2-remote-history
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  migration-remediation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n06-v2.2-remote-history
+          fetch-depth: 0
+
+      - name: Restore validated migration baseline and add generation identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 95736457e971d9a1c07bc62c4b77845824cc2ad3:packages/canvas/canvas/src/migration.ts > packages/canvas/canvas/src/migration.ts
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('packages/canvas/canvas/src/migration.ts')
+          text = path.read_text()
+          old_keys = "new Set(['finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),"
+          new_keys = "new Set(['canvasId', 'finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),"
+          if text.count(old_keys) != 1:
+              raise SystemExit(f'history allowed-key anchor count={text.count(old_keys)}')
+          text = text.replace(old_keys, new_keys, 1)
+          old_return = "  return {\n    runId: CanvasRunId(nonEmptyString(source.runId, 'canvas-run-history.runId')),"
+          new_return = "  return {\n    canvasId: CanvasId(nonEmptyString(source.canvasId, 'canvas-run-history.canvasId')),\n    runId: CanvasRunId(nonEmptyString(source.runId, 'canvas-run-history.runId')),"
+          if text.count(old_return) != 1:
+              raise SystemExit(f'history return anchor count={text.count(old_return)}')
+          path.write_text(text.replace(old_return, new_return, 1))
+          PY
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify immutable install
+        run: pnpm install --frozen-lockfile
+
+      - name: Run N06 migration/history focused regressions
+        run: >-
+          pnpm exec vitest run
+          packages/canvas/canvas/tests/migration.spec.ts
+          packages/canvas/canvas/tests/history-index.spec.ts
+          packages/canvas/canvas/tests/history-authorization.spec.ts
+          packages/canvas/canvas/tests/remote.spec.ts
+
+      - name: Verify host build has no migration errors
+        shell: bash
+        run: |
+          set +e
+          pnpm run build:lib:host > /tmp/n06-host-build.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/n06-host-build.log
+          if grep -F 'packages/canvas/canvas/src/migration.ts' /tmp/n06-host-build.log; then
+            echo 'migration.ts still has host-build errors'
+            exit 1
+          fi
+          echo "host build exit=${status}; migration.ts is clean"
+
+      - name: Commit validated migration remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/canvas-n06-migration-remediation.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(canvas): restore validated migration decoder with history generation'
+          git push origin HEAD:fix/canvas-n06-v2.2-remote-history
