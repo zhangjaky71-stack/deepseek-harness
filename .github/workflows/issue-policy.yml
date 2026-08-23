@@ -25,3 +25,219 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/issue-management/policy.mjs pr
+
+  canvas-n06-final-stack:
+    name: Canvas N06 final-stack validation
+    if: github.event_name == 'pull_request' && github.head_ref == 'ci/canvas-n06-final-stack-trusted-trigger'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Check out N06 validation branch
+        uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n06-v2.2-remote-history
+          fetch-depth: 0
+
+      - name: Apply cross-node host-build hygiene fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: replacement count for {old!r} is {actual}, expected {count}')
+              file.write_text(text.replace(old, new, count))
+
+          interaction = 'packages/canvas/canvas/src/interaction.ts'
+          replace(
+              interaction,
+              "selectedNodeIds: selectedNodeIds as CanvasInteractionContext['selectedNodeIds']",
+              "selectedNodeIds: selectedNodeIds as NonNullable<CanvasInteractionContext['selectedNodeIds']>",
+          )
+          replace(
+              interaction,
+              "selectedEdgeIds: selectedEdgeIds as CanvasInteractionContext['selectedEdgeIds']",
+              "selectedEdgeIds: selectedEdgeIds as NonNullable<CanvasInteractionContext['selectedEdgeIds']>",
+          )
+
+          for path in [
+              'packages/canvas/canvas/tests/interaction-features.spec.ts',
+              'packages/canvas/media-workflow/tests/plugin-node.spec.ts',
+              'packages/canvas/media-workflow/tests/registry.spec.ts',
+          ]:
+              replace(path, 'await contexts.pop()!.dispose()', 'await contexts.pop()!.fiber.dispose()')
+
+          built = 'packages/canvas/media-workflow/tests/built-lib.e2e.ts'
+          replace(built, "const root = resolve(packageDir, '../../..')\n", '')
+
+          media_tsconfig = 'packages/canvas/media-workflow/tsconfig.json'
+          replace(media_tsconfig, '"outDir": "lib"', '"outDir": "lib/types"')
+
+          ui_canvas_tsdown = Path('packages/client/ui-canvas/tsdown.config.ts')
+          if ui_canvas_tsdown.exists():
+              raise SystemExit('packages/client/ui-canvas/tsdown.config.ts unexpectedly already exists')
+          ui_canvas_tsdown.write_text(
+              "import { clientBundle } from '../tsdown.client.ts'\n\n"
+              "export default clientBundle('@deepseek-ai/dsh-client-ui-canvas', ['lib/types/index.js', 'lib/types/invariant.js'])\n"
+          )
+
+          prompt = 'packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts'
+          file = Path(prompt)
+          text = file.read_text()
+          anchor = "import { describe, expect, it } from 'vitest'\n"
+          if text.count(anchor) != 1:
+              raise SystemExit(f'{prompt}: import anchor count={text.count(anchor)}')
+          text = text.replace(anchor, anchor + "import { SessionId } from '@deepseek-ai/dsh-session'\n", 1)
+          text = text.replace("sessionId: 'session-preparation',", "sessionId: SessionId('session-preparation'),", 1)
+          file.write_text(text)
+
+          real = 'packages/bundle/base/tests/canvas-real-composition.spec.ts'
+          replace(
+              real,
+              '''    "- id: invariants",
+    "  name: '@deepseek-ai/dsh-invariants'",
+''',
+              '',
+          )
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify immutable install
+        shell: bash
+        run: |
+          set +e
+          pnpm install --frozen-lockfile > /tmp/install.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== immutable install failure (tail) ==='
+            tail -n 120 /tmp/install.log
+            exit "$code"
+          fi
+          echo 'immutable install PASS'
+
+      - name: Run standalone hygiene regressions
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run \
+            packages/canvas/canvas/tests/interaction.spec.ts \
+            packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts \
+            > /tmp/standalone.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== standalone regression failure (tail) ==='
+            tail -n 160 /tmp/standalone.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/standalone.log
+
+      - name: Build host libraries
+        id: host_build
+        shell: bash
+        run: |
+          set +e
+          pnpm run build:lib:host > /tmp/host-build.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo '=== host build failure (tail) ==='
+            tail -n 180 /tmp/host-build.log
+            exit "$code"
+          fi
+          echo 'build:lib:host PASS'
+
+      - name: Run Canvas REAL Loader composition
+        id: canvas_real
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set +e
+          pnpm exec vitest run packages/bundle/base/tests/canvas-real-composition.spec.ts > /tmp/canvas-real.log 2>&1
+          code=$?
+          echo "CANVAS_REAL_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== Canvas REAL Loader failure (tail) ==='
+            tail -n 160 /tmp/canvas-real.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/canvas-real.log
+
+      - name: Run media-workflow built-LIB smoke
+        id: media_built
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set +e
+          source_file=packages/canvas/media-workflow/tests/built-lib.e2e.ts
+          tmp=packages/canvas/media-workflow/tests/built-lib.e2e.spec.ts
+          cp "$source_file" "$tmp"
+          trap 'rm -f "$tmp"' EXIT
+          pnpm exec vitest run "$tmp" > /tmp/media-built.log 2>&1
+          code=$?
+          echo "MEDIA_BUILT_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== media-workflow built-LIB failure (tail) ==='
+            tail -n 160 /tmp/media-built.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/media-built.log
+
+      - name: Run api-remotes built-LIB smoke
+        id: remotes_built
+        if: ${{ !cancelled() && steps.host_build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set +e
+          source_file=packages/api/remotes/tests/built-lib.e2e.ts
+          tmp=packages/api/remotes/tests/built-lib.e2e.spec.ts
+          cp "$source_file" "$tmp"
+          trap 'rm -f "$tmp"' EXIT
+          pnpm exec vitest run "$tmp" > /tmp/remotes-built.log 2>&1
+          code=$?
+          echo "REMOTES_BUILT_EXIT=$code"
+          if [ "$code" -ne 0 ]; then
+            echo '=== api-remotes built-LIB failure (tail) ==='
+            tail -n 160 /tmp/remotes-built.log
+            exit "$code"
+          fi
+          tail -n 12 /tmp/remotes-built.log
+
+      - name: Verify built package invariants
+        if: >-
+          ${{ !cancelled()
+          && steps.host_build.outcome == 'success'
+          && steps.canvas_real.outcome == 'success'
+          && steps.media_built.outcome == 'success'
+          && steps.remotes_built.outcome == 'success' }}
+        run: pnpm run verify-built-package-invariants
+
+      - name: Commit validated final-stack hygiene
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/canvas-n06-final-stack-hygiene.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            packages/bundle/base/tests/canvas-real-composition.spec.ts \
+            packages/canvas/canvas/src/interaction.ts \
+            packages/canvas/canvas/tests/interaction-features.spec.ts \
+            packages/canvas/media-workflow/tests/plugin-node.spec.ts \
+            packages/canvas/media-workflow/tests/registry.spec.ts \
+            packages/canvas/media-workflow/tests/built-lib.e2e.ts \
+            packages/canvas/media-workflow/tsconfig.json \
+            packages/client/ui-canvas/tsdown.config.ts \
+            packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
+          git diff --cached --check
+          git commit -m 'fix(canvas): clear host build blockers for N06 validation'
+          git push origin HEAD:fix/canvas-n06-v2.2-remote-history
