@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N07 predecessor sync validation. Do not merge.
-Attempt: 3 — Git-native conflict verification.
+Attempt: 4 — reconcile N07 ui-canvas lock importer, then frozen validation.
