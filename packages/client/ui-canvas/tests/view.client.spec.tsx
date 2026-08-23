@@ -1,7 +1,8 @@
+import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
-import { MinimalCanvas, WorkflowEditorShell } from '../src/client/CanvasView.tsx'
+import type { CanvasCapabilities, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import { CanvasView, MinimalCanvas } from '../src/client/CanvasView.tsx'
 
 const t = ((key: string) => key) as never
 const workflow = {
@@ -23,6 +24,36 @@ function base(overrides: Partial<CanvasSnapshot>): CanvasSnapshot {
     updatedAt: 1,
     ...overrides,
   } as CanvasSnapshot
+}
+
+const capabilities: CanvasCapabilities = {
+  canvas: { enabled: true }, editor: { enabled: true }, history: { enabled: true }, video: { enabled: false },
+  variants: { enabled: false }, partialRun: { enabled: false }, regionEdit: { enabled: false }, providerFallback: { enabled: false },
+}
+const interaction = { selectedNodeIds: [], selectedEdgeIds: [], selectedAssetRefs: [] } as const
+const editorState = { saveStatus: 'saved' as const, draft: null, undo: [], redo: [], clipboard: null, localPositions: {} }
+const actions = {
+  setSaveStatus: () => {}, setDraft: () => {}, setDraftName: () => {}, setDraftConfig: () => {},
+  markDraftClean: () => {}, recordCommand: () => {}, completeUndo: () => {}, completeRedo: () => {},
+  clearHistory: () => {}, setClipboard: () => {}, setLocalPosition: () => {}, mergeLocalPositions: () => {}, clearLocalPositions: () => {},
+}
+
+function editorProps(canvas: CanvasSnapshot): ComponentProps<typeof CanvasView> {
+  return {
+    useSession: selector => selector({ openState: 'open' } as never),
+    useProjection: (key: string) => key === 'canvas' ? canvas : null,
+    useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
+    useInteraction: (selector: (value: typeof interaction) => unknown) => selector(interaction),
+    useStore: (selector: (value: typeof editorState) => unknown) => selector(editorState),
+    actions,
+    capabilities,
+    nodeCatalog: [],
+    setMode: () => {}, selectNode: () => {}, selectNodes: () => {}, selectEdge: () => {}, selectEdges: () => {},
+    selectOutput: () => {}, setRegion: () => {}, clearSelection: () => {},
+    commitOperations: async () => ({ ok: true, workflowRevision: 1 }),
+    saveLayout: async () => ({ ok: true, layoutRevision: 1 }),
+    t,
+  } as unknown as ComponentProps<typeof CanvasView>
 }
 
 describe('Canvas view shells', () => {
@@ -57,11 +88,11 @@ describe('Canvas view shells', () => {
     expect(html).toContain('state.DIRTY_READY.body')
   })
 
-  it('Editor is a semantic workflow shell rather than a second Canvas state store', () => {
-    const canvas = base({})
-    const html = renderToStaticMarkup(<WorkflowEditorShell canvas={canvas} layout={null} t={t} />)
+  it('Editor renders the projected semantic workflow through the real editor path', () => {
+    const html = renderToStaticMarkup(<CanvasView {...editorProps(base({}))} />)
     expect(html).toContain('View workflow')
     expect(html).toContain('prompt')
-    expect(html).toContain('editor.placeholder')
+    expect(html).toContain('editor.shortcuts')
+    expect(html).not.toContain('editor.placeholder')
   })
 })
