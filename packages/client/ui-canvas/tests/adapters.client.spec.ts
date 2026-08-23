@@ -8,16 +8,16 @@ const workflow: MediaWorkflow = {
   id: 'workflow-1' as MediaWorkflow['id'],
   schemaVersion: 1,
   name: 'Flow',
-  nodes: [{ id: 'a' as WorkflowNodeId, type: 'prompt', nodeVersion: 1, name: 'Prompt', config: {} }],
+  nodes: [{ id: 'a' as WorkflowNodeId, type: 'prompt', nodeVersion: 2, name: 'Prompt', config: {} }],
   edges: [],
   outputNodeIds: [],
 }
 
 describe('Canvas graph adapter', () => {
-  it('prefers local drag position over persisted layout without modifying Domain data', () => {
+  it('keeps semantic type/version while preferring local layout without modifying Domain data', () => {
     const layout = { schemaVersion: 1, workflowId: workflow.id, nodePositions: { a: { x: 1, y: 2 } }, updatedAt: 1 } as never
     expect(toCanvasFlow(workflow, layout, { a: { x: 9, y: 8 } }).nodes[0]).toMatchObject({
-      id: 'a', label: 'Prompt', position: { x: 9, y: 8 },
+      id: 'a', type: 'prompt', nodeVersion: 2, label: 'Prompt', position: { x: 9, y: 8 },
     })
     expect(mergedLayoutPositions(workflow, layout, { a: { x: 9, y: 8 } })).toEqual({ a: { x: 9, y: 8 } })
     expect(workflow.nodes[0]).not.toHaveProperty('position')

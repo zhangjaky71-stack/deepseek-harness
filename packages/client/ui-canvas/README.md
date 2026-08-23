@@ -2,13 +2,13 @@
 
 English | [中文](README.zh.md)
 
-Browser-only Canvas product surface over the session-native Canvas domain. The plugin does not own the conversation session, composer, Canvas durability, deployment capability policy, layout shell, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`), while deployment capability comes from the read-only Host `canvasFeatures` Remote.
+Browser-only Canvas product surface over the session-native Canvas domain. The plugin does not own the conversation session, composer, Canvas durability, deployment capability policy, layout shell, media-node registry, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`), while deployment capability comes from the read-only Host `canvasFeatures` Remote.
 
 ## Surface contract
 
-The Canvas product surface is contributed to the generic session-scoped `shell.main` region. `ui-layout` only declares and arranges generic `shell.left` / `shell.main` / `shell.right` regions; it does not know Canvas Workflow, Run, Asset, Selection, Mode, or mutation state. `ui-conversation` remains the Conversation/Composer owner in `shell.right` and keeps its own `conversation.view` composition internally. Canvas therefore never needs to claim the Conversation view ring or create a second Composer.
+The Canvas product surface is contributed to the generic session-scoped `shell.main` region. `ui-layout` only declares and arranges generic `shell.left` / `shell.main` / `shell.right` regions; it does not know Canvas Workflow, Run, Asset, Selection, Mode, Draft, or mutation state. `ui-conversation` remains the Conversation/Composer owner in `shell.right` and keeps its own `conversation.view` composition internally. Canvas therefore never claims the Conversation view ring or creates a second Composer.
 
-The surface has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** shows a workflow-oriented shell with semantic node/edge counts, revision/layout information, and selectable node/edge cards; later editor nodes still own full visual DAG mutation.
+The surface has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** projects the semantic workflow through a renderer-neutral graph adapter and provides Node Library, node Inspector, validation, connection authoring, selection, atomic editing, undo/redo, copy/paste/delete, and independently persisted layout positions.
 
 Mode is browser-local per Session and never becomes a Session event. The person may switch Minimal/Editor without mutating Canvas state. The mode ledger has no Session-write or persistence dependency.
 
@@ -22,9 +22,11 @@ Write availability is intentionally separate from read rendering. Once Canvas is
 
 When Editor catalog discovery succeeds, the Host returns one `CanvasNodeCatalogSnapshot { revision, entries }`. `nodeCatalogRevision` is the exact process-local `ctx.mediaNodes` Registry revision that produced the loaded entries; the Browser preserves that Host value and never generates a local catalog revision or second Registry authority. If discovery fails, no revision is claimed. The revision identifies one snapshot within the current Host Registry lifetime only and must not be compared as a durable generation across Host restarts.
 
+Editor metadata lookup is exact by `(node.type, node.nodeVersion ?? 1)`. The Browser does not silently bind a historical v1 workflow node to an installed v2 definition with the same type. A historical node whose exact definition is no longer installed remains visible, but its Inspector is read-only and its ports are excluded from new connection authoring. The same read-only behavior applies when the exact definition exists but its deployment feature is disabled. The Node Library lists only Host-catalog definitions whose lifecycle is creatable, non-deprecated, and currently feature-enabled.
+
 `editor.enabled=false` makes the surface Minimal-only even if the browser-local mode store still contains `editor`; the mode switch is not rendered. The stored preference is not rewritten, so a later deployment that re-enables Editor can reuse normal local preference semantics without a Session mutation.
 
-Disabled feature data is not erased. In particular, a historical `video.generate` or `video.image-to-video` node remains visible in Editor when `video.enabled=false`, but is marked `Unavailable in this deployment`. Existing video output references also remain visible. This distinguishes “cannot use this capability now” from “the historical workflow/result no longer exists.”
+Disabled feature data is not erased. Existing workflow nodes and output references remain readable even when their creation/execution capability is disabled. This distinguishes “cannot use this capability now” from “the historical workflow/result no longer exists.”
 
 The send-time interaction preparer is registered only inside an enabled Canvas capability scope. `regionEdit.enabled=false` strips any stale browser-local region selection before staging an otherwise valid prompt; the Host independently rejects a direct region-bearing stage call, so UI filtering is an affordance rather than the security/enforcement boundary.
 
@@ -48,6 +50,20 @@ At the ordinary conversation send boundary, the Canvas plugin synchronously snap
 
 The Host later binds that RPC id to the exact admitted user-message id and, only when that message survives into `agent/pre-step`, places a logged Canvas plugin-context message immediately before it. The Browser-local selection itself is never durable; only the context text the model actually receives enters the Session log. This preserves the repository rule that model-visible content uses logged channels.
 
+## Workflow Editor authority
+
+The Editor never owns a durable Workflow copy. Every render starts from the current `canvas` Session Projection. Its declared session-scoped store contains only presentation state: one narrow selected-node Draft, save status, revision-fenced undo/redo commands, clipboard payload, and transient drag positions. Replacing the Canvas generation or workflow identity clears generation-bound Draft/history/layout presentation state before editing the new document.
+
+Inspector typing modifies only the local Draft. Typing is debounced for 450 ms, and blur uses the same save path for immediate commit. Both paths share an in-flight Draft identity so the same Draft is not submitted twice. A valid save derives the smallest semantic `WorkflowEditOperation[]` batch and sends it once with the Draft's exact `workflowRevision` CAS. A stale Draft becomes `Conflict`; transport/infrastructure failure remains `Offline` or `Save failed` and is never presented as `Saved`.
+
+Semantic edits are atomic Host mutations. Add node, rename/config edits, paste, delete, connect/disconnect, and output-node repair all flow through `canvas.editWorkflow`; the Browser does not directly rewrite the projected Workflow. Paste assigns fresh node/edge identities. Delete disconnects affected edges before removing nodes and repairs output selection in the same batch.
+
+Undo/Redo stores commands, not Workflow snapshots. Each accepted undo/redo is a new legal Host mutation against the revision produced by the previous accepted command, so history events are never rewritten. The current V1 `rename-node` wire contract cannot yet represent restoring an originally absent optional `name`; that exact clear/restore case is tracked as an N11 follow-up rather than hidden behind client-only state.
+
+Node dragging is presentation-local while the pointer moves. Pointer-up persists only `canvas/layout-change` with independent `layoutRevision` CAS; it does not advance `workflowRevision`. The renderer-neutral adapter keeps semantic node identity/type/version separate from position so a later XYFlow/React Flow renderer can replace the current positioned-card renderer without changing Domain storage.
+
+Port authoring is derived from the exact Host catalog definition for each durable node version. The connection panel offers only currently available installed ports, checks source/target media type before emitting a semantic `connect`, and never reconstructs a registry from current workflow contents.
+
 ## Product states
 
 The shell implements the same N01 product-state rules as the Host domain without value-importing Host Canvas code into the browser bundle:
@@ -65,11 +81,9 @@ The primary-control skeleton is deterministic: READY/COMPLETED/DIRTY_READY → R
 
 ## Projection and client boundary
 
-`@deepseek-ai/dsh-canvas/client` is consumed type-only for Canvas DTOs, capability DTOs, interaction DTOs, and the SessionProjectionMap declaration merge. The browser bundle owns small isomorphic product-state/interaction builders so it does not require Host-domain Canvas JavaScript at runtime. No client-side Canvas fold or feature-policy implementation exists: the Host computes whole projection values and effective deployment capabilities.
+`@deepseek-ai/dsh-canvas/client` is consumed type-only for Canvas DTOs, capability DTOs, interaction DTOs, and the SessionProjectionMap declaration merge. The browser bundle owns small isomorphic product-state/interaction/catalog builders so it does not require Host-domain Canvas JavaScript at runtime. No client-side Canvas fold, durable Workflow store, feature-policy implementation, or media-node registry exists: the Host computes whole projection values, effective deployment capabilities, and catalog metadata.
 
 Generated image/video bytes are not resolved by this shell yet. Result cards display durable media-reference metadata only; authorized media routes and richer previews belong to the asset/UI nodes that own those capabilities.
-
-`SaveStatus` remains a presentation skeleton fixed to `saved`. Draft ownership, debounce, autosave, conflict handling, and real saving/error transitions belong to the later editor-draft node.
 
 ## Model Experience
 
@@ -84,10 +98,10 @@ No standing prefix is added. Interaction context is turn-local user-role plugin 
 ## Known Limitations and Deferred Work
 
 - **No live Run/Retry/Cancel behavior** — controls are state-correct but disabled until media execution and cancellation exist on the Host.
-- **Editor selection is not DAG editing** — node/edge selection is shipped for deictic Agent context, while connection mutation, Inspector editing, undo/redo, and partial execution arrive later.
+- **Exact optional node-name clear/Undo needs a Host wire operation** — current V1 `rename-node` accepts a string and cannot restore field absence exactly; N11 does not fake this in browser state.
+- **Graph renderer remains renderer-neutral positioned cards** — semantic editing is implemented, while adopting XYFlow/React Flow can happen later without persisting renderer JSON or changing the Domain contract.
 - **Feature-gated future surfaces are not fabricated** — History/Variant/Partial Run/Provider Fallback have capability values now, but their future UI appears only with their owning implementation nodes.
 - **Region selection is a seam, not a visual mask editor** — the DTO/store path exists, but drawing masks/regions and inpaint/outpaint operations are later UI/workflow work.
 - **Media cards are metadata placeholders** — actual image/video rendering requires authorized asset delivery.
-- **Save status is static** — draft/autosave behavior is deferred; the UI still creates no second durable source.
 - **Mode and selection are intentionally local** — they survive only in the mounted browser client lifetime and are not synchronized through Session history; only model-visible context actually consumed by a turn is logged.
 - **Node catalog is activation-scoped, not live-subscribed** — N10 preserves exact Host revision identity for the loaded snapshot but does not poll or push Registry changes into an already-mounted Browser surface.
