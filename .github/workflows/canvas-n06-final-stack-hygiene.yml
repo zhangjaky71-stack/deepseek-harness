@@ -58,6 +58,14 @@ jobs:
           media_tsconfig = 'packages/canvas/media-workflow/tsconfig.json'
           replace(media_tsconfig, '"outDir": "lib"', '"outDir": "lib/types"')
 
+          ui_canvas_tsdown = Path('packages/client/ui-canvas/tsdown.config.ts')
+          if ui_canvas_tsdown.exists():
+              raise SystemExit('packages/client/ui-canvas/tsdown.config.ts unexpectedly already exists')
+          ui_canvas_tsdown.write_text(
+              "import { clientBundle } from '../tsdown.client.ts'\n\n"
+              "export default clientBundle('@deepseek-ai/dsh-client-ui-canvas', ['lib/types/index.js', 'lib/types/invariant.js'])\n"
+          )
+
           prompt = 'packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts'
           file = Path(prompt)
           text = file.read_text()
@@ -110,6 +118,7 @@ jobs:
             packages/canvas/media-workflow/tests/registry.spec.ts \
             packages/canvas/media-workflow/tests/built-lib.e2e.ts \
             packages/canvas/media-workflow/tsconfig.json \
+            packages/client/ui-canvas/tsdown.config.ts \
             packages/host/apiproxy/tests/fetch-client-prompt-preparation.spec.ts
           git diff --cached --check
           git commit -m 'fix(canvas): clear host build blockers for N06 validation'
