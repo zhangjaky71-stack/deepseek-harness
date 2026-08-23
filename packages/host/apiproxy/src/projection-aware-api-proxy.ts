@@ -68,12 +68,14 @@ async function exactTailProjectionBaseline(
 ): Promise<SessionProjectionsBlock | undefined> {
   const expectedEnd = pageEnd(entries)
   const live = ctx.sessions.get(sessionId)
-  if (live !== undefined) {
-    if (logEnd(live.events) !== expectedEnd) return undefined
+  if (live !== undefined && logEnd(live.events) === expectedEnd) {
     const registry = ctx.get('sessionProjections')
     return registry?.snapshot(live)
   }
 
+  // A live Session may have advanced after the core history page was built.
+  // That does not invalidate a persisted source that still represents the
+  // exact returned cut; authorize/fold that exact durable cut instead.
   const inspected = await inspectApiRemoteSession(ctx, sessionId)
   if (logEnd(inspected.events) !== expectedEnd) return undefined
   return detachedProjectionBaseline(ctx, sessionId, inspected.events)
