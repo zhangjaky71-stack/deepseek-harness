@@ -154,7 +154,7 @@ describe('Canvas authorization hardening', () => {
     const checkpoint = ctx.sessionProjections.checkpoint(agent.session)
     expect(checkpoint).toHaveProperty('canvas')
     expect(checkpoint).toHaveProperty('canvasLayout')
-    const beforeDetachedReads = policy.requests.length
+    const policyCallsBeforeDetachedViews = policy.requests.length
 
     const detached = ctx.sessionProjections.viewCheckpoint(checkpoint)
     expect(detached).not.toHaveProperty('canvas')
@@ -165,6 +165,6 @@ describe('Canvas authorization hardening', () => {
     expect(restored.snapshot.values).not.toHaveProperty('canvasLayout')
     expect(restored.checkpoint).toHaveProperty('canvas')
     expect(restored.checkpoint).toHaveProperty('canvasLayout')
-    expect(policy.requests).toHaveLength(beforeDetachedReads)
+    expect(policy.requests).toHaveLength(policyCallsBeforeDetachedViews)
   })
 })
