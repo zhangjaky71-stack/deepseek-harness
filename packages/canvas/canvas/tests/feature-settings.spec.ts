@@ -9,7 +9,7 @@ import CanvasFeatureService, { CANVAS_FEATURE_SETTINGS_NAMESPACE } from '../src/
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 class MemorySettings extends SettingsProvider {
