@@ -27,6 +27,9 @@
     - id: session
       name: '@deepseek-ai/dsh-session'
 
+    - id: invariants
+      name: '@deepseek-ai/dsh-invariants'
+
     - id: typert
       name: '@deepseek-ai/dsh-typert-registry'
 
@@ -145,6 +148,11 @@
     # Agent tools share one Session-backed authority and Projection source.
     - id: canvas
       name: '@deepseek-ai/dsh-canvas'
+
+    # Package-owned pre-commit/replay checks make the Canvas write permit a
+    # shipped invariant instead of a test-only convention.
+    - id: canvas-invariant
+      name: '@deepseek-ai/dsh-canvas/invariant'
 
     # Request-local Browser Canvas selection is staged separately from durable
     # Canvas state, then logged only when its exact correlated user prompt enters a step.

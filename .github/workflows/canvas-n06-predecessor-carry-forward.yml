@@ -1,0 +1,162 @@
+name: Canvas N06 predecessor carry-forward
+
+on:
+  pull_request:
+    branches:
+      - fix/canvas-n06-v2.2-remote-history
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  carry-forward:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n06-v2.2-remote-history
+          fetch-depth: 0
+
+      - name: Carry validated N05 predecessor contracts into N06
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/canvas-n05-v2.2-projection-layout
+          n05=FETCH_HEAD
+          for path in \
+            .agents/workplans/canvas-v2.1/implementations/N03.md \
+            .agents/workplans/canvas-v2.1/implementations/N04.md \
+            .agents/workplans/canvas-v2.1/implementations/N05.md \
+            packages/canvas/canvas/tests/authorization-hardening.spec.ts \
+            packages/canvas/canvas/tests/authorization.spec.ts \
+            packages/canvas/canvas/tests/features.spec.ts \
+            packages/canvas/canvas/tests/fold.spec.ts \
+            packages/canvas/canvas/tests/interaction-bridge.spec.ts \
+            packages/canvas/canvas/tests/invariant.spec.ts \
+            packages/canvas/canvas/tests/projection.spec.ts \
+            packages/canvas/canvas/tests/service.spec.ts \
+            packages/client/ui-canvas/src/client/WorkflowEditor.tsx \
+            packages/client/ui-canvas/src/client/layout-revision.ts \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/features.client.spec.tsx \
+            packages/client/ui-canvas/tests/layout-revision.client.spec.ts \
+            packages/client/ui-canvas/tests/view.client.spec.tsx \
+            packages/host/apiproxy/src/projection-aware-api-proxy.ts \
+            packages/host/apiproxy/tests/api-proxy-detached-projection-identity.spec.ts \
+            packages/session/session-projection-cache/src/index.ts \
+            packages/session/session-projection-cache/src/spec.ts \
+            packages/session/session-projection-cache/tests/cache.spec.ts \
+            packages/session/session-projection/tests/read-guards.spec.ts \
+            packages/session/session-projection/tests/registry.spec.ts \
+            pnpm-lock.yaml
+          do
+            git show "$n05:$path" > "$path"
+          done
+
+      - name: Merge predecessor contracts into N06-owned files
+        shell: python
+        run: |
+          from pathlib import Path
+
+          runtime = Path('packages/canvas/canvas/src/runtime.ts')
+          text = runtime.read_text()
+          old = """    if (sessionId === undefined) {\n      if (this.ctx.get('canvasAuthorization') !== undefined || this.authorizationMode === 'required-external') return false\n      const access = canvasBrowserAccess('detached-session')\n      return this.fallbackAuthorization.authorize({\n        permission: 'canvas.read',\n        actor: access.actor,\n        source: access.source,\n        sessionId: 'detached-session',\n        resource: this.projectionAuthorizationResource(value),\n      }).allowed\n    }\n"""
+          new = """    // Canvas read authorization is resource-aware and therefore requires the\n    // carrier's real Session identity. Detached generic projection views have\n    // no such identity and must fail closed rather than inventing one.\n    if (sessionId === undefined) return false\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'runtime detached projection replacement count={text.count(old)}')
+          runtime.write_text(text.replace(old, new, 1))
+
+          remote = Path('packages/canvas/canvas/tests/remote.spec.ts')
+          text = remote.read_text()
+          text = text.replace(
+              "import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'\n",
+              "import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'\nimport { withCanvasWritePermit } from '../src/write-authority.ts'\n",
+              1,
+          )
+          text = text.replace(
+              "  baseWorkflow,\n  runStartChange,\n",
+              "  baseWorkflow,\n  currentWriterChange,\n  runStartChange,\n",
+              1,
+          )
+          anchor = """function appendCompletedRun(ctx: Context, agent: Agent, id: string): void {\n"""
+          helper = """function appendCurrentChange(agent: Agent, change: ReturnType<typeof currentWriterChange>): void {\n  withCanvasWritePermit(agent.session, 'canvas/change', change, () => {\n    agent.session.append('canvas/change', change)\n  })\n}\n\n"""
+          if text.count(anchor) != 1:
+              raise SystemExit(f'remote append helper anchor count={text.count(anchor)}')
+          text = text.replace(anchor, helper + anchor, 1)
+          text = text.replace(
+              "  agent.session.append('canvas/change', runStartChange(before, CanvasRunId(id)))\n",
+              "  appendCurrentChange(agent, currentWriterChange(runStartChange(before, CanvasRunId(id))))\n",
+              1,
+          )
+          text = text.replace(
+              "  agent.session.append('canvas/change', runUpdateChange(queued, 'completed'))\n",
+              "  appendCurrentChange(agent, currentWriterChange(runUpdateChange(queued, 'completed')))\n",
+              1,
+          )
+          remote.write_text(text)
+
+          features = Path('packages/canvas/canvas/tests/features.spec.ts')
+          text = features.read_text()
+          old = """    expect(() => ctx.canvas.listRuns(agent)).toThrow(\n"""
+          new = """    expect(() => ctx.canvas.listRuns(agent, { canvasId: created.id })).toThrow(\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'features history request replacement count={text.count(old)}')
+          features.write_text(text.replace(old, new, 1))
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Reconcile N06 lockfile from validated N05 base
+        run: pnpm install --lockfile-only --ignore-scripts
+
+      - name: Verify immutable install
+        run: pnpm install --frozen-lockfile
+
+      - name: Run predecessor regression suite on N06
+        run: >-
+          pnpm exec vitest run
+          packages/canvas/canvas/tests/audit.spec.ts
+          packages/canvas/canvas/tests/authorization-hardening.spec.ts
+          packages/canvas/canvas/tests/authorization.spec.ts
+          packages/canvas/canvas/tests/invariant.spec.ts
+          packages/canvas/canvas/tests/interaction-bridge.spec.ts
+          packages/canvas/canvas/tests/service.spec.ts
+          packages/canvas/canvas/tests/projection.spec.ts
+          packages/canvas/canvas/tests/remote.spec.ts
+          packages/canvas/canvas/tests/features.spec.ts
+          packages/canvas/canvas/tests/fold.spec.ts
+          packages/canvas/canvas/tests/migration.spec.ts
+          packages/session/session-projection/tests/registry.spec.ts
+          packages/session/session-projection/tests/read-guards.spec.ts
+          packages/session/session-projection/tests/hmr.spec.ts
+          packages/session/session-projection-cache/tests/cache.spec.ts
+          packages/session/session-projection-cache/tests/read-identity.spec.ts
+          packages/host/apiproxy/tests/api-proxy-detached-projection-identity.spec.ts
+          packages/client/runtime/tests/projection-visibility.client.spec.ts
+          packages/client/ui-canvas/tests/adapters.client.spec.ts
+          packages/client/ui-canvas/tests/capability-gate.client.spec.ts
+          packages/client/ui-canvas/tests/draft.client.spec.ts
+          packages/client/ui-canvas/tests/features.client.spec.tsx
+          packages/client/ui-canvas/tests/interaction.client.spec.ts
+          packages/client/ui-canvas/tests/layout-revision.client.spec.ts
+          packages/client/ui-canvas/tests/mode-store.client.spec.ts
+          packages/client/ui-canvas/tests/state.client.spec.ts
+          packages/client/ui-canvas/tests/store.client.spec.ts
+          packages/client/ui-canvas/tests/view.client.spec.tsx
+
+      - name: Commit predecessor carry-forward to N06
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/canvas-n06-predecessor-carry-forward.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(canvas): carry validated N05 contracts into N06'
+          git push origin HEAD:fix/canvas-n06-v2.2-remote-history

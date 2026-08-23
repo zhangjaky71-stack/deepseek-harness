@@ -7,7 +7,6 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import CanvasService, {
   CanvasAuthorizationService,
-  CanvasHistoryQueryError,
   CanvasRunId,
 } from '@deepseek-ai/dsh-canvas'
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
@@ -141,38 +140,52 @@ describe('Canvas Typert Remote contract and history API', () => {
 
   it('pages newest-first by stable run-start Session cursor even when a later run is appended', async () => {
     const { ctx, agent } = await harness()
-    ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
     appendCompletedRun(ctx, agent, 'run-1')
     appendCompletedRun(ctx, agent, 'run-2')
     appendCompletedRun(ctx, agent, 'run-3')
 
-    const first = ctx.canvas.remoteExportListRuns(agent, { limit: 2 })
+    const first = ctx.canvas.remoteExportListRuns(agent, { canvasId: created.id, limit: 2 })
     expect(first.items.map(item => item.runId)).toEqual(['run-3', 'run-2'])
     if (first.nextCursor === undefined) throw new Error('expected a second history page')
 
     appendCompletedRun(ctx, agent, 'run-4')
-    const second = ctx.canvas.remoteExportListRuns(agent, { cursor: first.nextCursor, limit: 2 })
+    const second = ctx.canvas.remoteExportListRuns(agent, {
+      canvasId: created.id,
+      cursor: first.nextCursor,
+      limit: 2,
+    })
     expect(second.items.map(item => item.runId)).toEqual(['run-1'])
     expect(second.nextCursor).toBeUndefined()
 
-    expect(ctx.canvas.remoteExportGetRun(agent, { runId: CanvasRunId('run-2') })).toMatchObject({
+    expect(ctx.canvas.remoteExportGetRun(agent, {
+      canvasId: created.id,
+      runId: CanvasRunId('run-2'),
+    })).toMatchObject({
+      canvasId: created.id,
       runId: 'run-2',
       status: 'completed',
       workflowRevision: 1,
       outputs: [{ kind: 'video' }, { kind: 'video' }],
     })
-    expect(ctx.canvas.remoteExportGetRun(agent, { runId: CanvasRunId('missing') })).toBeNull()
+    expect(ctx.canvas.remoteExportGetRun(agent, {
+      canvasId: created.id,
+      runId: CanvasRunId('missing'),
+    })).toBeNull()
   })
 
   it('enforces bounded history pages and Host history-read authorization', async () => {
     const { ctx, agent } = await harness()
-    ctx.canvas.create(agent, { workflow: baseWorkflow() })
-    expect(() => ctx.canvas.remoteExportListRuns(agent, { limit: 101 })).toThrow(CanvasHistoryQueryError)
+    const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    expect(() => ctx.canvas.remoteExportListRuns(agent, { canvasId: created.id, limit: 101 })).toThrow(
+      expect.objectContaining({ code: 'CANVAS_INVALID_HISTORY_QUERY' }),
+    )
 
     const restricted = await harness({ permissions: { 'canvas.history.read': ['agent'] } })
-    restricted.ctx.canvas.create(restricted.agent, { workflow: baseWorkflow() })
-    expect(() => restricted.ctx.canvas.remoteExportListRuns(restricted.agent, { limit: 20 })).toThrow(
-      expect.objectContaining({ code: 'CANVAS_PERMISSION_DENIED' }),
-    )
+    const restrictedCanvas = restricted.ctx.canvas.create(restricted.agent, { workflow: baseWorkflow() })
+    expect(() => restricted.ctx.canvas.remoteExportListRuns(restricted.agent, {
+      canvasId: restrictedCanvas.id,
+      limit: 20,
+    })).toThrow(expect.objectContaining({ code: 'CANVAS_PERMISSION_DENIED' }))
   })
 })
