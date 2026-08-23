@@ -1,1 +1,2 @@
 Temporary trigger for repository-pinned N08 predecessor sync validation. Do not merge.
+Attempt: 2 — live SessionStore feature-policy fixture plus full gates.
