@@ -1,0 +1,39 @@
+name: Canvas N11 sync validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  canvas-n11-sync:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n11-sync-trigger'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n11-v2.2-editor-workspace
+          fetch-depth: 0
+
+      - name: Probe ordinary N10 predecessor merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/canvas-n10-v2.2-node-registry fix/canvas-n11-v2.2-editor-workspace
+          set +e
+          git merge --no-edit origin/fix/canvas-n10-v2.2-node-registry
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo 'N10->N11 ordinary merge conflict set:'
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          git merge-base --is-ancestor origin/fix/canvas-n10-v2.2-node-registry HEAD
+          test -z "$(git ls-files -u)"
+          echo 'N10->N11 ordinary merge: PASS (no conflicts)'
