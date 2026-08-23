@@ -1,6 +1,9 @@
 name: Canvas N06 final-stack hygiene
 
 on:
+  push:
+    branches:
+      - fix/canvas-n06-v2.2-remote-history
   pull_request:
     branches:
       - fix/canvas-n06-v2.2-remote-history
