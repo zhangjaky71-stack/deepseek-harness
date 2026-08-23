@@ -11,6 +11,7 @@ import CanvasService, {
   CanvasRunId,
 } from '@deepseek-ai/dsh-canvas'
 import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas'
+import { withCanvasWritePermit } from '../src/write-authority.ts'
 import {
   baseWorkflow,
   currentWriterChange,
@@ -60,11 +61,17 @@ function currentCanvas(ctx: Context, agent: Agent): CanvasSnapshot {
   return canvas
 }
 
+function appendCurrentChange(agent: Agent, change: ReturnType<typeof currentWriterChange>): void {
+  withCanvasWritePermit(agent.session, 'canvas/change', change, () => {
+    agent.session.append('canvas/change', change)
+  })
+}
+
 function appendCompletedRun(ctx: Context, agent: Agent, id: string): void {
   const before = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', currentWriterChange(runStartChange(before, CanvasRunId(id))))
+  appendCurrentChange(agent, currentWriterChange(runStartChange(before, CanvasRunId(id))))
   const queued = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', currentWriterChange(runUpdateChange(queued, 'completed')))
+  appendCurrentChange(agent, currentWriterChange(runUpdateChange(queued, 'completed')))
   currentCanvas(ctx, agent)
 }
 
@@ -113,7 +120,7 @@ describe('Canvas Typert Remote contract and history API', () => {
     if (event?.type !== 'canvas/change') throw new Error('expected Canvas change')
     expect(event.data.meta).toMatchObject({
       schemaVersion: 2,
-      actor: { kind: 'human', id: String(agent.id) },
+      actor: { kind: 'human', id: 'host-browser' },
       source: 'browser-remote',
     })
   })
