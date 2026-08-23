@@ -6,9 +6,14 @@ const A = 'session-a' as SessionId
 const B = 'session-b' as SessionId
 
 describe('Canvas UI-local mode store', () => {
-  it('defaults narrow sessions to Minimal and wide sessions to Editor', () => {
-    expect(new CanvasModeStore(() => true).faceOf(A).getSnapshot()).toBe('minimal')
-    expect(new CanvasModeStore(() => false).faceOf(A).getSnapshot()).toBe('editor')
+  it('uses viewport width only for the first per-session default', () => {
+    let narrow = true
+    const store = new CanvasModeStore(() => narrow)
+    expect(store.faceOf(A).getSnapshot()).toBe('minimal')
+    narrow = false
+    // Existing preference is stable; a new session samples the new viewport.
+    expect(store.faceOf(A).getSnapshot()).toBe('minimal')
+    expect(store.faceOf(B).getSnapshot()).toBe('editor')
   })
 
   it('keeps preferences per session and has no Session/Remote persistence dependency', () => {
@@ -29,5 +34,15 @@ describe('Canvas UI-local mode store', () => {
     store.faceOf(A).subscribe(listener)
     store.set(A, 'minimal')
     expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('prunes rows that leave the live Session catalog', () => {
+    const store = new CanvasModeStore(() => false)
+    store.set(A, 'minimal')
+    store.set(B, 'minimal')
+    store.prune(new Set([B]))
+    expect(store.faceOf(B).getSnapshot()).toBe('minimal')
+    // A was removed; recreating its row re-samples the wide default.
+    expect(store.faceOf(A).getSnapshot()).toBe('editor')
   })
 })

@@ -2,19 +2,23 @@
 
 English | [中文](README.zh.md)
 
-Browser-only Canvas conversation view over the session-native Canvas domain. The plugin does not own the conversation session, composer, Canvas durability, deployment capability policy, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`), while deployment capability comes from the read-only Host `canvasFeatures` Remote.
+Browser-only Canvas product surface over the session-native Canvas domain. The plugin does not own the conversation session, composer, Canvas durability, deployment capability policy, layout shell, or provider execution. Current Canvas and editor-layout state comes only from the standard Session Projection hook (`canvas` / `canvasLayout`), while deployment capability comes from the read-only Host `canvasFeatures` Remote.
 
 ## Surface contract
 
-The view has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** shows a workflow-oriented shell with semantic node/edge counts, revision/layout information, and selectable node/edge cards; N09 still deliberately stops before visual DAG mutation.
+The Canvas product surface is contributed to the generic session-scoped `shell.main` region. `ui-layout` only declares and arranges generic `shell.left` / `shell.main` / `shell.right` regions; it does not know Canvas Workflow, Run, Asset, Selection, Mode, or mutation state. `ui-conversation` remains the Conversation/Composer owner in `shell.right` and keeps its own `conversation.view` composition internally. Canvas therefore never needs to claim the Conversation view ring or create a second Composer.
+
+The surface has two presentation modes over the same projected Canvas. **Minimal** shows product state and generated output references without exposing workflow topology. **Editor** shows a workflow-oriented shell with semantic node/edge counts, revision/layout information, and selectable node/edge cards; later editor nodes still own full visual DAG mutation.
 
 Mode is browser-local per Session and never becomes a Session event. The person may switch Minimal/Editor without mutating Canvas state. The mode ledger has no Session-write or persistence dependency.
 
-The conversation composer remains resident because `ui-conversation` owns it outside the `conversation.view` ring. Switching Chat/Trajectory/Canvas changes the session body only; prompt entry remains the ordinary conversation composer rather than a Canvas-specific duplicate input.
+The ordinary Conversation Composer remains resident in the Conversation-owned `shell.right` surface. Canvas in `shell.main` uses that existing prompt path for Agent turns rather than exposing a Canvas-specific duplicate input.
 
 ## Deployment capabilities
 
-N09 makes the Browser fail closed on deployment capability. The plugin waits for generated `remote.canvasFeatures`, calls its global read-only `get()` method, and registers the `canvas` conversation view only when the returned effective `canvas.enabled` value is true. A missing Remote, business failure, transport failure, or plugin disposal before the query settles registers no Canvas tab. Capability discovery is not stored in Session state and does not become a second business-state authority.
+The Browser fails closed on deployment-level Canvas capability. The plugin waits for generated `remote.canvasFeatures`, calls its global read-only `get()` method, and contributes the Canvas `shell.main` surface only when the returned effective `canvas.enabled` value is true. A missing feature Remote, business failure, transport failure, or plugin disposal before the query settles publishes no Canvas main surface. Capability discovery is not stored in Session state and does not become a second business-state authority.
+
+Write availability is intentionally separate from read rendering. Once Canvas is enabled, the projected Minimal surface does not require `remote.canvas` mutation transport to remain visible. If mutation transport is absent or reconnecting, write operations return explicit offline/save outcomes instead of erasing the readable projection. If Editor is enabled but node-catalog discovery fails, Editor is disabled for that activation and the Minimal read surface remains available.
 
 `editor.enabled=false` makes the surface Minimal-only even if the browser-local mode store still contains `editor`; the mode switch is not rendered. The stored preference is not rewritten, so a later deployment that re-enables Editor can reuse normal local preference semantics without a Session mutation.
 

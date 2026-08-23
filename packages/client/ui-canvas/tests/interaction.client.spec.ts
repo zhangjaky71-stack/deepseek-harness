@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CanvasSnapshot, WorkflowNodeId } from '@deepseek-ai/dsh-canvas/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { CanvasInteractionStore } from '../src/client/interaction-store.ts'
-import { buildCanvasInteractionContext } from '../src/client/interaction.ts'
+import { buildCanvasInteractionContext, interactionForCanvas } from '../src/client/interaction.ts'
 
 const A = 'session-a' as SessionId
 const B = 'session-b' as SessionId
@@ -57,10 +57,17 @@ describe('Canvas interaction selection store', () => {
     expect(store.faceOf(B).getSnapshot().selectedNodeIds).toEqual([])
   })
 
-  it('anchors semantic selection to the workflow revision observed at click time', () => {
+  it('anchors semantic selection to the workflow revision and Canvas generation observed at click time', () => {
     const store = new CanvasInteractionStore()
     store.selectNode(A, snapshot(), 'node-a' as WorkflowNodeId)
-    const context = buildCanvasInteractionContext(store.faceOf(A).getSnapshot(), snapshot({ workflowRevision: 2 }), 'editor')
+    const selection = store.faceOf(A).getSnapshot()
+    expect(selection.anchor).toMatchObject({
+      canvasId: 'canvas-ui',
+      canvasCreatedAt: 1,
+      workflowId: 'workflow-ui',
+      workflowRevision: 1,
+    })
+    const context = buildCanvasInteractionContext(selection, snapshot({ workflowRevision: 2 }), 'editor')
     expect(context).toMatchObject({
       canvasId: 'canvas-ui',
       workflowId: 'workflow-ui',
@@ -83,6 +90,16 @@ describe('Canvas interaction selection store', () => {
       snapshot({ workflow: { ...workflow, id: 'other-workflow' as typeof workflow.id } }),
       'editor',
     )).toBeUndefined()
+  })
+
+  it('rejects clear/re-create even when Canvas/workflow/node ids are reused', () => {
+    const store = new CanvasInteractionStore()
+    const original = snapshot({ createdAt: 100, updatedAt: 100 })
+    store.selectNode(A, original, 'node-a' as WorkflowNodeId)
+    const replacement = snapshot({ createdAt: 200, updatedAt: 200 })
+    const selection = store.faceOf(A).getSnapshot()
+    expect(interactionForCanvas(selection, replacement).selectedNodeIds).toEqual([])
+    expect(buildCanvasInteractionContext(selection, replacement, 'editor')).toBeUndefined()
   })
 
   it('focuses candidate three with both durable asset and zero-based index two', () => {
@@ -108,6 +125,15 @@ describe('Canvas interaction selection store', () => {
     const context = buildCanvasInteractionContext(store.faceOf(A).getSnapshot(), next, 'minimal')
     expect(context?.focusedOutput).toBeUndefined()
     expect(context?.selectedAssetRefs).toEqual([assets[2]])
+  })
+
+  it('prunes presentation rows when their Session leaves the client catalog', () => {
+    const store = new CanvasInteractionStore()
+    store.selectNode(A, snapshot(), 'node-a' as WorkflowNodeId)
+    store.selectNode(B, snapshot(), 'node-a' as WorkflowNodeId)
+    store.prune(new Set([B]))
+    expect(store.faceOf(B).getSnapshot().selectedNodeIds).toEqual(['node-a'])
+    expect(store.faceOf(A).getSnapshot().selectedNodeIds).toEqual([])
   })
 
   it('omits interaction context when nothing is selected', () => {

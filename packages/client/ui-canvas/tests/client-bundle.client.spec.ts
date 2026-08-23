@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/** Built client artifact smoke: Host capabilities gate Canvas view registration. */
+/** Built client artifact smoke: Host capabilities gate the Canvas main-surface contribution. */
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -68,17 +68,21 @@ describe('ui-canvas built client artifact', () => {
     slots.register({
       name: 'root',
       children: {
-        'conversation.view': { kind: 'list', scope: 'session' },
+        'shell.main': { kind: 'single', scope: 'session' },
         'conversation.composer': { kind: 'chain', scope: 'session' },
       },
     }, (_p: { renderSlot?: unknown }) => null)
-    ctx.provide('sessions', { binding: () => ({ session: {} }) } as never)
+    ctx.provide('sessions', {
+      list: { getSnapshot: () => ({ ids: [], current: undefined }), subscribe: () => () => {} },
+      binding: () => ({ session: {} }),
+    } as never)
     ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
     ctx.provide('conversation', { registerPromptPreparation: () => () => {} } as never)
     ctx.provide('remote', {
-      canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }), listNodes: async () => ({ ok: true, value: [] }) },
-      canvas: {},
-      canvasInteraction: {},
+      canvasFeatures: {
+        get: async () => ({ ok: true, value: capabilities(canvasEnabled) }),
+        listNodes: async () => ({ ok: true, value: [] }),
+      },
     } as never)
     ctx.provide('remote.canvasFeatures', {} as never)
     ctx.provide('remote.canvas', {} as never)
@@ -100,17 +104,17 @@ describe('ui-canvas built client artifact', () => {
     expect(exports.inject).toEqual(['slots', 'sessions', 'locale', 'conversation'])
   })
 
-  it.skipIf(code === undefined)('registers Canvas only when the Host deployment enables it', async () => {
+  it.skipIf(code === undefined)('registers only the main Canvas surface when the Host deployment enables it', async () => {
     const { exports } = await loadArtifact()
     const enabled = await composed(exports, true)
-    expect(enabled.slots.entries('conversation.view').map(entry => entry.options.id)).toEqual(['canvas'])
+    expect(enabled.slots.entries('shell.main')).toHaveLength(1)
     expect(enabled.slots.entries('conversation.composer')).toHaveLength(enabled.beforeComposer)
     await enabled.fiber.dispose()
-    expect(enabled.slots.entries('conversation.view')).toHaveLength(0)
+    expect(enabled.slots.entries('shell.main')).toHaveLength(0)
     await enabled.ctx.fiber.dispose()
 
     const disabled = await composed(exports, false)
-    expect(disabled.slots.entries('conversation.view')).toHaveLength(0)
+    expect(disabled.slots.entries('shell.main')).toHaveLength(0)
     expect(disabled.slots.entries('conversation.composer')).toHaveLength(disabled.beforeComposer)
     await disabled.fiber.dispose()
     await disabled.ctx.fiber.dispose()

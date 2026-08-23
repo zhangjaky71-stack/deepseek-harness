@@ -34,7 +34,6 @@ const baselinesReady = { current: true }
 const SessionProviderStub: AppFrameProps['SessionProvider'] = ({ children, empty }) =>
   selectedSession.current === undefined ? <>{empty?.() ?? null}</> : <>{children(selectedSession.current)}</>
 
-
 /** Observer stub: captures the callback so tests can fire resizes manually. */
 let fireResize: (() => void) | null = null
 class ResizeObserverStub {
@@ -59,9 +58,9 @@ function mountFrame() {
   const renderSlot = ((key: string, owner: object) => {
     slotCalls.push({ key, props: owner })
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
-    if (key === 'conversation') return <div data-testid="center-content" />
+    if (key === 'shell.main') return <div data-testid="main-content" />
+    if (key === 'conversation') return <div data-testid="conversation-content" />
     if (key === 'details') return <div data-testid="details-content" />
-    if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
   const useSessions = ((sel: (s: SessionListState) => unknown) => {
@@ -144,33 +143,36 @@ describe('AppFrame', () => {
     expect(tracks(frame)).toEqual([280, 1280, 360])
   })
 
-  it('renders the session pair with empty owner shares (sessionId is framework-standard)', () => {
-    const { slotCalls, getByTestId, getByTitle } = mountFrame()
-    expect(getByTestId('center-content')).toBeTruthy()
+  it('renders a feature-neutral main slot beside the permanent conversation column', () => {
+    const { slotCalls, getByTestId, queryByTitle } = mountFrame()
+    expect(getByTestId('main-content')).toBeTruthy()
+    expect(getByTestId('conversation-content')).toBeTruthy()
     expect(getByTestId('details-content')).toBeTruthy()
-    expect(getByTitle('Infinite Canvas').getAttribute('src')).toBe('http://127.0.0.1:3000/')
+    expect(queryByTitle('Infinite Canvas')).toBeNull()
+    expect(document.querySelector('iframe[src="http://127.0.0.1:3000/"]')).toBeNull()
     const keys = slotCalls.map(c => c.key)
+    expect(keys).toContain('shell.main')
     expect(keys).toContain('conversation')
     expect(keys).toContain('details')
-    expect(keys).not.toContain('conversation.empty')
+    expect(slotCalls.find(c => c.key === 'shell.main')!.props).toEqual({})
     expect(slotCalls.find(c => c.key === 'conversation')!.props).toEqual({})
     expect(slotCalls.find(c => c.key === 'details')!.props).toEqual({})
   })
 
   it('keeps the conversation slot mounted while no session is current', () => {
-    // No current session: the session-maybe conversation shell owns the New
-    // Session view itself — the center column renders it unconditionally.
+    // No current session: the session-maybe conversation shell owns its Hero.
+    // The session-scoped main outlet remains in the tree but binds no occupant.
     selectedSession.current = undefined
     const { slotCalls, getByTestId } = mountFrame()
-    expect(getByTestId('center-content')).toBeTruthy()
+    expect(getByTestId('conversation-content')).toBeTruthy()
     expect(slotCalls.map(c => c.key)).toContain('conversation')
+    expect(slotCalls.map(c => c.key)).toContain('shell.main')
   })
 
-  it('renders both column occupants before baselines settle (no loading gate)', () => {
-    // No loading gate: a bare loading status reads worse than the shell's own
-    // pending rendering — both occupants mount from first paint.
+  it('renders main, conversation, and details outlets before baselines settle', () => {
     baselinesReady.current = false
     const { slotCalls } = mountFrame()
+    expect(slotCalls.map(c => c.key)).toContain('shell.main')
     expect(slotCalls.map(c => c.key)).toContain('conversation')
     expect(slotCalls.map(c => c.key)).toContain('details')
   })
@@ -325,7 +327,6 @@ describe('AppFrame — guard branches', () => {
     const { frame, instance } = mountFrame()
     const handle = frame.querySelectorAll('[class*="handle"]')[0]!
     const before = instance.getSnapshot().sidebar
-    // Move + up without a preceding pointerdown: hasPointerCapture is false.
     act(() => {
       handle.dispatchEvent(new PointerEvent('pointermove', { pointerId: 9, clientX: 500, bubbles: true }))
       vi.advanceTimersByTime(20)
@@ -339,8 +340,6 @@ describe('AppFrame — guard branches', () => {
     const handle = frame.querySelectorAll('[class*="handle"]')[0]!
     act(() => { handle.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 280, bubbles: true })) })
     act(() => {
-      // Two moves before the frame flushes: the second must ride the pending
-      // rAF (frame.current ??= guard), and the flush sees the latest x.
       handle.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 320, bubbles: true }))
       handle.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 340, bubbles: true }))
       vi.advanceTimersByTime(20)
@@ -355,7 +354,6 @@ describe('AppFrame — guard branches', () => {
     act(() => { handle.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 280, bubbles: true })) })
     act(() => {
       handle.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 360, bubbles: true }))
-      // No timer advance: the rAF is still pending when pointerup arrives.
       handle.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, clientX: 360, bubbles: true }))
     })
     expect(instance.getSnapshot().sidebar).toBe(360)
@@ -365,7 +363,6 @@ describe('AppFrame — guard branches', () => {
     const { frame } = mountFrame()
     frameWidth = 0
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
-    // Track template still reflects the last non-zero viewport.
     expect(frame.style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 360px')
   })
 })
@@ -374,9 +371,8 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
   it('cancels the pending rAF on unmount (no post-unmount setState)', () => {
     const { unmount } = mountFrame()
     frameWidth = 800
-    act(() => { fireResize?.() }) // rAF scheduled, NOT flushed
+    act(() => { fireResize?.() })
     unmount()
-    // Flushing after unmount must be a no-op (the frame was cancelled).
     expect(() => { vi.advanceTimersByTime(20) }).not.toThrow()
   })
 

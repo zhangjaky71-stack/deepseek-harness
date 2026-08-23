@@ -24,6 +24,7 @@ function anchorOf(canvas: CanvasSnapshot): CanvasInteractionAnchor | undefined {
   if (workflow === null) return undefined
   return {
     canvasId: canvas.id,
+    canvasCreatedAt: canvas.createdAt,
     workflowId: workflow.id,
     workflowRevision: canvas.workflowRevision,
   }
@@ -101,8 +102,18 @@ export class CanvasInteractionStore {
   /** Clear one Session's transient selection without affecting other Sessions. */
   clear(sessionId: SessionId): void { this.row(sessionId).set(EMPTY_SELECTION) }
 
-  /** Drop one Session row when an owning integration explicitly prunes it. */
+  /** Drop one Session row when its client-side Session lifetime ends. */
   delete(sessionId: SessionId): void { this.rows.delete(sessionId) }
+
+  /** Remove rows that no longer belong to the current Session catalog. */
+  prune(liveSessionIds: ReadonlySet<SessionId>): void {
+    for (const sessionId of this.rows.keys()) {
+      if (!liveSessionIds.has(sessionId)) this.rows.delete(sessionId)
+    }
+  }
+
+  /** Drop every row when the owning plugin fiber is disposed or replaced. */
+  clearAll(): void { this.rows.clear() }
 
   private row(sessionId: SessionId): SnapshotStore<CanvasInteractionSelection> {
     let row = this.rows.get(sessionId)

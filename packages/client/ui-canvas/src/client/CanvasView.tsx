@@ -1,35 +1,68 @@
-/** Canvas conversation view: Minimal result surface and N11 semantic Workflow Editor over one Projection. */
+/** Session-native Canvas main surface: Minimal result view and semantic Workflow Editor over one Projection. */
 
+import { useEffect } from 'react'
 import type { CanvasAssetRef, CanvasSnapshot, MediaWorkflow } from '@deepseek-ai/dsh-canvas/client'
-import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { InjectFace, PropsLocale, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { CanvasInteractionSelection, CanvasMode, CanvasSaveStatus, CanvasViewInjected } from '../types.ts'
 import { deriveCanvasPresentation } from './state.ts'
-import { createCanvasEditorStore } from './store.ts'
+import { interactionForCanvas } from './interaction.ts'
+import { createCanvasEditorStore, type CanvasEditorOwner } from './store.ts'
 import { WorkflowEditor } from './WorkflowEditor.tsx'
 import css from './CanvasView.module.css'
 
 type EditableCanvasSnapshot = CanvasSnapshot & { readonly workflow: MediaWorkflow }
-export type CanvasViewProps = ConvViewProps & InjectFace<CanvasViewInjected> & PropsLocale<'canvas'> & PropsStore<ReturnType<typeof createCanvasEditorStore>>
+export type CanvasViewProps = PropsRuntime<'shell.main'> & InjectFace<CanvasViewInjected> & PropsLocale<'canvas'> & PropsStore<ReturnType<typeof createCanvasEditorStore>>
 function hasWorkflow(canvas: CanvasSnapshot | null): canvas is EditableCanvasSnapshot { return canvas !== null && canvas.workflow !== null }
 
+function editorOwnerOf(canvas: CanvasSnapshot | null | undefined): CanvasEditorOwner | null | undefined {
+  if (canvas === undefined) return undefined
+  if (!hasWorkflow(canvas)) return null
+  return { canvasId: canvas.id, canvasCreatedAt: canvas.createdAt, workflowId: canvas.workflow.id }
+}
+
+function sameEditorOwner(left: CanvasEditorOwner | null, right: CanvasEditorOwner | null): boolean {
+  if (left === null || right === null) return left === right
+  return left.canvasId === right.canvasId
+    && left.canvasCreatedAt === right.canvasCreatedAt
+    && left.workflowId === right.workflowId
+}
+
 export function CanvasView({
-  useSession, useProjection, useMode, useInteraction, useStore, actions, capabilities, nodeCatalog, setMode,
+  useSession, useProjection, useMode, useInteraction, useStore, actions, capabilities, editorReady, nodeCatalog, setMode,
   selectNode, selectNodes, selectEdge, selectOutput, clearSelection, commitOperations, saveLayout, t,
 }: CanvasViewProps) {
   const projectedCanvas = useProjection('canvas')
   const layout = useProjection('canvasLayout')
   const openState = useSession(session => session.openState)
   const mode = useMode(value => value)
-  const interaction = useInteraction(value => value)
+  const rawInteraction = useInteraction(value => value)
+  const interaction = interactionForCanvas(rawInteraction, projectedCanvas)
+  const editorOwner = useStore(state => state.owner)
   const saveStatus = useStore(state => state.saveStatus)
-  const effectiveMode: CanvasMode = capabilities.editor.enabled ? mode : 'minimal'
+  const projectedOwner = editorOwnerOf(projectedCanvas)
+  const ownerReady = projectedOwner !== undefined && sameEditorOwner(editorOwner, projectedOwner)
+  const editorAvailable = capabilities.editor.enabled && editorReady
+  const effectiveMode: CanvasMode = editorAvailable ? mode : 'minimal'
+
+  useEffect(() => {
+    if (projectedOwner === undefined || sameEditorOwner(editorOwner, projectedOwner)) return
+    actions.resetGeneration(projectedOwner)
+  }, [actions, editorOwner, projectedOwner])
+
+  // Release a stale selection after clear/re-create or workflow replacement. The
+  // pure read path already masks it synchronously, so no stale frame is rendered.
+  useEffect(() => {
+    if (rawInteraction.anchor !== undefined && interaction !== rawInteraction && projectedCanvas !== undefined) clearSelection()
+  }, [clearSelection, interaction, projectedCanvas, rawInteraction])
+
   return <section className={css.root} aria-label={t('view.canvas')}>
     <div className={css.toolbar}>
-      {capabilities.editor.enabled && <div className={css.modeSwitch} role="group" aria-label={t('mode.aria')}>
+      {editorAvailable && <div className={css.modeSwitch} role="group" aria-label={t('mode.aria')}>
         <button type="button" className={effectiveMode === 'minimal' ? css.modeActive : css.modeButton} aria-pressed={effectiveMode === 'minimal'} onClick={() => { setMode('minimal') }}>{t('mode.minimal')}</button>
         <button type="button" className={effectiveMode === 'editor' ? css.modeActive : css.modeButton} aria-pressed={effectiveMode === 'editor'} onClick={() => { setMode('editor') }}>{t('mode.editor')}</button>
       </div>}
+      {capabilities.editor.enabled && !editorReady && <span className={css.saveStatus}>{t('editor.catalogUnavailable')}</span>}
       <SaveStatus status={saveStatus} t={t} />
     </div>
     {projectedCanvas === undefined
@@ -38,9 +71,13 @@ export function CanvasView({
         ? <MinimalCanvas canvas={projectedCanvas} interaction={interaction} onSelectOutput={selectOutput} t={t} />
         : !hasWorkflow(projectedCanvas)
           ? <div className={css.loading}>{t('editor.noWorkflow')}</div>
-          : <WorkflowEditor canvas={projectedCanvas} layout={layout ?? null} capabilities={capabilities} nodeCatalog={nodeCatalog} interaction={interaction}
-              onSelectNode={selectNode} onSelectNodes={selectNodes} onSelectEdge={selectEdge} onClearSelection={clearSelection}
-              commitOperations={commitOperations} saveLayout={saveLayout} useStore={useStore} actions={actions} t={t} />}
+          : !ownerReady
+            ? <div className={css.loading} role="status">{t('editor.preparing')}</div>
+            : layout === undefined
+              ? <div className={css.loading} role="status">{t('projection.layoutLoading')}</div>
+              : <WorkflowEditor canvas={projectedCanvas} layout={layout} capabilities={capabilities} nodeCatalog={nodeCatalog} interaction={interaction}
+                  onSelectNode={selectNode} onSelectNodes={selectNodes} onSelectEdge={selectEdge} onClearSelection={clearSelection}
+                  commitOperations={commitOperations} saveLayout={saveLayout} useStore={useStore} actions={actions} t={t} />}
   </section>
 }
 
