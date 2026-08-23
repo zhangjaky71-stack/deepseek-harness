@@ -1,5 +1,7 @@
 # Agent Note: Canvas V2.2 node registry revision identity
 
+[English](2026-08-22-canvas-v2-2-node-registry-revision.md) | 中文
+
 Status: implemented
 
 ## Problem
