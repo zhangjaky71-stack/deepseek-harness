@@ -8,10 +8,11 @@ import CanvasService, {
   CanvasVariantId,
   MediaWorkflowId,
   WorkflowNodeId,
+  canvasBrowserAccess,
   createMediaWorkflow,
   resolveCanvasCapabilities,
 } from '@deepseek-ai/dsh-canvas'
-import type { CanvasAccessContext, MediaWorkflow } from '@deepseek-ai/dsh-canvas'
+import type { MediaWorkflow } from '@deepseek-ai/dsh-canvas'
 import CanvasFeatureService from '../src/feature-service.ts'
 import { baseWorkflow, workflowRef } from './canvas-fixtures.ts'
 
@@ -65,11 +66,6 @@ async function canvasHarness() {
   const agent = stubAgent(ctx, `canvas-feature-${Math.random()}`)
   ctx.agents.register(agent)
   return { ctx, agent }
-}
-
-const browserAccess: CanvasAccessContext = {
-  actor: { kind: 'human', id: 'browser-user' },
-  source: 'browser-remote',
 }
 
 describe('Canvas deployment feature policy', () => {
@@ -139,7 +135,7 @@ describe('Canvas deployment feature policy', () => {
       agent,
       workflowRef(created),
       [{ op: 'rename-workflow', name: 'Browser denied' }],
-      browserAccess,
+      canvasBrowserAccess(String(agent.session.id)),
     )).toThrow(expect.objectContaining<Partial<CanvasFeatureError>>({ feature: 'editor' }))
     expect(agent.session.seq).toBe(beforeBrowser)
 
