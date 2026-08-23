@@ -44,4 +44,16 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Run one-shot N06 final-stack validator
-        run: bash .github/canvas-n06-final-stack-validate.sh
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/canvas-n06-final-stack-validate.sh')
+          text = path.read_text()
+          old = "{presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}"
+          new = "{presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} {...(interaction === undefined ? {} : { interaction })} {...(onSelectOutput === undefined ? {} : { onSelectOutput })} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}"
+          if text.count(old) != 1:
+              raise SystemExit(f'validator exact-optional patch anchor count={text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          bash .github/canvas-n06-final-stack-validate.sh
