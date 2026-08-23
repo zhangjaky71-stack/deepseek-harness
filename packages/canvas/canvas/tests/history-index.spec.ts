@@ -1,11 +1,12 @@
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
-import { CanvasRunId } from '@deepseek-ai/dsh-canvas'
+import { CanvasRunId, type CanvasChange } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
 import { buildCanvasRunHistoryIndex } from '../src/history.ts'
 import { withCanvasWritePermit } from '../src/write-authority.ts'
 import {
   createChange,
+  currentWriterChange,
   runStartChange,
   runUpdateChange,
 } from './canvas-fixtures.ts'
@@ -16,9 +17,9 @@ async function liveSession(rawId: string) {
   return { ctx, session: ctx.sessions.create(SessionId(rawId)) }
 }
 
-function appendCanvasChange(session: Session, change: unknown): void {
+function appendCanvasChange(session: Session, change: CanvasChange): void {
   withCanvasWritePermit(session, 'canvas/change', change, () => {
-    session.append('canvas/change', change as never)
+    session.append('canvas/change', change)
   })
 }
 
@@ -26,12 +27,12 @@ describe('CanvasRunHistoryIndex', () => {
   it('fails loud when Session history updates a run before run-start', async () => {
     const { ctx, session } = await liveSession('history-missing-start')
     try {
-      const created = createChange()
+      const created = currentWriterChange(createChange())
       appendCanvasChange(session, created)
       if (created.canvas === null) throw new Error('expected created Canvas')
-      const started = runStartChange(created.canvas, CanvasRunId('run-missing-start'))
+      const started = currentWriterChange(runStartChange(created.canvas, CanvasRunId('run-missing-start')))
       if (started.canvas === null) throw new Error('expected started Canvas')
-      const completed = runUpdateChange(started.canvas, 'completed')
+      const completed = currentWriterChange(runUpdateChange(started.canvas, 'completed'))
       appendCanvasChange(session, completed)
 
       expect(() => buildCanvasRunHistoryIndex(session.events)).toThrow(
@@ -45,16 +46,16 @@ describe('CanvasRunHistoryIndex', () => {
   it('supports one rebuild followed by incremental apply and generation-scoped lookup', async () => {
     const { ctx, session } = await liveSession('history-incremental')
     try {
-      const created = createChange()
+      const created = currentWriterChange(createChange())
       appendCanvasChange(session, created)
       if (created.canvas === null) throw new Error('expected created Canvas')
 
       const index = buildCanvasRunHistoryIndex(session.events)
-      const started = runStartChange(created.canvas, CanvasRunId('run-incremental'))
+      const started = currentWriterChange(runStartChange(created.canvas, CanvasRunId('run-incremental')))
       appendCanvasChange(session, started)
       index.apply(session.events.at(-1)!)
       if (started.canvas === null) throw new Error('expected started Canvas')
-      const completed = runUpdateChange(started.canvas, 'completed')
+      const completed = currentWriterChange(runUpdateChange(started.canvas, 'completed'))
       appendCanvasChange(session, completed)
       index.apply(session.events.at(-1)!)
 
