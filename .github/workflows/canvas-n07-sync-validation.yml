@@ -37,36 +37,22 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          # The store action reducer mutates these fields. N06 removed readonly from
-          # the existing fields; N07 added owner and must preserve that reducer shape.
           store = Path('packages/client/ui-canvas/src/client/store.ts')
           text = store.read_text()
           for field in ('owner', 'saveStatus', 'draft', 'undo', 'redo', 'clipboard', 'localPositions'):
               text = text.replace(f'  readonly {field}:', f'  {field}:')
           store.write_text(text)
 
-          # Carry forward the verified Cordis/SlotRegistry test-fixture API changes,
-          # while keeping N07's shell.main ownership and optional mutation Remote.
           capability = Path('packages/client/ui-canvas/tests/capability-gate.client.spec.ts')
           text = capability.read_text()
           text = text.replace('while (contexts.length > 0) await contexts.pop()!.dispose()', 'while (contexts.length > 0) await contexts.pop()!.fiber.dispose()')
-          old_register = """  slots.register({
-    name: 'root',
-    children: { 'shell.main': { kind: 'single', scope: 'session' } },
-  }, () => null)"""
-          new_register = """  slots.register({
-    name: 'root',
-    children: { 'shell.main': { kind: 'single', scope: 'session' } },
-    inject: () => ({}),
-  }, (_p: { renderSlot?: unknown }) => null)"""
+          old_register = "  slots.register({\n    name: 'root',\n    children: { 'shell.main': { kind: 'single', scope: 'session' } },\n  }, () => null)"
+          new_register = "  slots.register({\n    name: 'root',\n    children: { 'shell.main': { kind: 'single', scope: 'session' } },\n    inject: () => ({}),\n  }, (_p: { renderSlot?: unknown }) => null)"
           if old_register in text:
               text = text.replace(old_register, new_register, 1)
           elif new_register not in text:
               raise SystemExit('capability-gate: shell.main root fixture shape not recognized')
-          text = text.replace(
-              '(entry!.inject as (sessionId: never) => CanvasViewInjected)',
-              '(entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)',
-          )
+          text = text.replace('(entry!.inject as (sessionId: never) => CanvasViewInjected)', '(entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)')
           capability.write_text(text)
 
           bundle = Path('packages/client/ui-canvas/tests/client-bundle.client.spec.ts')
@@ -75,21 +61,12 @@ jobs:
           text = text.replace('await disabled.ctx.dispose()', 'await disabled.ctx.fiber.dispose()')
           bundle.write_text(text)
 
-          # N07 owns the real WorkflowEditor fixture. Remove a predecessor-only
-          # capability parameter if the three-way merge retained it, and preserve
-          # the branded CanvasSnapshot test cast via an explicit unknown boundary.
           features = Path('packages/client/ui-canvas/tests/features.client.spec.tsx')
           text = features.read_text()
           text = text.replace("  resolvedCapabilities: CanvasCapabilities = capabilities({ editor: false }),\n", '')
-          text = text.replace(
-              "  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }",
-              "  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }",
-          )
+          text = text.replace("  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }", "  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }")
           features.write_text(text)
 
-          # N07 deliberately tests Minimal as result/state-only. If the merge pulled
-          # in N06's predecessor editorProps helper without its imports, drop that
-          # dead helper rather than reintroducing the predecessor Editor assertion.
           view = Path('packages/client/ui-canvas/tests/view.client.spec.tsx')
           text = view.read_text()
           start = text.find('const capabilities: CanvasCapabilities = {')
@@ -118,11 +95,9 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --lockfile-only --no-frozen-lockfile >/tmp/lock.log 2>&1 || { tail -n 120 /tmp/lock.log; exit 1; }
-
           changed="$(git diff --numstat -- pnpm-lock.yaml | awk '{ print $1 + $2 }')"
           test -n "$changed"
           test "$changed" -le 20
-
           python - <<'PY'
           from pathlib import Path
           text = Path('pnpm-lock.yaml').read_text()
@@ -137,7 +112,6 @@ jobs:
           if 'specifier: workspace:^' not in block:
               raise SystemExit('workspace:^ specifier missing from ui-canvas lock importer')
           PY
-
           git diff --check -- pnpm-lock.yaml
           echo "N07 lock importer reconciliation: PASS (${changed} changed lines)"
 
