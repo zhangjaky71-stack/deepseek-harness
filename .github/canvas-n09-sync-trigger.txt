@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
-Attempt: 8 — N09 context-teardown compatibility fix plus baseline-aware full validation.
+Attempt: 9 — carry N08 slot fixture compatibility plus N09 Settings assertions through full validation.
