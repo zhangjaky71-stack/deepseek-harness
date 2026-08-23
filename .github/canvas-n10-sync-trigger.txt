@@ -1,0 +1,2 @@
+Temporary trigger for repository-pinned N10 predecessor merge probe. Do not merge.
+Attempt: 1 — ordinary three-way merge only; print exact N09→N10 conflict set if present.
