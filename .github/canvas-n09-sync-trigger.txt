@@ -1,1 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
+Attempt: 2 — semantic N08 live-session + N09 Settings fixture merge, then full gates.
