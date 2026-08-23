@@ -37,21 +37,23 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+          def ensure(path: str, old: str, new: str, count: int = 1) -> None:
               p = Path(path)
               text = p.read_text()
+              if text.count(new) == count:
+                  return
               actual = text.count(old)
               if actual != count:
-                  raise SystemExit(f"{path}: expected {count} anchor(s), found {actual}: {old[:120]!r}")
+                  raise SystemExit(f"{path}: expected desired form or {count} old anchor(s), found desired={text.count(new)} old={actual}")
               p.write_text(text.replace(old, new, count))
 
           canvas_view = 'packages/client/ui-canvas/src/client/CanvasView.tsx'
-          replace(
+          ensure(
               canvas_view,
               "{presentation.showOutput && canvas?.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
               "{presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} {...(interaction === undefined ? {} : { interaction })} {...(onSelectOutput === undefined ? {} : { onSelectOutput })} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
           )
-          replace(
+          ensure(
               canvas_view,
               "return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }} t={t} />)}</div>",
               "return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} {...(onSelectOutput === undefined ? {} : { onSelect: () => { onSelectOutput(canvas, index) } })} t={t} />)}</div>",
@@ -61,15 +63,17 @@ jobs:
           p = Path(store)
           text = p.read_text()
           for field in ('owner', 'saveStatus', 'draft', 'undo', 'redo', 'clipboard', 'localPositions'):
-              needle = f'  readonly {field}:'
-              if needle not in text:
-                  raise SystemExit(f'{store}: missing mutable-state anchor {needle!r}')
-              text = text.replace(needle, f'  {field}:', 1)
+              readonly = f'  readonly {field}:'
+              mutable = f'  {field}:'
+              if readonly in text:
+                  text = text.replace(readonly, mutable, 1)
+              elif mutable not in text:
+                  raise SystemExit(f'{store}: missing state field {field!r}')
           p.write_text(text)
 
           capability = 'packages/client/ui-canvas/tests/capability-gate.client.spec.ts'
-          replace(capability, "while (contexts.length > 0) await contexts.pop()!.dispose()", "while (contexts.length > 0) await contexts.pop()!.fiber.dispose()")
-          replace(
+          ensure(capability, "while (contexts.length > 0) await contexts.pop()!.dispose()", "while (contexts.length > 0) await contexts.pop()!.fiber.dispose()")
+          ensure(
               capability,
               "children: { 'shell.main': { kind: 'single', scope: 'session' } },\n  }, () => null)",
               "children: { 'shell.main': { kind: 'single', scope: 'session' } },\n    inject: () => ({}),\n  }, (_p: { renderSlot?: unknown }) => null)",
@@ -78,15 +82,16 @@ jobs:
           bundle = 'packages/client/ui-canvas/tests/client-bundle.client.spec.ts'
           p = Path(bundle)
           text = p.read_text()
-          old = """canvasFeatures: {\n        get: async () => ({ ok: true, value: capabilities(canvasEnabled) }),\n        listNodes: async () => ({ ok: true, value: [] }),\n      },"""
-          new = old + "\n      canvas: {},\n      canvasInteraction: {},"
-          if old not in text:
-              raise SystemExit(f'{bundle}: missing remote fixture anchor')
-          text = text.replace(old, new, 1)
+          if '      canvas: {},\n' not in text:
+              old = """canvasFeatures: {\n        get: async () => ({ ok: true, value: capabilities(canvasEnabled) }),\n        listNodes: async () => ({ ok: true, value: [] }),\n      },"""
+              if old not in text:
+                  raise SystemExit(f'{bundle}: missing canvasFeatures fixture anchor')
+              text = text.replace(old, old + "\n      canvas: {},\n      canvasInteraction: {},", 1)
           anchor = "    ctx.provide('remote.canvasFeatures', {} as never)\n"
-          if anchor not in text:
-              raise SystemExit(f'{bundle}: missing service fixture anchor')
-          text = text.replace(anchor, anchor + "    ctx.provide('remote.canvas', {} as never)\n    ctx.provide('remote.canvasInteraction', {} as never)\n", 1)
+          if "ctx.provide('remote.canvas', {} as never)" not in text:
+              if anchor not in text:
+                  raise SystemExit(f'{bundle}: missing remote.canvasFeatures service fixture')
+              text = text.replace(anchor, anchor + "    ctx.provide('remote.canvas', {} as never)\n    ctx.provide('remote.canvasInteraction', {} as never)\n", 1)
           text = text.replace('await enabled.ctx.dispose()', 'await enabled.ctx.fiber.dispose()')
           text = text.replace('await disabled.ctx.dispose()', 'await disabled.ctx.fiber.dispose()')
           p.write_text(text)
