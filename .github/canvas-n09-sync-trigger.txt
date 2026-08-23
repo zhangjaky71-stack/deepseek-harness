@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N09 predecessor sync validation. Do not merge.
-Attempt: 5 — exact N08 README/translation/module-graph attribution, then candidate validation.
+Attempt: 6 — exact N08 package/config boundary attribution before final candidate gates.
