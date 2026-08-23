@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N07 predecessor sync validation. Do not merge.
-Attempt: 6b — same scoped carry-forward fixes; retrigger after workflow propagation.
+Attempt: 7 — valid YAML; scoped carry-forward fixes plus full N07 gates.
