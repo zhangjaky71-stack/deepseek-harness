@@ -1,0 +1,167 @@
+name: Canvas N07 sync validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  canvas-n07-sync:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n07-sync-trigger'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n07-v2.2-dynamic-surface
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Merge validated N06 and retain N07 product ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/canvas-n06-v2.2-remote-history fix/canvas-n07-v2.2-dynamic-surface
+          git merge --no-edit -X ours origin/fix/canvas-n06-v2.2-remote-history
+
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{path}: expected {count} anchor(s), found {actual}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, count))
+
+          canvas_view = 'packages/client/ui-canvas/src/client/CanvasView.tsx'
+          replace(
+              canvas_view,
+              "{presentation.showOutput && canvas?.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
+              "{presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} {...(interaction === undefined ? {} : { interaction })} {...(onSelectOutput === undefined ? {} : { onSelectOutput })} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}",
+          )
+          replace(
+              canvas_view,
+              "return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }} t={t} />)}</div>",
+              "return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} {...(onSelectOutput === undefined ? {} : { onSelect: () => { onSelectOutput(canvas, index) } })} t={t} />)}</div>",
+          )
+
+          store = 'packages/client/ui-canvas/src/client/store.ts'
+          p = Path(store)
+          text = p.read_text()
+          for field in ('owner', 'saveStatus', 'draft', 'undo', 'redo', 'clipboard', 'localPositions'):
+              needle = f'  readonly {field}:'
+              if needle not in text:
+                  raise SystemExit(f'{store}: missing mutable-state anchor {needle!r}')
+              text = text.replace(needle, f'  {field}:', 1)
+          p.write_text(text)
+
+          capability = 'packages/client/ui-canvas/tests/capability-gate.client.spec.ts'
+          replace(capability, "while (contexts.length > 0) await contexts.pop()!.dispose()", "while (contexts.length > 0) await contexts.pop()!.fiber.dispose()")
+          replace(
+              capability,
+              "children: { 'shell.main': { kind: 'single', scope: 'session' } },\n  }, () => null)",
+              "children: { 'shell.main': { kind: 'single', scope: 'session' } },\n    inject: () => ({}),\n  }, (_p: { renderSlot?: unknown }) => null)",
+          )
+
+          bundle = 'packages/client/ui-canvas/tests/client-bundle.client.spec.ts'
+          p = Path(bundle)
+          text = p.read_text()
+          old = """canvasFeatures: {\n        get: async () => ({ ok: true, value: capabilities(canvasEnabled) }),\n        listNodes: async () => ({ ok: true, value: [] }),\n      },"""
+          new = old + "\n      canvas: {},\n      canvasInteraction: {},"
+          if old not in text:
+              raise SystemExit(f'{bundle}: missing remote fixture anchor')
+          text = text.replace(old, new, 1)
+          anchor = "    ctx.provide('remote.canvasFeatures', {} as never)\n"
+          if anchor not in text:
+              raise SystemExit(f'{bundle}: missing service fixture anchor')
+          text = text.replace(anchor, anchor + "    ctx.provide('remote.canvas', {} as never)\n    ctx.provide('remote.canvasInteraction', {} as never)\n", 1)
+          text = text.replace('await enabled.ctx.dispose()', 'await enabled.ctx.fiber.dispose()')
+          text = text.replace('await disabled.ctx.dispose()', 'await disabled.ctx.fiber.dispose()')
+          p.write_text(text)
+
+          interaction = 'packages/client/ui-canvas/tests/interaction.client.spec.ts'
+          p = Path(interaction)
+          text = p.read_text()
+          text = text.replace("})) as NonNullable<CanvasSnapshot['output']>['assets']", "})) as unknown as NonNullable<CanvasSnapshot['output']>['assets']")
+          text = text.replace('  } as CanvasSnapshot\n', '  } as unknown as CanvasSnapshot\n', 1)
+          text = text.replace("      } as NonNullable<CanvasSnapshot['output']>,", "      } as unknown as NonNullable<CanvasSnapshot['output']>,")
+          p.write_text(text)
+
+          view = 'packages/client/ui-canvas/tests/view.client.spec.tsx'
+          p = Path(view)
+          text = p.read_text()
+          text = text.replace('  } as CanvasSnapshot\n', '  } as unknown as CanvasSnapshot\n', 1)
+          text = text.replace("run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 },", "run: { id: 'run-live', status: 'running', workflowId: workflow.id, workflowRevision: 1, startedAt: 2 } as unknown as NonNullable<CanvasSnapshot['run']>,")
+          text = text.replace("      },\n      output: {", "      } as unknown as NonNullable<CanvasSnapshot['run']>,\n      output: {", 1)
+          text = text.replace("        primaryAssetIndex: 0,\n      },", "        primaryAssetIndex: 0,\n      } as unknown as NonNullable<CanvasSnapshot['output']>,", 1)
+          p.write_text(text)
+
+          features = 'packages/client/ui-canvas/tests/features.client.spec.tsx'
+          p = Path(features)
+          text = p.read_text()
+          text = text.replace("  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }", "  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }")
+          p.write_text(text)
+          PY
+
+          git diff --check
+          test -z "$(git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!pnpm-lock.yaml' || true)"
+          git merge-base --is-ancestor origin/fix/canvas-n06-v2.2-remote-history HEAD
+          grep -q "PropsRuntime<'shell.main'>" packages/client/ui-canvas/src/client/CanvasView.tsx
+          grep -q "'shell.main': { kind: 'single'; scope: 'session'" packages/client/ui-layout/src/client/index.ts
+
+      - name: Install immutable workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate inherited Host build
+        run: pnpm run build:lib:host
+
+      - name: Validate N07 Client build
+        run: pnpm run build:lib:client
+
+      - name: Run N07 focused regressions
+        run: >-
+          pnpm exec vitest run
+          packages/client/ui-canvas/tests/capability-gate.client.spec.ts
+          packages/client/ui-canvas/tests/client-bundle.client.spec.ts
+          packages/client/ui-canvas/tests/features.client.spec.tsx
+          packages/client/ui-canvas/tests/interaction.client.spec.ts
+          packages/client/ui-canvas/tests/mode-store.client.spec.ts
+          packages/client/ui-canvas/tests/store.client.spec.ts
+          packages/client/ui-canvas/tests/view.client.spec.tsx
+          packages/client/ui-canvas/tests/layout-revision.client.spec.ts
+          packages/client/ui-canvas/tests/state.client.spec.ts
+          packages/client/ui-layout/tests/app-frame.client.spec.tsx
+          packages/client/ui-layout/tests/apply.client.spec.ts
+          packages/client/ui-layout/tests/service.client.spec.ts
+          packages/bundle/base/tests/canvas-real-composition.spec.ts
+
+      - name: Validate built package invariants
+        run: pnpm run verify-built-package-invariants
+
+      - name: Commit and push only after all gates pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add packages/client/ui-canvas/src/client/CanvasView.tsx \
+            packages/client/ui-canvas/src/client/store.ts \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+            packages/client/ui-canvas/tests/features.client.spec.tsx \
+            packages/client/ui-canvas/tests/interaction.client.spec.ts \
+            packages/client/ui-canvas/tests/view.client.spec.tsx
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+          fi
+          git push origin HEAD:fix/canvas-n07-v2.2-dynamic-surface
