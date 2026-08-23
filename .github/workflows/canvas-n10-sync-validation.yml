@@ -1,0 +1,39 @@
+name: Canvas N10 sync validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  canvas-n10-sync:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n10-sync-trigger'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n10-v2.2-node-registry
+          fetch-depth: 0
+
+      - name: Probe validated N09 predecessor merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/canvas-n09-v2.2-settings-authority fix/canvas-n10-v2.2-node-registry
+          set +e
+          git merge --no-edit origin/fix/canvas-n09-v2.2-settings-authority >/tmp/merge.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/merge.log
+          if (( status != 0 )); then
+            echo "=== N09 -> N10 CONFLICT SET ==="
+            git diff --name-only --diff-filter=U
+            exit "$status"
+          fi
+          git merge-base --is-ancestor origin/fix/canvas-n09-v2.2-settings-authority HEAD
+          echo "N09->N10 ordinary three-way merge: PASS"
