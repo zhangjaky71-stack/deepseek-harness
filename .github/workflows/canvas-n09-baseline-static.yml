@@ -1,0 +1,45 @@
+name: Canvas N09 baseline static attribution
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  n08-static-baseline:
+    if: github.event.pull_request.head.ref == 'ci/canvas-n09-sync-trigger'
+    runs-on: ubuntu-24.04
+    env:
+      DSH_GATE_CONCURRENCY: '8'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/canvas-n08-v2.2-interaction-context
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install immutable N08 workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile >/tmp/install.log 2>&1 || { tail -n 180 /tmp/install.log; exit 1; }
+          echo "N08 frozen install: PASS"
+
+      - name: Run N08 repository static baseline
+        shell: bash
+        run: |
+          set +e
+          pnpm run check:ci:static >/tmp/static.log 2>&1
+          status=$?
+          set -e
+          echo "=== N08 STATIC SUMMARY ==="
+          grep -E '^run-gates: [0-9]+ passed|^run-gates: unsuccessful gates:|^  - FAILED ' /tmp/static.log || true
+          echo "=== N08 STATIC SELECTED DIAGNOSTICS ==="
+          grep -E 'optional dependency imports|module graph|package README model experience|translation pairing|Cordis config|client catalog|config catalog|package invariants|constraints|TypertAnalysisError|Unused files' /tmp/static.log | tail -n 240 || true
+          exit "$status"
