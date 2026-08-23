@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N07 predecessor sync validation. Do not merge.
-Attempt: 5 — compact client-build diagnostics.
+Attempt: 6 — scoped N06 TypeScript carry-forward fixes plus full N07 gates.
