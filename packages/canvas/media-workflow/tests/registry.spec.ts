@@ -7,7 +7,7 @@ import { BUILTIN_MEDIA_NODE_DEFINITIONS, apply as applyBuiltins, inject as built
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 const configSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))

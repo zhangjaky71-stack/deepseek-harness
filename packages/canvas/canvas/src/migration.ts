@@ -552,7 +552,7 @@ export function decodeCanvasRunHistoryEntry(value: unknown): CanvasRunHistoryEnt
   const source = record(value, 'canvas-run-history')
   requireAllowedKeys(
     source,
-    new Set(['finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),
+    new Set(['canvasId', 'finishedAt', 'outputs', 'promptSummary', 'runId', 'startedAt', 'status', 'variantId', 'workflowId', 'workflowRevision']),
     'canvas-run-history',
   )
   const statusValue = string(source.status, 'canvas-run-history.status')
@@ -567,6 +567,7 @@ export function decodeCanvasRunHistoryEntry(value: unknown): CanvasRunHistoryEnt
   if (!terminal && finishedAt !== undefined) invalid('canvas-run-history.finishedAt', `non-terminal history entry ${String(source.runId)} cannot include finishedAt`)
   if (finishedAt !== undefined && finishedAt < startedAt) invalid('canvas-run-history.finishedAt', 'canvas-run-history.finishedAt must not precede startedAt')
   return {
+    canvasId: CanvasId(nonEmptyString(source.canvasId, 'canvas-run-history.canvasId')),
     runId: CanvasRunId(nonEmptyString(source.runId, 'canvas-run-history.runId')),
     ...(variantId === undefined ? {} : { variantId: CanvasVariantId(nonEmptyString(variantId, 'canvas-run-history.variantId')) }),
     workflowId: MediaWorkflowId(nonEmptyString(source.workflowId, 'canvas-run-history.workflowId')),

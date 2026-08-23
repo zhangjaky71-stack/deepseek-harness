@@ -4,22 +4,24 @@ import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CanvasService, {
+  CanvasId,
   CanvasRunId,
   type CanvasAuthorizationDecision,
   type CanvasAuthorizationRequest,
-  type CanvasId,
   type CanvasSnapshot,
 } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
 import {
   baseWorkflow,
+  currentWriterChange,
   runStartChange,
   runUpdateChange,
   workflowRef,
 } from './canvas-fixtures.ts'
+import { withCanvasWritePermit } from '../src/write-authority.ts'
 
 class GenerationAuthorizationService extends Service {
-  deniedCanvasId: CanvasId | undefined
+  deniedCanvasId: ReturnType<typeof CanvasId> | undefined
   readonly requests: CanvasAuthorizationRequest[] = []
 
   constructor(ctx: Context) {
@@ -59,6 +61,12 @@ function liveAgent(ctx: Context, rawId: string): Agent {
   return agent
 }
 
+function appendCurrentChange(agent: Agent, change: ReturnType<typeof currentWriterChange>): void {
+  withCanvasWritePermit(agent.session, 'canvas/change', change, () => {
+    agent.session.append('canvas/change', change)
+  })
+}
+
 function currentCanvas(ctx: Context, agent: Agent): CanvasSnapshot {
   const canvas = ctx.canvas.get(agent)
   if (canvas === null) throw new Error('expected current Canvas')
@@ -67,9 +75,9 @@ function currentCanvas(ctx: Context, agent: Agent): CanvasSnapshot {
 
 function appendCompletedRun(ctx: Context, agent: Agent, id: string): void {
   const before = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runStartChange(before, CanvasRunId(id)))
+  appendCurrentChange(agent, currentWriterChange(runStartChange(before, CanvasRunId(id))))
   const queued = currentCanvas(ctx, agent)
-  agent.session.append('canvas/change', runUpdateChange(queued, 'completed'))
+  appendCurrentChange(agent, currentWriterChange(runUpdateChange(queued, 'completed')))
   currentCanvas(ctx, agent)
 }
 

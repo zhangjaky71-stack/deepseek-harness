@@ -91,6 +91,9 @@ describe('SessionProjectionRegistry drive', () => {
   it('notifies onChanged with the validated view and the causing seq, and skips same-reference applies', async () => {
     const { ctx, session } = await harness()
     ctx.sessionProjections.register(marksUnit())
+    // Establish the Browser baseline first so this test exercises the ordinary
+    // domain-value change path rather than the framework's first-presence control frame.
+    expect(ctx.sessionProjections.snapshot(session).values['test/marks']).toEqual({ marks: [] })
     const seen: { key: string; value: unknown; seq: number; sessionId: string }[] = []
     ctx.sessionProjections.onChanged((changedSession, key, value, seq) => {
       seen.push({ key, value, seq, sessionId: String(changedSession.id) })
@@ -163,7 +166,7 @@ describe('SessionProjectionRegistry drive', () => {
     // contract says the cached state shape differs, so the two cannot share
     // cells. Everything else about a definition is functions.
     expect(() => ctx.sessionProjections.register({ ...marksUnit(), stateVersion: 9 }))
-      .toThrow(/already registered at stateVersion 1; refusing to share it with stateVersion 9/)
+      .toThrow(/already registered at stateVersion 1; refusing unowned stateVersion 9/)
   })
 
   it('rejects a non-integer or negative stateVersion at register time', async () => {

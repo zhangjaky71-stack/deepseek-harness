@@ -88,7 +88,7 @@ export function MinimalCanvas({ canvas, interaction, onSelectOutput, t }: BodyPr
     <StateCard canvas={canvas} t={t} /><PrimaryAction state={presentation.state} action={presentation.primaryAction} t={t} />
     {presentation.staleOutput && <p className={css.dirtyNotice}>{t('state.DIRTY_READY.body')}</p>}
     <section className={css.outputSection} aria-label={t('minimal.output')}><h3>{t('minimal.output')}</h3>
-      {presentation.showOutput && canvas?.output !== null ? <OutputGrid canvas={canvas} interaction={interaction} onSelectOutput={onSelectOutput} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}
+      {presentation.showOutput && canvas !== null && canvas.output !== null ? <OutputGrid canvas={canvas} {...(interaction === undefined ? {} : { interaction })} {...(onSelectOutput === undefined ? {} : { onSelectOutput })} t={t} /> : <div className={css.emptyOutput}>{t('minimal.emptyOutput')}</div>}
     </section>
   </div>
 }
@@ -103,7 +103,7 @@ function PrimaryAction({ state, action, t }: { readonly state: ReturnType<typeof
 }
 function OutputGrid({ canvas, interaction, onSelectOutput, t }: { readonly canvas: CanvasSnapshot; readonly interaction?: CanvasInteractionSelection; readonly onSelectOutput?: (canvas: CanvasSnapshot, assetIndex: number) => void; readonly t: CanvasViewProps['t'] }) {
   const output = canvas.output; if (output === null) return null
-  return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} onSelect={onSelectOutput === undefined ? undefined : () => { onSelectOutput(canvas, index) }} t={t} />)}</div>
+  return <div className={css.outputGrid}>{output.assets.map((asset, index) => <AssetCard key={asset.kind === 'image' ? asset.image.attachmentId : asset.video.assetId} asset={asset} primary={index === output.primaryAssetIndex} selected={interaction?.focusedOutput?.runId === output.runId && interaction?.focusedOutput?.assetIndex === index} {...(onSelectOutput === undefined ? {} : { onSelect: () => { onSelectOutput(canvas, index) } })} t={t} />)}</div>
 }
 function AssetCard({ asset, primary, selected, onSelect, t }: { readonly asset: CanvasAssetRef; readonly primary: boolean; readonly selected: boolean; readonly onSelect?: () => void; readonly t: CanvasViewProps['t'] }) {
   const media = asset.kind === 'image' ? asset.image : asset.video; const dimensions = media.width !== undefined && media.height !== undefined ? `${media.width} × ${media.height}` : media.mediaType
