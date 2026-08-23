@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11 validation. Do not merge.
-Attempt: 3 — rerun full validation after export-JSDoc remediation in N11 catalog helpers.
+Attempt: 4 — rerun full validation after Agent Note format and bilingual pairing remediation.
