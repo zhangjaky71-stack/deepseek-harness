@@ -98,6 +98,14 @@ jobs:
           )
           remote.write_text(text)
 
+          features = Path('packages/canvas/canvas/tests/features.spec.ts')
+          text = features.read_text()
+          old = """    expect(() => ctx.canvas.listRuns(agent)).toThrow(\n"""
+          new = """    expect(() => ctx.canvas.listRuns(agent, { canvasId: created.id })).toThrow(\n"""
+          if text.count(old) != 1:
+              raise SystemExit(f'features history request replacement count={text.count(old)}')
+          features.write_text(text.replace(old, new, 1))
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
