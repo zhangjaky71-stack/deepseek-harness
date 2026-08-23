@@ -30,7 +30,7 @@ const layoutProjectionSchema = z.custom<CanvasLayoutSnapshot | null>((value) => 
 }, { message: 'invalid Canvas layout projection value' })
 
 /** Host-side browser visibility decision for Canvas projection keys. */
-export type CanvasProjectionReadGate = (sessionId: string | undefined) => boolean
+export type CanvasProjectionReadGate = (sessionId: string) => boolean
 
 /** Last-wins whole Canvas projection; malformed candidate events fail-soft. */
 export function applyCanvasProjection(state: CanvasSnapshot | null, event: SessionEvent): CanvasSnapshot | null {
