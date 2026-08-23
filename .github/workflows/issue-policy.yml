@@ -58,7 +58,7 @@ jobs:
           text = text.replace(old, new, 1)
 
           anchor = "bundle_test = 'packages/client/ui-canvas/tests/client-bundle.client.spec.ts'\n"
-          injection = anchor + "replace(\n    bundle_test,\n    \"canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }) },\",\n    \"canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }), listNodes: async () => ({ ok: true, value: [] }) },\",\n)\n"
+          injection = anchor + "replace(\n    bundle_test,\n    \"canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }) },\",\n    \"canvasFeatures: { get: async () => ({ ok: true, value: capabilities(canvasEnabled) }), listNodes: async () => ({ ok: true, value: [] }) },\\n      canvas: {},\\n      canvasInteraction: {},\",\n)\nreplace(\n    bundle_test,\n    \"    ctx.provide('remote.canvasFeatures', {} as never)\\n\",\n    \"    ctx.provide('remote.canvasFeatures', {} as never)\\n    ctx.provide('remote.canvas', {} as never)\\n    ctx.provide('remote.canvasInteraction', {} as never)\\n\",\n)\n"
           if text.count(anchor) != 1:
               raise SystemExit(f'validator client-bundle anchor count={text.count(anchor)}')
           text = text.replace(anchor, injection, 1)
