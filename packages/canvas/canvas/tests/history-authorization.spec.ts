@@ -4,10 +4,10 @@ import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CanvasService, {
+  CanvasId,
   CanvasRunId,
   type CanvasAuthorizationDecision,
   type CanvasAuthorizationRequest,
-  type CanvasId,
   type CanvasSnapshot,
 } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +21,7 @@ import {
 import { withCanvasWritePermit } from '../src/write-authority.ts'
 
 class GenerationAuthorizationService extends Service {
-  deniedCanvasId: CanvasId | undefined
+  deniedCanvasId: ReturnType<typeof CanvasId> | undefined
   readonly requests: CanvasAuthorizationRequest[] = []
 
   constructor(ctx: Context) {
