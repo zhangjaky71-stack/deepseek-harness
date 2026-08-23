@@ -10,7 +10,7 @@ export interface NodeInspectorProps {
   readonly node: MediaWorkflowNode | undefined
   readonly draft: CanvasNodeDraft | null
   readonly saveStatus: CanvasSaveStatus
-  readonly readOnlyReason?: 'definition-missing' | 'feature-disabled'
+  readonly readOnlyReason?: 'definition-missing' | 'feature-disabled' | undefined
   readonly onNameChange: (value: string) => void
   readonly onConfigChange: (value: string) => void
   readonly onBlur: () => void
