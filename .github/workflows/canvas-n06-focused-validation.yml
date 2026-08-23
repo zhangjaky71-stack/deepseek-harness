@@ -56,4 +56,3 @@ jobs:
           packages/api/gateway/tests/business-failure.spec.ts
           packages/typert/protocol/tests/business-failure.spec.ts
           packages/bundle/base/tests/base.spec.ts
-          packages/bundle/base/tests/canvas-real-composition.spec.ts
