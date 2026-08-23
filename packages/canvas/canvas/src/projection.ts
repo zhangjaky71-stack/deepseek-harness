@@ -68,7 +68,8 @@ export function applyCanvasLayoutProjection(
 /**
  * Register Canvas current-state/layout units and their optional Host browser-read gate.
  * Projection mathematics remains identity-free; authorization is evaluated only when
- * the registry serves a browser-facing snapshot/change value.
+ * the registry serves a browser-facing snapshot/change value. Detached checkpoint/restore
+ * views have no trustworthy Session identity and therefore fail closed before policy evaluation.
  */
 export function registerCanvasProjections(ctx: Context, canRead?: CanvasProjectionReadGate): void {
   ctx.sessionProjections.register<'canvas', CanvasSnapshot | null>({
@@ -88,7 +89,8 @@ export function registerCanvasProjections(ctx: Context, canRead?: CanvasProjecti
     stateVersion: 1,
   })
   if (canRead !== undefined) {
-    ctx.sessionProjections.registerReadGuard('canvas', context => canRead(context.sessionId))
-    ctx.sessionProjections.registerReadGuard('canvasLayout', context => canRead(context.sessionId))
+    const guardedRead = (sessionId: string | undefined): boolean => sessionId !== undefined && canRead(sessionId)
+    ctx.sessionProjections.registerReadGuard('canvas', context => guardedRead(context.sessionId))
+    ctx.sessionProjections.registerReadGuard('canvasLayout', context => guardedRead(context.sessionId))
   }
 }
