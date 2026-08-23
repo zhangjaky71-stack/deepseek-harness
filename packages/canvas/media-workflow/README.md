@@ -65,15 +65,19 @@ This keeps registry lifetime process-local and rebuildable. Definition metadata 
 
 ## Model Experience
 
-None directly. The package registers no model-facing tool and contributes no prompt text. N18 may use the same definitions to summarize nodes and advertise only currently creatable capabilities, but that model surface is not implemented here.
+### Registry metadata is not directly model-visible
+
+#### What the model sees
+
+Nothing from this package by itself. `MediaNodeRegistry` and its client-safe catalog remain Host/runtime metadata; a future model-facing consumer such as N18 may select and render those definitions, and that consumer owns the resulting model-visible text.
 
 #### Token effect
 
-Zero direct tokens.
+Zero standing or turn-local tokens are added by this package itself; tokens are incurred only if a downstream model-facing consumer renders selected registry metadata.
 
 #### KV Cache effect
 
-None.
+None from this package directly because it installs no prompt prefix or tool schema. Any cache effect belongs to the downstream consumer that renders registry metadata.
 
 ## Known Limitations and Deferred Work
 

@@ -5,7 +5,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const root = resolve(packageDir, '../../..')
 const registryPath = join(packageDir, 'lib/index.js')
 const builtinsPath = join(packageDir, 'lib/builtins.js')
 

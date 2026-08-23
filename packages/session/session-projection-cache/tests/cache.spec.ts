@@ -12,7 +12,7 @@ import { z } from 'zod'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
@@ -58,8 +58,18 @@ function fakePersistence(logs: Map<string, SessionEvent[]>) {
 }
 
 /** Header shape for cachedSnapshot calls (fake logs stamp createdAt 0, no cwd). */
-const headerOf = (id: SessionId, createdAt = 0, cwd?: string) =>
-  ({ version: 0, id, createdAt, ...cwd === undefined ? {} : { cwd } })
+const headerOf = (
+  id: SessionId,
+  createdAt = 0,
+  cwd?: string,
+  extra: Partial<Omit<SessionHeader, 'id' | 'version' | 'createdAt' | 'cwd'>> = {},
+): SessionHeader => ({
+  version: 0,
+  id,
+  createdAt,
+  ...cwd === undefined ? {} : { cwd },
+  ...extra,
+})
 
 interface HarnessOptions {
   pool?: MemoryMediaPool
@@ -99,7 +109,7 @@ const endTurn = (session: Session): SessionEvent =>
 function storedRecord(pool: MemoryMediaPool, id: Session['id']) {
   return pool.media.get('session_projcache')?.tables.get('sessions')?.get(String(id)) as
     {
-      identity: { createdAt: number; cwd?: string }
+      identity: Omit<SessionHeader, 'id'>
       rows: Record<string, { ver: number; seq: number; val: unknown }>
     } | undefined
 }
@@ -122,7 +132,7 @@ describe('SessionProjectionCache write policy', () => {
     const { ctx, pool } = await harness()
     const session = ctx.sessions.create(SessionId('turn-end'))
     mark(session, ['a'])
-    expect(storedRows(pool, session.id)).toBeUndefined() // throttled: no write yet
+    expect(storedRows(pool, session.id)).toBeUndefined()
     const end = endTurn(session)
     await settle()
     const rows = storedRows(pool, session.id)
@@ -131,7 +141,6 @@ describe('SessionProjectionCache write policy', () => {
 
   it('writes at session disposal (detach, the live-to-cold moment)', async () => {
     const { ctx, pool } = await harness()
-    // Sessions dispose with their owning fiber: create in a child plugin.
     let session: Session | undefined
     const owner = await ctx.plugin(Object.assign((inner: Context) => {
       session = inner.sessions.create(SessionId('detach'))
@@ -169,11 +178,9 @@ describe('SessionProjectionCache write policy', () => {
 
   it('write() on a never-dirty session checkpoints directly and rejects a non-JSON unit state', async () => {
     const { ctx, pool } = await harness()
-    // Never dirtied: no events — write() still lands the init-derived cut.
     const clean = ctx.sessions.create(SessionId('clean-write'))
     await ctx.sessionProjectionCache.write(clean)
     expect(storedRows(pool, clean.id)?.['cache-test/marks']).toEqual({ ver: 1, seq: -1, val: null })
-    // A unit whose state violates the plain-JSON contract fails the write loud.
     ctx.sessionProjections.register({
       key: 'cache-test/marks2' as never,
       schema: { parse: (value: unknown) => value } as never,
@@ -190,12 +197,11 @@ describe('SessionProjectionCache write policy', () => {
     const { ctx, pool, fiber } = await harness({ config: { writeEveryEvents: 100, writeIntervalMs: 5000 } })
     const armed = ctx.sessions.create(SessionId('armed'))
     const cleaned = ctx.sessions.create(SessionId('cleaned'))
-    mark(armed, ['pending']) // timer armed, no write yet
+    mark(armed, ['pending'])
     mark(cleaned, ['done'])
-    endTurn(cleaned) // mandatory write; markClean leaves {pending: 0, timer: undefined} in the map
+    endTurn(cleaned)
     await vi.advanceTimersByTimeAsync(0)
     await fiber.dispose()
-    // The armed timer died with the plugin: advancing time writes nothing.
     await vi.advanceTimersByTimeAsync(10_000)
     expect(storedRows(pool, armed.id)).toBeUndefined()
   })
@@ -210,7 +216,6 @@ describe('SessionProjectionCache write policy', () => {
     await settle()
     expect(storedRows(pool, session.id)).toBeUndefined()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('turn/end write for "fail-soft" failed'))
-    // Self-heal: the next mandatory point writes the current cut.
     mark(session, ['y'])
     endTurn(session)
     await settle()
@@ -230,14 +235,13 @@ describe('SessionProjectionCache cold read', () => {
     return events
   }
 
-  /** Pre-seed the medium with one stored checkpoint record (before the domain opens). */
   function seedRow(
     pool: MemoryMediaPool,
     id: string,
     row: { ver: number; seq: number; val: unknown },
-    identity: { createdAt: number; cwd?: string } = { createdAt: 0 },
+    identity: Omit<SessionHeader, 'id'> = { version: 0, createdAt: 0 },
   ): void {
-    pool.versions.set('session_projcache', 3)
+    pool.versions.set('session_projcache', 4)
     pool.media.set('session_projcache', {
       tables: new Map([['sessions', new Map([[id, { identity, rows: { 'cache-test/marks': row } }]])]]),
       global: null,
@@ -247,16 +251,13 @@ describe('SessionProjectionCache cold read', () => {
   it('serves a cold session from the cache row plus a bounded tail read, and writes the refresh back', async () => {
     const pool = new MemoryMediaPool()
     const logs = new Map([['cold', storedLog([['a'], ['a', 'b']])]])
-    // A warm-era checkpoint at watermark 1 (only ['a'] folded).
     seedRow(pool, 'cold', { ver: 1, seq: 1, val: { marks: ['a'] } })
     const { cache, persistence, pool: samePool } = await harness({ pool, logs })
     const id = SessionId('cold')
     const snapshot = await cache.coldSnapshot(id)
     expect(snapshot.values['cache-test/marks']).toEqual({ marks: ['a', 'b'] })
     expect(snapshot.asOfSeq).toBe(3)
-    // The tail read was bounded by the anchored floor (watermark 1 -> floor 1), not 0.
     expect(persistence.readFrom).toHaveBeenCalledWith(id, 1, undefined)
-    // Write-back: the stored row advanced to the served cut.
     expect(storedRows(samePool, id)?.['cache-test/marks'])
       .toEqual({ ver: 1, seq: 3, val: { marks: ['a', 'b'] } })
   })
@@ -268,20 +269,18 @@ describe('SessionProjectionCache cold read', () => {
     const { cache, persistence } = await harness({ pool, logs, stateVersion: 2 })
     const snapshot = await cache.coldSnapshot(SessionId('bumped'))
     expect(snapshot.values['cache-test/marks']).toEqual({ marks: ['a'] })
-    // Mismatch pulls the floor to 0: one full read, no second pass needed.
     expect(persistence.readFrom).toHaveBeenCalledTimes(1)
     expect(persistence.readFrom).toHaveBeenCalledWith(SessionId('bumped'), 0, undefined)
   })
 
   it('detects a log shrunk below the row watermark and degrades to one full re-read', async () => {
     const pool = new MemoryMediaPool()
-    const logs = new Map([['shrunk', storedLog([['a']])]]) // seqs 0..2
+    const logs = new Map([['shrunk', storedLog([['a']])]])
     seedRow(pool, 'shrunk', { ver: 1, seq: 9, val: { marks: ['ghost'] } })
     const { cache, persistence } = await harness({ pool, logs })
     const snapshot = await cache.coldSnapshot(SessionId('shrunk'))
     expect(snapshot.values['cache-test/marks']).toEqual({ marks: ['a'] })
     expect(snapshot.asOfSeq).toBe(2)
-    // Anchored tail read (floor 9) came back empty -> full re-read from 0.
     expect(persistence.readFrom).toHaveBeenNthCalledWith(1, SessionId('shrunk'), 9, undefined)
     expect(persistence.readFrom).toHaveBeenNthCalledWith(2, SessionId('shrunk'), 0, undefined)
   })
@@ -304,15 +303,12 @@ describe('SessionProjectionCache cold read', () => {
 
   it('discards a record bound to a different log lifecycle and refolds from the actual log', async () => {
     const pool = new MemoryMediaPool()
-    const logs = new Map([['reborn', storedLog([['real']])]]) // stored header stamps createdAt 0
-    // A checkpoint from a PRIOR lifecycle of the same id (different createdAt):
-    // its rows pass every watermark check, but the identity does not match.
-    seedRow(pool, 'reborn', { ver: 1, seq: 2, val: { marks: ['phantom'] } }, { createdAt: 999 })
+    const logs = new Map([['reborn', storedLog([['real']])]])
+    seedRow(pool, 'reborn', { ver: 1, seq: 2, val: { marks: ['phantom'] } }, { version: 0, createdAt: 999 })
     const { cache, pool: samePool } = await harness({ pool, logs })
     const snapshot = await cache.coldSnapshot(SessionId('reborn'))
     expect(snapshot.values['cache-test/marks']).toEqual({ marks: ['real'] })
-    // The write-back rebinds the record to the actual log's identity.
-    expect(storedRecord(samePool, SessionId('reborn'))?.identity).toEqual({ createdAt: 0 })
+    expect(storedRecord(samePool, SessionId('reborn'))?.identity).toEqual({ version: 0, createdAt: 0 })
   })
 
   it('cachedSnapshot returns undefined when every stored row is version-mismatched', async () => {
@@ -324,12 +320,53 @@ describe('SessionProjectionCache cold read', () => {
 
   it('binds identity on cwd too: a matching cwd serves, a moved session does not', async () => {
     const pool = new MemoryMediaPool()
-    seedRow(pool, 'homed', { ver: 1, seq: 2, val: { marks: ['w'] } }, { createdAt: 0, cwd: '/work' })
+    seedRow(pool, 'homed', { ver: 1, seq: 2, val: { marks: ['w'] } }, { version: 0, createdAt: 0, cwd: '/work' })
     const { cache } = await harness({ pool })
     const id = SessionId('homed')
     expect(cache.cachedSnapshot(headerOf(id, 0, '/work'))?.values['cache-test/marks']).toEqual({ marks: ['w'] })
     expect(cache.cachedSnapshot(headerOf(id, 0, '/elsewhere'))).toBeUndefined()
     expect(cache.cachedSnapshot(headerOf(id, 0))).toBeUndefined()
+  })
+
+  it('binds cache rows to immutable lineage and preset identity even when createdAt/cwd match', async () => {
+    const pool = new MemoryMediaPool()
+    const priorIdentity: Omit<SessionHeader, 'id'> = {
+      version: 0,
+      createdAt: 0,
+      cwd: '/work',
+      parentSession: SessionId('parent-a'),
+      seedLength: 3,
+      origin: 'subagent',
+      delegationDepth: 1,
+      agentPreset: 'preset-a',
+    }
+    seedRow(pool, 'same-clock', { ver: 1, seq: 2, val: { marks: ['prior'] } }, priorIdentity)
+    const { cache } = await harness({ pool })
+    const id = SessionId('same-clock')
+
+    expect(cache.cachedSnapshot(headerOf(id, 0, '/work', {
+      parentSession: SessionId('parent-a'),
+      seedLength: 3,
+      origin: 'subagent',
+      delegationDepth: 1,
+      agentPreset: 'preset-a',
+    }))?.values['cache-test/marks']).toEqual({ marks: ['prior'] })
+
+    expect(cache.cachedSnapshot(headerOf(id, 0, '/work', {
+      parentSession: SessionId('parent-b'),
+      seedLength: 3,
+      origin: 'subagent',
+      delegationDepth: 1,
+      agentPreset: 'preset-a',
+    }))).toBeUndefined()
+
+    expect(cache.cachedSnapshot(headerOf(id, 0, '/work', {
+      parentSession: SessionId('parent-a'),
+      seedLength: 3,
+      origin: 'subagent',
+      delegationDepth: 1,
+      agentPreset: 'preset-b',
+    }))).toBeUndefined()
   })
 
   it('dates an empty stored log at -1 in the zero-units topology', async () => {
@@ -355,20 +392,14 @@ describe('SessionProjectionCache cold read', () => {
     seedRow(pool, 'listed', { ver: 1, seq: 4, val: { marks: ['t'] } })
     const { cache } = await harness({ pool })
     const id = SessionId('listed')
-    // Matching header: values plus the watermark the client seeds under.
     expect(cache.cachedSnapshot(headerOf(id))).toEqual({ asOfSeq: 4, values: { 'cache-test/marks': { marks: ['t'] } } })
-    // A recreated id (different createdAt): the record is unrelated — no block.
     expect(cache.cachedSnapshot(headerOf(id, 777))).toBeUndefined()
-    // Unknown id: no block.
     expect(cache.cachedSnapshot(headerOf(SessionId('never-cached')))).toBeUndefined()
   })
 
   it('holds the not-found contract with zero registered units, and dates the empty cut for a present log', async () => {
-    // Same composition minus any registered unit: restoreFloor is undefined,
-    // yet coldSnapshot must still reject for an absent log (probe read) and
-    // serve an empty cut at the stored end for a present one.
     const pool = new MemoryMediaPool()
-    const logs = new Map([['bare', storedLog([['a']])]]) // seqs 0..2
+    const logs = new Map([['bare', storedLog([['a']])]])
     const ctx = new Context()
     contexts.push(ctx)
     await ctx.plugin(Storage)

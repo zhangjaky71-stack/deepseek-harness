@@ -1,7 +1,6 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -16,6 +15,8 @@ import {
   createMediaWorkflow,
 } from '@deepseek-ai/dsh-canvas'
 import { describe, expect, it } from 'vitest'
+
+const packageDir = fileURLToPath(new URL('..', import.meta.url))
 
 function workflow() {
   const prompt = WorkflowNodeId('prompt')
@@ -61,14 +62,15 @@ function registerLiveAgent(ctx: Context, rawId: string): Agent {
   return agent
 }
 
-async function bootCanvasComposition(): Promise<Context> {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-canvas-real-composition-'))
+async function bootCanvasComposition(): Promise<{ ctx: Context; dir: string }> {
+  // Keep the generated config underneath the real dsh-base package so Loader's
+  // Node resolution walks through this package's pnpm-linked node_modules.
+  // A system /tmp config makes the exact same package names unresolvable.
+  const dir = mkdtempSync(join(packageDir, '.canvas-real-composition-'))
   const config = join(dir, 'cordis.yml')
   writeFileSync(config, [
     "- id: session",
     "  name: '@deepseek-ai/dsh-session'",
-    "- id: invariants",
-    "  name: '@deepseek-ai/dsh-invariants'",
     "- id: agent",
     "  name: '@deepseek-ai/dsh-agent'",
     "- id: session-projection",
@@ -81,16 +83,22 @@ async function bootCanvasComposition(): Promise<Context> {
   ].join('\n'))
 
   const ctx = new Context()
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } })
-  await ctx.loader.await()
-  return ctx
+  try {
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } })
+    await ctx.loader.await()
+    return { ctx, dir }
+  } catch (error) {
+    await ctx.fiber.dispose()
+    rmSync(dir, { recursive: true, force: true })
+    throw error
+  }
 }
 
 describe('Canvas REAL Loader composition', () => {
   it('mounts the package invariant so direct current writes fail while CanvasService commits succeed', async () => {
-    const ctx = await bootCanvasComposition()
+    const { ctx, dir } = await bootCanvasComposition()
     try {
       const agent = registerLiveAgent(ctx, 'canvas-real-composition-agent')
       const created = ctx.canvas.create(agent, { workflow: workflow() })
@@ -131,6 +139,7 @@ describe('Canvas REAL Loader composition', () => {
       expect(edited.workflow?.name).toBe('committed workflow')
     } finally {
       await ctx.fiber.dispose()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

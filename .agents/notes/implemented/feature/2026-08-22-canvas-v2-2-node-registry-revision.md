@@ -1,56 +1,47 @@
-# Canvas V2.2 node registry revision identity
+# Agent Note: Canvas V2.2 node registry revision identity
+
+Status: implemented
+
+English | [中文](2026-08-22-canvas-v2-2-node-registry-revision.zh.md)
 
 ## Problem
 
 N10 already had the correct high-level ownership: `ctx.mediaNodes` was the process-local Host authority for versioned media-node definitions, registrations were effect-scoped, custom node types were open-world, and Browser consumers received only a data-safe catalog. The missing piece was catalog identity.
 
-The old `canvasFeatures.listNodes()` shape returned only `CanvasNodeCatalogEntry[]`. After a plugin unload/HMR replacement there was no mechanical way for a consumer or test to say which exact Host Registry mutation state produced a Browser catalog. A Browser could only compare array contents or invent its own generation counter, which would create a second authority and make stale-catalog reasoning ambiguous.
+The old `canvasFeatures.listNodes()` shape returned only `CanvasNodeCatalogEntry[]`. After a plugin unload or HMR replacement there was no mechanical way for a consumer or test to identify which exact Host Registry mutation state produced a Browser catalog. Comparing array contents was insufficient, while inventing a Browser-side generation counter would create a second authority and make stale-catalog reasoning ambiguous.
 
-## Durable maintenance contract
+## Decision
 
-`MediaNodeRegistry` owns a **process-local** monotonic mutation revision for the lifetime of that Registry instance.
+`MediaNodeRegistry` owns a process-local monotonic mutation revision for the lifetime of that Registry instance and exposes an atomic `snapshot()` containing `{ revision, definitions }`.
 
-- A fresh Registry starts at revision `0`.
-- Every successful `(type, version)` registration advances revision exactly once.
-- Every successful exact unregistration advances revision exactly once.
-- Validation failures and duplicate-registration failures do not advance revision.
-- HMR-style unload followed by replacement registration is two mutations and therefore two different revisions.
-- `snapshot()` returns `{ revision, definitions }` synchronously so the revision and ordered definition set describe the same Registry state.
-- `MediaNodeRegistryChange` includes the resulting revision for observers.
+A fresh Registry starts at revision `0`. Every successful `(type, version)` registration advances the revision exactly once, and every successful exact unregistration advances it exactly once. Validation failures and duplicate-registration failures do not advance the revision. An HMR-style unload followed by replacement registration is two mutations and therefore produces two different revisions. `MediaNodeRegistryChange` carries the resulting revision so observers can align lifecycle notifications with the same Registry sequence.
 
-The revision is **not durable state**. It is not appended to Canvas Session history, is not a workflow revision, and is not comparable across Host/Registry restarts. Restarting the Host rebuilds the Registry and may restart its revision sequence. Consumers must treat a newly fetched Host snapshot as authoritative for that Host lifetime.
+The revision is not durable state. It is not appended to Canvas Session history, is not a workflow revision, and is not comparable across Host or Registry restarts. Restarting the Host rebuilds the Registry and may restart its revision sequence. Consumers treat a newly fetched Host snapshot as authoritative for that Host lifetime.
 
-## Host / Browser boundary
+The Browser-safe catalog contract is `CanvasNodeCatalogSnapshot { revision, entries }`. `CanvasFeatureService.remoteExportListNodes()` reads one `ctx.mediaNodes.snapshot()`, projects definitions into client-safe entries, and forwards the exact Registry revision. Runtime Zod schemas and functions, Provider objects, credentials, and executor state remain Host-only.
 
-The Browser-safe catalog shape is `CanvasNodeCatalogSnapshot { revision, entries }`.
+`ui-canvas` stores the returned revision as `nodeCatalogRevision` alongside the entries it loaded. It does not increment, synthesize, persist, or otherwise maintain an independent registry revision. If catalog discovery fails, `nodeCatalogRevision` is absent and Editor may degrade while Minimal and historical Canvas rendering remain readable.
 
-`CanvasFeatureService.remoteExportListNodes()` takes one `ctx.mediaNodes.snapshot()` and projects its definitions into client-safe entries while forwarding the exact Registry revision. Runtime Zod schemas/functions, Provider objects, credentials, and executor state remain Host-only.
+The open-world rule remains unchanged. Built-in nodes are initial registrations, not a permanent enum. Historical workflows containing an unavailable custom node remain decodable and presentable; current validation or execution can report the definition as unavailable. Installing the matching plugin can make the same historical node resolvable without modifying a Canvas-core switch.
 
-`ui-canvas` stores that returned revision as `nodeCatalogRevision` alongside the entries it loaded. It must not increment, synthesize, persist, or otherwise maintain an independent registry revision. If catalog discovery fails, `nodeCatalogRevision` is absent and Editor may degrade while Minimal/historical Canvas rendering remains available.
+N10 intentionally does not add Browser polling or a push-synchronization protocol. Every successful catalog read instead carries an exact Host Registry identity, so a future refresh or subscription feature can replace snapshots using Host-provided identity without changing the authority model.
 
-N10 intentionally does not add Browser polling or a push-synchronization protocol. The important invariant is that every successful catalog read has an exact Host Registry identity. A future refresh/subscription feature can compare or replace snapshots using Host-provided identity without changing the authority model.
+## Alternatives considered
 
-## Open-world rule remains unchanged
+**A Browser-local generation counter.** Rejected because it would create a second catalog authority whose values could diverge from Host Registry mutations and could not prove which Host state produced a catalog.
 
-This revision contract must not be implemented by closing the node-type universe.
+**A durable or cross-restart registry generation.** Rejected because Registry membership is rebuildable process metadata, not Canvas or Session durable state. Persisting it would conflate deployment/plugin lifecycle with workflow history.
 
-Built-in nodes are initial registrations, not a permanent enum. Historical workflows containing an unavailable custom node remain decodable/presentable; current validation/execution can report the definition as unavailable. Installing the matching plugin can make the same historical node resolvable without modifying a Canvas-core switch.
+**A closed built-in node whitelist.** Rejected because the Registry is intentionally open-world. Closing the type universe would break historical custom-node readability and plugin extensibility without improving catalog identity.
 
-Do not add a Browser node registry, built-in admission whitelist, or durable migration that deletes unknown plugin nodes merely to make catalog synchronization easier.
+**Live polling or push synchronization in N10.** Rejected for this node because exact snapshot identity is sufficient for the current activation model. Live freshness can be added later without introducing another authority.
 
-## Validation that should remain pinned
+## Testing
 
-Focused tests should continue proving:
+Focused coverage pins the shipped contract: duplicate registration does not change the existing definition or revision; register → unregister → HMR replacement register → unregister produces four distinct revisions; change notifications carry the resulting revisions; seven built-ins produce seven successful mutations from a fresh Registry; Host `listNodes()` returns the exact current Registry revision and reflects a later snapshot on a later call; Browser preserves the Host revision; catalog failure exposes no fabricated revision and preserves Minimal readability; and custom-node historical/open-world behavior remains intact.
 
-1. duplicate registration fails without changing the existing definition or revision;
-2. register → unregister → HMR replacement register → unregister produces four distinct revisions;
-3. change notifications carry the exact resulting revisions;
-4. registering the seven built-ins yields seven successful mutations from a fresh Registry;
-5. Host `listNodes()` returns the exact Registry revision and reflects a later snapshot on a later call;
-6. Browser preserves the Host revision with the loaded catalog;
-7. Browser catalog failure exposes no fabricated revision and does not erase the Minimal read surface;
-8. custom-node historical/open-world behavior remains intact.
+## Consequences
 
-## Residual boundary
+The benefit is a mechanically testable identity for every client-safe node catalog without creating Browser authority or durable Registry state. Host, Browser, and future refresh logic can reason about which process-local Registry snapshot produced the entries they are using.
 
-A catalog loaded during one Browser activation can become old if plugins change later because N10 does not provide live catalog subscription. That is a presentation freshness concern for a later node, not permission to create a second authority. When refresh is needed, fetch the Host catalog again and replace both `entries` and its Host-provided `revision` together.
+The cost is that revision values are meaningful only within one Registry lifetime, and a catalog loaded during one Browser activation can become stale if plugins change later because N10 does not provide live subscription. When refresh is needed, the Browser must fetch the Host catalog again and replace both `entries` and the Host-provided `revision` together rather than comparing revisions across Host restarts or synthesizing a local generation.
