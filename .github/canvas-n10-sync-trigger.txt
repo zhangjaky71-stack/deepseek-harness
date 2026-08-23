@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N10 validation. Do not merge.
-Attempt: 5 — compare exact N09/N10 static diagnostics with location metadata normalized and multiplicity preserved; continue full build/test/invariant chain.
+Attempt: 6 — validate corrected bilingual N10 Agent Note format and continue exact-baseline static, build, focused tests, invariants, and gated push.
