@@ -25,7 +25,7 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Merge validated N06 and retain N07 product ownership
+      - name: Merge validated N06 and apply scoped N07 carry-forward fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -34,14 +34,76 @@ jobs:
           git fetch origin fix/canvas-n06-v2.2-remote-history fix/canvas-n07-v2.2-dynamic-surface
           git merge --no-edit -X ours origin/fix/canvas-n06-v2.2-remote-history >/tmp/merge.log 2>&1 || { cat /tmp/merge.log; exit 1; }
 
-          # N06 made CanvasEditorState mutable for the store action draft. N07 adds
-          # one new generation-owner field that must follow the same rule.
           python - <<'PY'
           from pathlib import Path
-          path = Path('packages/client/ui-canvas/src/client/store.ts')
-          text = path.read_text()
-          text = text.replace('  readonly owner: CanvasEditorOwner | null', '  owner: CanvasEditorOwner | null')
-          path.write_text(text)
+
+          # The store action reducer mutates these fields. N06 removed readonly from
+          # the existing fields; N07 added owner and must preserve that reducer shape.
+          store = Path('packages/client/ui-canvas/src/client/store.ts')
+          text = store.read_text()
+          for field in ('owner', 'saveStatus', 'draft', 'undo', 'redo', 'clipboard', 'localPositions'):
+              text = text.replace(f'  readonly {field}:', f'  {field}:')
+          store.write_text(text)
+
+          # Carry forward the verified Cordis/SlotRegistry test-fixture API changes,
+          # while keeping N07's shell.main ownership and optional mutation Remote.
+          capability = Path('packages/client/ui-canvas/tests/capability-gate.client.spec.ts')
+          text = capability.read_text()
+          text = text.replace('while (contexts.length > 0) await contexts.pop()!.dispose()', 'while (contexts.length > 0) await contexts.pop()!.fiber.dispose()')
+          old_register = """  slots.register({
+    name: 'root',
+    children: { 'shell.main': { kind: 'single', scope: 'session' } },
+  }, () => null)"""
+          new_register = """  slots.register({
+    name: 'root',
+    children: { 'shell.main': { kind: 'single', scope: 'session' } },
+    inject: () => ({}),
+  }, (_p: { renderSlot?: unknown }) => null)"""
+          if old_register in text:
+              text = text.replace(old_register, new_register, 1)
+          elif new_register not in text:
+              raise SystemExit('capability-gate: shell.main root fixture shape not recognized')
+          text = text.replace(
+              '(entry!.inject as (sessionId: never) => CanvasViewInjected)',
+              '(entry!.inject as unknown as (sessionId: never) => CanvasViewInjected)',
+          )
+          capability.write_text(text)
+
+          bundle = Path('packages/client/ui-canvas/tests/client-bundle.client.spec.ts')
+          text = bundle.read_text()
+          text = text.replace('await enabled.ctx.dispose()', 'await enabled.ctx.fiber.dispose()')
+          text = text.replace('await disabled.ctx.dispose()', 'await disabled.ctx.fiber.dispose()')
+          bundle.write_text(text)
+
+          # N07 owns the real WorkflowEditor fixture. Remove a predecessor-only
+          # capability parameter if the three-way merge retained it, and preserve
+          # the branded CanvasSnapshot test cast via an explicit unknown boundary.
+          features = Path('packages/client/ui-canvas/tests/features.client.spec.tsx')
+          text = features.read_text()
+          text = text.replace("  resolvedCapabilities: CanvasCapabilities = capabilities({ editor: false }),\n", '')
+          text = text.replace(
+              "  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }",
+              "  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }",
+          )
+          features.write_text(text)
+
+          # N07 deliberately tests Minimal as result/state-only. If the merge pulled
+          # in N06's predecessor editorProps helper without its imports, drop that
+          # dead helper rather than reintroducing the predecessor Editor assertion.
+          view = Path('packages/client/ui-canvas/tests/view.client.spec.tsx')
+          text = view.read_text()
+          start = text.find('const capabilities: CanvasCapabilities = {')
+          if start >= 0:
+              marker = "describe('Canvas Minimal surface'"
+              end = text.find(marker, start)
+              if end < 0:
+                  raise SystemExit('view: predecessor helper found but N07 describe marker missing')
+              text = text[:start] + text[end:]
+          text = text.replace("import type { ComponentProps } from 'react'\n", '')
+          text = text.replace("import type { CanvasCapabilities, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'", "import type { CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'")
+          text = text.replace("import { CanvasView, MinimalCanvas } from '../src/client/CanvasView.tsx'", "import { MinimalCanvas } from '../src/client/CanvasView.tsx'")
+          text = text.replace('  } as CanvasSnapshot\n', '  } as unknown as CanvasSnapshot\n', 1)
+          view.write_text(text)
           PY
 
           git diff --check
@@ -49,7 +111,7 @@ jobs:
           git merge-base --is-ancestor origin/fix/canvas-n06-v2.2-remote-history HEAD
           grep -Fq "PropsRuntime<'shell.main'>" packages/client/ui-canvas/src/client/CanvasView.tsx
           grep -Fq "'shell.main': { kind: 'single'; scope: 'session'" packages/client/ui-layout/src/client/index.ts
-          echo "N06->N07 merge and ownership assertions: PASS"
+          echo "N06->N07 merge, shell ownership, and scoped carry-forward fixes: PASS"
 
       - name: Reconcile N07 workspace lock importer
         shell: bash
@@ -124,20 +186,25 @@ jobs:
             packages/client/ui-layout/tests/apply.client.spec.ts \
             packages/client/ui-layout/tests/service.client.spec.ts \
             packages/bundle/base/tests/canvas-real-composition.spec.ts >/tmp/n07-tests.log 2>&1 || { tail -n 300 /tmp/n07-tests.log; exit 1; }
-          tail -n 80 /tmp/n07-tests.log
+          tail -n 100 /tmp/n07-tests.log
 
       - name: Validate built package invariants
         shell: bash
         run: |
           set -o pipefail
           pnpm run verify-built-package-invariants >/tmp/invariants.log 2>&1 || { tail -n 240 /tmp/invariants.log; exit 1; }
-          tail -n 80 /tmp/invariants.log
+          tail -n 100 /tmp/invariants.log
 
       - name: Commit and push only after all gates pass
         shell: bash
         run: |
           set -euo pipefail
-          git add pnpm-lock.yaml packages/client/ui-canvas/src/client/store.ts
+          git add pnpm-lock.yaml \
+            packages/client/ui-canvas/src/client/store.ts \
+            packages/client/ui-canvas/tests/capability-gate.client.spec.ts \
+            packages/client/ui-canvas/tests/client-bundle.client.spec.ts \
+            packages/client/ui-canvas/tests/features.client.spec.tsx \
+            packages/client/ui-canvas/tests/view.client.spec.tsx
           if ! git diff --cached --quiet; then
             git commit --amend --no-edit
           fi
