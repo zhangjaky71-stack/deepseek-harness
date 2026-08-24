@@ -85,6 +85,12 @@ jobs:
           grep -Fq 'Status: `BLOCKED / REVIEW`' .agents/workplans/canvas-v2.1/N11.5-rc8-compatibility.md
           echo 'Renderer-root + validated overlay ownership assertions: PASS'
 
+      - name: Diagnose markdown links
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run verify-md-links 2>&1 | tee /tmp/md-links.log
+
       - name: Exact overlay static differential
         run: /tmp/canvas-n11-5-renderer-validation.sh static
 
