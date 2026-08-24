@@ -96,6 +96,14 @@ jobs:
       - name: Validate markdown links
         run: pnpm run verify-md-links
 
+      - name: Build renderer generated type surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @deepseek-ai/dsh-client-ui-renderer bundle
+          test -f packages/client/ui-renderer/lib/types/index.d.ts
+          echo 'Renderer generated type surface: PASS'
+
       - name: Exact overlay static differential
         run: /tmp/canvas-n11-5-renderer-validation.sh static
 
