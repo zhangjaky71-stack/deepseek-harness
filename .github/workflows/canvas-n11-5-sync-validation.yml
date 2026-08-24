@@ -87,17 +87,23 @@ jobs:
           from pathlib import Path
           path = Path('packages/typert/generator/src/analyzer.ts')
           text = path.read_text()
-          old = '''    const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol
+          old = '''    const sourceFile = this.sourceFiles.get(realPath(sourcePathForExport(registration.root, target))) as ts.SourceFile
+              const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol
               const exported = this.checker.getExportsOfModule(moduleSymbol)
           '''
-          new = '''    const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol | undefined
+          new = '''    const sourcePath = realPath(sourcePathForExport(registration.root, target))
+              const sourceFile = this.sourceFiles.get(sourcePath)
+              if (sourceFile === undefined) {
+                throw new Error(`TY-SOURCEFILE-DIAGNOSTIC package=${module.package} subpath=${module.subpath} face=${face} requested=${requestedName} symbol=${symbol.name} target=${target} sourcePath=${sourcePath} registrationRoot=${registration.root}`)
+              }
+              const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile)
               if (moduleSymbol === undefined) {
-                throw new Error(`TY-PACKAGE-EXPORT-DIAGNOSTIC package=${module.package} subpath=${module.subpath} face=${face} requested=${requestedName} symbol=${symbol.name} target=${target} source=${sourceFile.fileName}`)
+                throw new Error(`TY-MODULE-SYMBOL-DIAGNOSTIC package=${module.package} subpath=${module.subpath} face=${face} requested=${requestedName} symbol=${symbol.name} target=${target} sourcePath=${sourcePath}`)
               }
               const exported = this.checker.getExportsOfModule(moduleSymbol)
           '''
           if old not in text:
-              raise SystemExit('packageExportName patch anchor not found')
+              raise SystemExit('packageExportName source-file patch anchor not found')
           path.write_text(text.replace(old, new, 1))
           PY
           pnpm run verify-cordis-catalog
