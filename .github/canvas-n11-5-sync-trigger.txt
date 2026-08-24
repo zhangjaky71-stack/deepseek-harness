@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Attempt: 4 — rerun full final-N11 baseline validation after bilingual Agent Note pairing remediation; gated push only after all gates pass.
+Renderer-root Attempt: 1 — ordinary final compatibility-overlay to renderer-root merge probe only; print exact conflict set on failure.
