@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-/** Web assembly pin for the Canvas conversation-view plugin. */
-describe('dsh-web-app Canvas roster', () => {
+/** Web assembly pin for the dynamic Canvas product-surface plugin. */
+describe('dsh-web-app Canvas dynamic roster', () => {
   it('ships ui-canvas exactly once and declares its workspace dependency', () => {
     const root = resolve('packages/bundle/web-app')
     const patch = readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8')

@@ -81,7 +81,7 @@ describe('ui-canvas built client artifact', () => {
     ctx.provide('remote', {
       canvasFeatures: {
         get: async () => ({ ok: true, value: capabilities(canvasEnabled) }),
-        listNodes: async () => ({ ok: true, value: [] }),
+        listNodes: async () => ({ ok: true, value: { revision: 0, entries: [] } }),
       },
     } as never)
     ctx.provide('remote.canvasFeatures', {} as never)
