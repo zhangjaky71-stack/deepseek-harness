@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 14 — validate latest #41 head after ui-renderer workspace source path remediation; rerun semantic predecessor merge, lock/pairing, markdown, Host→Client builds, exact overlay static differential, renderer/module/Canvas regressions, built invariants, and gated push only after every gate passes.
+Renderer-root Attempt: 15 — focused diagnostic after Attempt 14 crossed Cordis config but crashed verify-cordis-catalog; reproduce exact predecessor merge + Host/Client build and print the package/subpath/symbol/source causing Typert packageExportName to receive an undefined module symbol. No gated push in this diagnostic run.
