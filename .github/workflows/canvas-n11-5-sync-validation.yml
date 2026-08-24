@@ -73,7 +73,17 @@ jobs:
         run: /tmp/canvas-n11-5-renderer-validation.sh pair-commit
 
       - name: Ownership assertions
-        run: /tmp/canvas-n11-5-renderer-validation.sh ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f packages/client/ui-renderer/package.json
+          grep -R -Fq 'createRoot' packages/client/ui-renderer/src/client
+          grep -Fq 'uiRenderer.mount' packages/client/web/src/boot.ts
+          grep -R -Fq '__ModuleLoader__' packages/client/modules/src packages/client/web/src
+          grep -Fq "expect(Object.keys(canvasClient).sort()).toEqual(['apply', 'inject'])" packages/client/ui-canvas/tests/rc8-contract.client.spec.ts
+          grep -Fq 'value: { revision: 0, entries: [] }' packages/client/ui-canvas/tests/client-bundle.client.spec.ts
+          grep -Fq 'Status: `BLOCKED / REVIEW`' .agents/workplans/canvas-v2.1/N11.5-rc8-compatibility.md
+          echo 'Renderer-root + validated overlay ownership assertions: PASS'
 
       - name: Exact overlay static differential
         run: /tmp/canvas-n11-5-renderer-validation.sh static
