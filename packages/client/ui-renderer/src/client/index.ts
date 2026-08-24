@@ -7,6 +7,7 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 
+/** Selector hook bound to one session snapshot source. */
 export type UseSession<Snap extends object = object> = SnapshotSelectorHook<Snap>
 export type {
   ChainRenderOpts, HostObservable, RenderOpts, SessionProvideInfo, SnapshotSelectorHook,
@@ -14,7 +15,9 @@ export type {
 } from '@deepseek-ai/dsh-client-ui-slots'
 export type { SessionProviderProps } from './session-provider.tsx'
 
+/** Dynamic renderer service handed to the framework-free Web boot kernel. */
 export interface UiRendererService {
+  /** Mount the assembled application and return its lifecycle disposer. */
   mount: (container: HTMLElement) => () => void
 }
 
@@ -22,6 +25,7 @@ declare module '@deepseek-ai/cordis' {
   interface Context { uiRenderer: UiRendererService }
 }
 
+/** Cordis dependencies required before the browser renderer can activate. */
 export const inject = ['slots', 'sessions']
 
 interface BootSnapshot { className: string; html: string }
@@ -47,6 +51,11 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
   flushSync(() => { root.render(app()) })
   return root
 }
+
+/**
+ * Install slot rendering and publish dynamic React-root ownership.
+ * @param ctx - Browser Cordis context that owns slots, sessions, and service lifetime.
+ */
 export function apply(ctx: Context): void {
   ctx.slots.install(createSlotRenderer())
   ctx.reflect.provide('uiRenderer', {
