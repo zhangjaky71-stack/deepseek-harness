@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 4 — semantic three-note merge plus pnpm-generated lock reconciliation and exact validated-overlay full validation; gated push only after all gates pass.
+Renderer-root Attempt: 5 — semantic three-note merge, pnpm-generated lock reconciliation, corrected ownership assertions, and exact validated-overlay full validation; gated push only after all gates pass.
