@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 10 — run the ui-renderer project-reference TypeScript build before its tsdown bundle, then exact validated-overlay static/build/test/invariant validation; gated push only after all gates pass.
+Renderer-root Attempt: 11 — restore the official rc.8 client build-environment ambient and validate in formal Host→Client→static order, retaining lock/pairing/markdown/invariant/JSDoc remediations; gated push only after every gate passes.
