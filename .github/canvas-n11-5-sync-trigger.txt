@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Attempt: 2 — full final-N11 baseline validation for the N11.5 compatibility overlay; gated push only after all gates pass.
+Attempt: 3 — rerun full final-N11 baseline validation after Agent Note format remediation; gated push only after all gates pass.
