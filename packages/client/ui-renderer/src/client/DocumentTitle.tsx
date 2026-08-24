@@ -8,8 +8,13 @@ export interface DocumentTitleProps {
   title?: string
 }
 
-/** Project the selected session title into the browser title. */
-export function DocumentTitle({ title }: DocumentTitleProps): null {
+/**
+ * Project the selected session title into the browser title.
+ * @param props - Selected-session title projection input.
+ * @returns No rendered node; this component updates `document.title` by effect.
+ */
+export function DocumentTitle(props: DocumentTitleProps): null {
+  const { title } = props
   const productTitle = process.env.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE
   useEffect(() => {
     document.title = title === undefined ? productTitle : `${title} — ${productTitle}`
