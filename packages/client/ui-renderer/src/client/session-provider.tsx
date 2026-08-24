@@ -30,7 +30,10 @@ export function useHost(): SlotRendererHost {
 
 const BindingContext = createContext<SessionMaybeProvideInfo | null>(null)
 
-/** Read the current-session-optional bundle supplied at the root. */
+/**
+ * Read the current-session-optional bundle supplied at the root.
+ * @returns The current optional-session provide bundle.
+ */
 export function useSessionMaybeProvideInfo(): SessionMaybeProvideInfo {
   const info = useContext(BindingContext)
   if (!info) throw new SlotAssemblyError('session-aware slot rendered outside the root binding provider')
@@ -70,7 +73,11 @@ const absentSource: HostObservable<undefined> = {
   subscribe: () => () => {},
 }
 
-/** Bind a source that disappears with the current session to an optional selector hook. */
+/**
+ * Bind a source that disappears with the current session to an optional selector hook.
+ * @param source - Session-scoped observable, or undefined while no session is active.
+ * @returns A selector hook that yields undefined when the source is absent.
+ */
 export function maybeObservableHook<T>(source: HostObservable<T> | undefined): MaybeSnapshotSelectorHook<T> {
   if (source !== undefined) return observableHook(source)
   return useAbsentSnapshot
@@ -92,6 +99,8 @@ function useAbsentSnapshot<S>(_selector: (snapshot: never) => S, _equal?: (a: S,
  * runs per call and the subscribe reference stays stable per key. A key no
  * baseline or frame has carried (or a no-session bundle) reads `undefined` —
  * capability absence — keeping the hook order constant.
+ * @param info - Stable session provide bundle whose projection faces are exposed.
+ * @returns A key-addressed projection selector hook bound to that bundle.
  */
 export function projectionHook(info: SessionMaybeProvideInfo): (
   key: string, selector?: (value: unknown) => unknown, eq?: (a: unknown, b: unknown) => boolean,
@@ -121,8 +130,11 @@ const projectionHookCache = new WeakMap<SessionMaybeProvideInfo, (
  * per-entry identity is the outlet's adoption bookkeeping (SessionMaybeEntry):
  * a blank-born incarnation adopts the first session without remounting, and
  * every later transition (switch or loss) remounts like a strict entry.
+ * @param props - Provider children rendered inside the current optional-session binding.
+ * @returns The binding context provider tree.
  */
-export function SessionMaybeProvider({ children }: { children: ReactNode }) {
+export function SessionMaybeProvider(props: { children: ReactNode }): ReactNode {
+  const { children } = props
   const host = useHost()
   const info = observableHook(host.sessions.provideInfo)(s => s)
   return (
@@ -146,8 +158,11 @@ export interface SessionProviderProps {
  * rebuilds the session subtree. This dependency-inverted layer uses plain
  * string ids; `PropsRuntime` applies the branded type at the component
  * boundary.
+ * @param props - Session body and optional no-session body.
+ * @returns The current session binding provider or the no-session body.
  */
-export function SessionProvider({ empty, children }: SessionProviderProps) {
+export function SessionProvider(props: SessionProviderProps): ReactNode {
+  const { empty, children } = props
   const host = useHost()
   const info = observableHook(host.sessions.provideInfo)(s => s)
   const id = info.sessionId
