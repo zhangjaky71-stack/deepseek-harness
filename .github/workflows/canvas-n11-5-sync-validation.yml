@@ -70,7 +70,15 @@ jobs:
           echo "N11.5 renderer-root frozen workspace install after toolchain reconciliation: PASS"
 
       - name: Pair notes and commit merge
-        run: /tmp/canvas-n11-5-renderer-validation.sh pair-commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/canvas-n11-5-renderer-validation.sh pair-commit
+          pnpm run verify-translation-pairing --write packages/client/modules/README.md
+          git add packages/client/modules/README.i18n.yaml
+          git commit --amend --no-edit
+          git merge-base --is-ancestor origin/fix/canvas-n11-5-v2.2-rc8-compatibility HEAD
+          echo 'Architecture + modules README pairing recorded in real predecessor merge commit: PASS'
 
       - name: Ownership assertions
         shell: bash
@@ -85,11 +93,8 @@ jobs:
           grep -Fq 'Status: `BLOCKED / REVIEW`' .agents/workplans/canvas-v2.1/N11.5-rc8-compatibility.md
           echo 'Renderer-root + validated overlay ownership assertions: PASS'
 
-      - name: Diagnose markdown links
-        shell: bash
-        run: |
-          set -o pipefail
-          pnpm run verify-md-links 2>&1 | tee /tmp/md-links.log
+      - name: Validate markdown links
+        run: pnpm run verify-md-links
 
       - name: Exact overlay static differential
         run: /tmp/canvas-n11-5-renderer-validation.sh static
