@@ -12,7 +12,7 @@ Host 会在 parser preload 运行前安装 `window.__ModuleLoader__`。其 queue
 
 Node 侧会扫描已启用的 Loader 配置项以发现 web `dsh.client` 包，解析每个 `exports["./client"]`，把构建后的 bundle 哈希和包专属 `dsh.client.external` 请求写入启动图，把动态提供方排在消费者之前，并通过 `/plugins` 提供该文件及其 sourcemap。源码启动会把宿主侧导入映射到 TypeScript 源码，但仍消费这一构建后的客户端导出；缺失文件共享一条构建说明，随后以包／路径列表列出各项，而无关的文件系统错误仍是独立故障。
 
-`dsh.client.external` 是统一基座之外的可选精确 specifier 请求列表。统一基座包括外壳播种的 React、Cordis 和静态 UI 库，以及由 HTML parser 预载的 runtime。请求由其命名的动态 package row 或精确静态表键回答；只有末尾 `/client` 会别名到 package row，并且不存在 provider 别名声明。纯类型 import 会被擦除，不产生请求。组合阶段会拒绝畸形请求、缺失提供方、自请求和同步请求环；import 与 prefetch 会在消费者物化前递归登记动态提供方。参见[共享模块与模块图](../AGENTS.md#shared-modules-and-the-module-graph)。
+`dsh.client.external` 是统一基座之外的可选精确 specifier 请求列表。统一基座包括外壳播种的 React、Cordis 和静态 UI 库，以及由 HTML parser 预载的 runtime。请求由其命名的动态 package row 或精确静态表键回答；只有末尾 `/client` 会别名到 package row，并且不存在 provider 别名声明。纯类型 import 会被擦除，不产生请求。组合阶段会拒绝畸形请求、缺失提供方、自请求和同步请求环；import 与 prefetch 会在消费者物化前递归登记动态提供方。当前 `dsh.client` manifest 与依赖图规则见[新插件包检查清单](../AGENTS.md#new-plugin-package-checklist)。
 
 ## 模型体验
 
