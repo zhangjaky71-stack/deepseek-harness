@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 6 — diagnose exact markdown-link failures after semantic merge and pnpm lock reconciliation; no gated push unless all downstream gates pass.
+Renderer-root Attempt: 7 — fixed official-rc8 inherited modules README anchors, repository-generated bilingual pairing, exact validated-overlay static/build/test/invariant validation, gated push only after all gates pass.
