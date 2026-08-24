@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 9 — prebuild the new ui-renderer generated type surface before exact static differential, retaining invariant/JSDoc/markdown/lock/pairing remediations; full exact-overlay validation and gated push only after all gates pass.
+Renderer-root Attempt: 10 — run the ui-renderer project-reference TypeScript build before its tsdown bundle, then exact validated-overlay static/build/test/invariant validation; gated push only after all gates pass.
