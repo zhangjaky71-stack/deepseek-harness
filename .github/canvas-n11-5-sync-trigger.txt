@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 7 — fixed official-rc8 inherited modules README anchors, repository-generated bilingual pairing, exact validated-overlay static/build/test/invariant validation, gated push only after all gates pass.
+Renderer-root Attempt: 8 — package invariant companion remediation plus strict public-export JSDoc normalization, with prior markdown/lock/pairing fixes retained; full exact-overlay validation and gated push only after all gates pass.
