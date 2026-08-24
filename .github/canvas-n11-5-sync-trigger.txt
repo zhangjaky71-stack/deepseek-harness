@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 13 — add the missing workspace source path for @deepseek-ai/dsh-client-ui-renderer after Attempt 12 proved Host/Client builds and isolated verify-cordis-config; rerun formal Host→Client→static→regressions→invariants order with gated push only after every gate passes.
+Renderer-root Attempt: 14 — validate latest #41 head after ui-renderer workspace source path remediation; rerun semantic predecessor merge, lock/pairing, markdown, Host→Client builds, exact overlay static differential, renderer/module/Canvas regressions, built invariants, and gated push only after every gate passes.
