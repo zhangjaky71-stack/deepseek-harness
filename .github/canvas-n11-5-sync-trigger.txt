@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 11 — restore the official rc.8 client build-environment ambient and validate in formal Host→Client→static order, retaining lock/pairing/markdown/invariant/JSDoc remediations; gated push only after every gate passes.
+Renderer-root Attempt: 12 — restore the official rc.8 Web→ui-renderer project reference on top of the client build-environment ambient, then validate formal Host→Client→static→regressions→invariants order; gated push only after every gate passes.
