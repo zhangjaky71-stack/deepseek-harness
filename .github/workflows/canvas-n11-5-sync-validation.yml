@@ -100,9 +100,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @deepseek-ai/dsh-client-ui-renderer bundle
+          pnpm exec tsc -b packages/client/ui-renderer/tsconfig.json
+          test -f packages/client/ui-renderer/lib/types/index.js
           test -f packages/client/ui-renderer/lib/types/index.d.ts
-          echo 'Renderer generated type surface: PASS'
+          test -f packages/client/ui-renderer/lib/types/invariant.js
+          test -f packages/client/ui-renderer/lib/types/invariant.d.ts
+          pnpm --filter @deepseek-ai/dsh-client-ui-renderer bundle
+          echo 'Renderer generated type surface + bundle: PASS'
 
       - name: Exact overlay static differential
         run: /tmp/canvas-n11-5-renderer-validation.sh static
