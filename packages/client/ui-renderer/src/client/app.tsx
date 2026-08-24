@@ -5,9 +5,19 @@ import { bindSnapshotSelector } from './bind.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
 
-export interface AssemblyDeps { readonly ctx: Context }
+/** Dependencies required to assemble the browser application root. */
+export interface AssemblyDeps {
+  /** Browser Cordis context containing sessions and the installed slot renderer. */
+  readonly ctx: Context
+}
 
-export function buildRenderApp({ ctx }: AssemblyDeps): () => ReactNode {
+/**
+ * Build the React application closure rendered by the dynamic root owner.
+ * @param deps - Renderer assembly dependencies.
+ * @returns A closure that projects the selected-session title and root slot.
+ */
+export function buildRenderApp(deps: AssemblyDeps): () => ReactNode {
+  const { ctx } = deps
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('ui renderer: sessions service unavailable')
   const useSessions = bindSnapshotSelector(sessions.list)
