@@ -31,6 +31,25 @@ jobs:
           cp _validator/.github/scripts/canvas-n11-5-renderer-validation.sh /tmp/canvas-n11-5-renderer-validation.sh
           chmod +x /tmp/canvas-n11-5-renderer-validation.sh
           rm -rf _validator
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/canvas-n11-5-renderer-validation.sh')
+          text = path.read_text()
+          old = '''  (cd /tmp/n11-5-overlay-static && pnpm install --frozen-lockfile >/tmp/base-install.log 2>&1) || { tail -n 260 /tmp/base-install.log; exit 1; }
+
+            set +e
+          '''
+          new = '''  (cd /tmp/n11-5-overlay-static && pnpm install --frozen-lockfile >/tmp/base-install.log 2>&1) || { tail -n 260 /tmp/base-install.log; exit 1; }
+            (cd /tmp/n11-5-overlay-static && pnpm run build:lib:host >/tmp/base-host-build.log 2>&1) || { tail -n 420 /tmp/base-host-build.log; exit 1; }
+            (cd /tmp/n11-5-overlay-static && pnpm run build:lib:client >/tmp/base-client-build.log 2>&1) || { tail -n 420 /tmp/base-client-build.log; exit 1; }
+            echo "Exact overlay baseline Host+Client build before static comparison: PASS"
+
+            set +e
+          '''
+          if old not in text:
+              raise SystemExit('static baseline build patch anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
       - uses: pnpm/action-setup@v4
 
@@ -55,13 +74,19 @@ jobs:
           else
             grep -Fq 'ERR_PNPM_OUTDATED_LOCKFILE' /tmp/frozen-before.log
             grep -Fq 'packages/client/ui-renderer/package.json' /tmp/frozen-before.log
+            echo "Confirmed renderer package/lock mismatch; regenerating with pnpm."
             pnpm install --no-frozen-lockfile >/tmp/lock-reconcile.log 2>&1 || { tail -n 320 /tmp/lock-reconcile.log; exit 1; }
             mapfile -t unstaged < <(git diff --name-only | sort)
             expected=("pnpm-lock.yaml")
-            test "${unstaged[*]}" = "${expected[*]}"
+            if [ "${unstaged[*]}" != "${expected[*]}" ]; then
+              echo "Unexpected files changed by lock reconciliation:"
+              printf '  %s\n' "${unstaged[@]}"
+              exit 1
+            fi
             git add pnpm-lock.yaml
           fi
           pnpm install --frozen-lockfile >/tmp/frozen-after.log 2>&1 || { tail -n 320 /tmp/frozen-after.log; exit 1; }
+          echo "N11.5 renderer-root frozen workspace install after toolchain reconciliation: PASS"
 
       - name: Pair notes and commit merge
         shell: bash
@@ -72,6 +97,23 @@ jobs:
           git add packages/client/modules/README.i18n.yaml
           git commit --amend --no-edit
           git merge-base --is-ancestor origin/fix/canvas-n11-5-v2.2-rc8-compatibility HEAD
+          echo 'Architecture + modules README pairing recorded in real predecessor merge commit: PASS'
+
+      - name: Ownership assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f packages/client/ui-renderer/package.json
+          grep -R -Fq 'createRoot' packages/client/ui-renderer/src/client
+          grep -Fq 'uiRenderer.mount' packages/client/web/src/boot.ts
+          grep -R -Fq '__ModuleLoader__' packages/client/modules/src packages/client/web/src
+          grep -Fq "expect(Object.keys(canvasClient).sort()).toEqual(['apply', 'inject'])" packages/client/ui-canvas/tests/rc8-contract.client.spec.ts
+          grep -Fq 'value: { revision: 0, entries: [] }' packages/client/ui-canvas/tests/client-bundle.client.spec.ts
+          grep -Fq 'Status: `BLOCKED / REVIEW`' .agents/workplans/canvas-v2.1/N11.5-rc8-compatibility.md
+          echo 'Renderer-root + validated overlay ownership assertions: PASS'
+
+      - name: Validate markdown links
+        run: pnpm run verify-md-links
 
       - name: Host build
         run: /tmp/canvas-n11-5-renderer-validation.sh host-build
@@ -79,31 +121,14 @@ jobs:
       - name: Client build
         run: /tmp/canvas-n11-5-renderer-validation.sh client-build
 
-      - name: Diagnose Cordis catalog export resolution
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('packages/typert/generator/src/analyzer.ts')
-          text = path.read_text()
-          old = '''    const sourceFile = this.sourceFiles.get(realPath(sourcePathForExport(registration.root, target))) as ts.SourceFile
-              const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile) as ts.Symbol
-              const exported = this.checker.getExportsOfModule(moduleSymbol)
-          '''
-          new = '''    const sourcePath = realPath(sourcePathForExport(registration.root, target))
-              const sourceFile = this.sourceFiles.get(sourcePath)
-              if (sourceFile === undefined) {
-                throw new Error(`TY-SOURCEFILE-DIAGNOSTIC package=${module.package} subpath=${module.subpath} face=${face} requested=${requestedName} symbol=${symbol.name} target=${target} sourcePath=${sourcePath} registrationRoot=${registration.root}`)
-              }
-              const moduleSymbol = this.checker.getSymbolAtLocation(sourceFile)
-              if (moduleSymbol === undefined) {
-                throw new Error(`TY-MODULE-SYMBOL-DIAGNOSTIC package=${module.package} subpath=${module.subpath} face=${face} requested=${requestedName} symbol=${symbol.name} target=${target} sourcePath=${sourcePath}`)
-              }
-              const exported = this.checker.getExportsOfModule(moduleSymbol)
-          '''
-          if old not in text:
-              raise SystemExit('packageExportName source-file patch anchor not found')
-          path.write_text(text.replace(old, new, 1))
-          PY
-          pnpm run verify-cordis-catalog
+      - name: Exact overlay static differential
+        run: /tmp/canvas-n11-5-renderer-validation.sh static
+
+      - name: Renderer/module/overlay regressions
+        run: /tmp/canvas-n11-5-renderer-validation.sh tests
+
+      - name: Built package invariants
+        run: /tmp/canvas-n11-5-renderer-validation.sh invariants
+
+      - name: Gated push
+        run: /tmp/canvas-n11-5-renderer-validation.sh push
