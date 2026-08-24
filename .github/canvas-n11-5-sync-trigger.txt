@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 15 — focused diagnostic after Attempt 14 crossed Cordis config but crashed verify-cordis-catalog; reproduce exact predecessor merge + Host/Client build and print the package/subpath/symbol/source causing Typert packageExportName to receive an undefined module symbol. No gated push in this diagnostic run.
+Renderer-root Attempt: 16 — second focused Cordis-catalog diagnostic after Attempt 15 proved the export target sourceFile is absent from Typert's face program; print exact package/subpath/face/requestedName/target/sourcePath without mutating #41. No gated push in this diagnostic run.
