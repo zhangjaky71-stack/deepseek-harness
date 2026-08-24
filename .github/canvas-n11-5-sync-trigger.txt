@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 2 — semantic three-note merge plus exact validated-overlay baseline full validation; gated push only after all gates pass.
+Renderer-root Attempt: 3 — minimal workflow invokes trusted validator script; semantic three-note merge plus exact validated-overlay full validation; gated push only after all gates pass.
