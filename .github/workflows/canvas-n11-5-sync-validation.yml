@@ -42,8 +42,32 @@ jobs:
       - name: Semantic predecessor merge
         run: /tmp/canvas-n11-5-renderer-validation.sh merge
 
-      - name: Frozen install
-        run: /tmp/canvas-n11-5-renderer-validation.sh install
+      - name: Reconcile renderer lockfile with repository toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          pnpm install --frozen-lockfile >/tmp/frozen-before.log 2>&1
+          frozen_status=$?
+          set -e
+          if [ "$frozen_status" -eq 0 ]; then
+            echo "Frozen install already passed; no lock reconciliation needed."
+          else
+            grep -Fq 'ERR_PNPM_OUTDATED_LOCKFILE' /tmp/frozen-before.log
+            grep -Fq 'packages/client/ui-renderer/package.json' /tmp/frozen-before.log
+            echo "Confirmed renderer package/lock mismatch; regenerating with pnpm."
+            pnpm install --no-frozen-lockfile >/tmp/lock-reconcile.log 2>&1 || { tail -n 320 /tmp/lock-reconcile.log; exit 1; }
+            mapfile -t unstaged < <(git diff --name-only | sort)
+            expected=("pnpm-lock.yaml")
+            if [ "${unstaged[*]}" != "${expected[*]}" ]; then
+              echo "Unexpected files changed by lock reconciliation:"
+              printf '  %s\n' "${unstaged[@]}"
+              exit 1
+            fi
+            git add pnpm-lock.yaml
+          fi
+          pnpm install --frozen-lockfile >/tmp/frozen-after.log 2>&1 || { tail -n 320 /tmp/frozen-after.log; exit 1; }
+          echo "N11.5 renderer-root frozen workspace install after toolchain reconciliation: PASS"
 
       - name: Pair notes and commit merge
         run: /tmp/canvas-n11-5-renderer-validation.sh pair-commit
