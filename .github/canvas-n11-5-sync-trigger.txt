@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 1 — ordinary final compatibility-overlay to renderer-root merge probe only; print exact conflict set on failure.
+Renderer-root Attempt: 2 — semantic three-note merge plus exact validated-overlay baseline full validation; gated push only after all gates pass.
