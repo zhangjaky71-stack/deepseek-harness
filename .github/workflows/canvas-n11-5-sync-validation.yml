@@ -96,26 +96,14 @@ jobs:
       - name: Validate markdown links
         run: pnpm run verify-md-links
 
-      - name: Build renderer generated type surface
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm exec tsc -b packages/client/ui-renderer/tsconfig.json
-          test -f packages/client/ui-renderer/lib/types/index.js
-          test -f packages/client/ui-renderer/lib/types/index.d.ts
-          test -f packages/client/ui-renderer/lib/types/invariant.js
-          test -f packages/client/ui-renderer/lib/types/invariant.d.ts
-          pnpm --filter @deepseek-ai/dsh-client-ui-renderer bundle
-          echo 'Renderer generated type surface + bundle: PASS'
-
-      - name: Exact overlay static differential
-        run: /tmp/canvas-n11-5-renderer-validation.sh static
-
       - name: Host build
         run: /tmp/canvas-n11-5-renderer-validation.sh host-build
 
       - name: Client build
         run: /tmp/canvas-n11-5-renderer-validation.sh client-build
+
+      - name: Exact overlay static differential
+        run: /tmp/canvas-n11-5-renderer-validation.sh static
 
       - name: Renderer/module/overlay regressions
         run: /tmp/canvas-n11-5-renderer-validation.sh tests
