@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { CanvasCapabilities, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
+import type { CanvasCapabilities, CanvasNodeCatalogEntry, CanvasSnapshot } from '@deepseek-ai/dsh-canvas/client'
 import { CanvasView } from '../src/client/CanvasView.tsx'
 import { WorkflowEditor } from '../src/client/WorkflowEditor.tsx'
 import { createCanvasEditorStore } from '../src/client/store.ts'
@@ -20,6 +20,18 @@ function capabilities(overrides: Partial<Record<keyof CanvasCapabilities, boolea
     regionEdit: value('regionEdit', false),
     providerFallback: value('providerFallback', false),
   }
+}
+
+const videoDefinition: CanvasNodeCatalogEntry = {
+  type: 'video.generate',
+  version: 1,
+  displayName: 'Video Generate',
+  inputs: [],
+  outputs: [{ name: 'video', type: 'video', required: true }],
+  defaultConfig: { prompt: '' },
+  feature: 'video',
+  lifecycle: { deprecated: false, creatable: true, executable: true },
+  ui: { category: 'Video', icon: 'video', inspectorKind: 'json' },
 }
 
 function canvasWithVideo(): CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> } {
@@ -45,7 +57,7 @@ function canvasWithVideo(): CanvasSnapshot & { workflow: NonNullable<CanvasSnaps
     output: null,
     createdAt: 1,
     updatedAt: 1,
-  } as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }
+  } as unknown as CanvasSnapshot & { workflow: NonNullable<CanvasSnapshot['workflow']> }
 }
 
 const emptyInteraction = {
@@ -73,7 +85,7 @@ function canvasViewProps(
 ): ComponentProps<typeof CanvasView> {
   const store = editorStore()
   return {
-    useSession: selector => selector({ openState } as never),
+    useSession: (selector: (value: { openState: typeof openState }) => unknown) => selector({ openState }),
     useProjection: (key: string) => key === 'canvas' ? canvas : null,
     useMode: (selector: (value: 'minimal' | 'editor') => unknown) => selector('editor'),
     useInteraction: (selector: (value: typeof emptyInteraction) => unknown) => selector(emptyInteraction),
@@ -104,7 +116,7 @@ function editorMarkup(videoEnabled: boolean): string {
       canvas={canvas}
       layout={null}
       capabilities={capabilities({ video: videoEnabled })}
-      nodeCatalog={[]}
+      nodeCatalog={[videoDefinition]}
       interaction={emptyInteraction}
       onSelectNode={() => {}}
       onSelectNodes={() => {}}

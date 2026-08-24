@@ -65,15 +65,19 @@ Registry lifetime 因而保持 process-local 且可重建。Definition metadata 
 
 ## 模型体验
 
-没有直接影响。本 Package 不注册 model-facing Tool，也不贡献 Prompt Text。N18 未来可以使用同一套 Definition 总结 Node，并只广告当前 creatable capability，但该模型 Surface 不在 N10 实现。
+### Registry metadata 本身不直接对模型可见
+
+#### 模型看到什么
+
+本 Package 自身不会让模型看到任何内容。`MediaNodeRegistry` 与其 client-safe catalog 仍是 Host/runtime metadata；未来如 N18 的 model-facing consumer 可以选择并渲染这些 Definition，而由该 consumer 对最终 model-visible text 负责。
 
 #### Token 影响
 
-直接影响为零。
+本 Package 自身不会增加 standing 或 turn-local token；只有下游 model-facing consumer 真正渲染所选 Registry metadata 时才产生 token。
 
 #### KV Cache 影响
 
-无。
+本 Package 自身不安装 prompt prefix 或 tool schema，因此无直接 KV Cache 影响；任何缓存影响归实际渲染 Registry metadata 的下游 consumer 所有。
 
 ## 已知限制与后续工作
 

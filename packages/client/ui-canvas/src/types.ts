@@ -73,4 +73,5 @@ export interface CanvasViewInjected extends CanvasInteractionActions {
   readonly commitOperations: (operations: readonly WorkflowEditOperation[], expectedWorkflowRevision: number) => Promise<CanvasWorkflowWriteResult>
   readonly saveLayout: (request: SaveCanvasLayoutRequest) => Promise<CanvasLayoutWriteResult>
 }
+/** Canvas projection value accepted by presentation-state derivation. */
 export type CanvasPresentationInput = CanvasSnapshot | null

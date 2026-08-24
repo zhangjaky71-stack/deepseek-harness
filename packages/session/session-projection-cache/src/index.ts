@@ -303,14 +303,30 @@ export class SessionProjectionCache extends Service {
   }
 }
 
-/** Project a header onto the identity fields a record is bound to. */
+/** Project every immutable header field except SessionId, which is the table key. */
 function identityOf(header: SessionHeader): CheckpointIdentity {
-  return { createdAt: header.createdAt, ...header.cwd === undefined ? {} : { cwd: header.cwd } }
+  return {
+    version: header.version,
+    createdAt: header.createdAt,
+    ...header.cwd === undefined ? {} : { cwd: header.cwd },
+    ...header.parentSession === undefined ? {} : { parentSession: header.parentSession },
+    ...header.seedLength === undefined ? {} : { seedLength: header.seedLength },
+    ...header.origin === undefined ? {} : { origin: header.origin },
+    ...header.delegationDepth === undefined ? {} : { delegationDepth: header.delegationDepth },
+    ...header.agentPreset === undefined ? {} : { agentPreset: header.agentPreset },
+  }
 }
 
 /** Whether a stored record's bound identity names the caller's lifecycle. */
 function identityMatches(stored: CheckpointIdentity, expected: CheckpointIdentity): boolean {
-  return stored.createdAt === expected.createdAt && stored.cwd === expected.cwd
+  return stored.version === expected.version
+    && stored.createdAt === expected.createdAt
+    && stored.cwd === expected.cwd
+    && stored.parentSession === expected.parentSession
+    && stored.seedLength === expected.seedLength
+    && stored.origin === expected.origin
+    && stored.delegationDepth === expected.delegationDepth
+    && stored.agentPreset === expected.agentPreset
 }
 
 export default SessionProjectionCache

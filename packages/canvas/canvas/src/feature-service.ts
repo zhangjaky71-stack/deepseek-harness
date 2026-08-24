@@ -69,6 +69,7 @@ export class CanvasFeatureService extends TypertRemoteService {
     variants: toggle(false), partialRun: toggle(false), regionEdit: toggle(false), providerFallback: toggle(false),
   })
 
+  /** Immutable effective deployment capability snapshot sampled at activation. */
   readonly capabilities: CanvasCapabilities
 
   constructor(ctx: Context, config: CanvasFeatureConfig = {}) {
@@ -81,19 +82,51 @@ export class CanvasFeatureService extends TypertRemoteService {
     this.capabilities = resolveCanvasCapabilities(scope.get())
   }
 
+  /**
+   * Test whether one deployment feature is enabled in the activation snapshot.
+   * @param feature - deployment feature to inspect.
+   * @returns whether the feature is enabled for this activation.
+   */
   isEnabled(feature: CanvasFeatureName): boolean { return canvasFeatureEnabled(this.capabilities, feature) }
+
+  /**
+   * Require one deployment feature to be enabled.
+   * @param feature - deployment feature to require.
+   */
   assertEnabled(feature: CanvasFeatureName): void { assertCanvasFeatureEnabled(this.capabilities, feature) }
+
+  /**
+   * Require the deployment capabilities needed to author a workflow.
+   * @param workflow - workflow whose authoring requirements are checked.
+   */
   assertWorkflowCreatable(workflow: MediaWorkflow): void { assertCanvasWorkflowCreatable(this.capabilities, workflow) }
+
+  /**
+   * Require the deployment capabilities needed by one workflow edit.
+   * @param workflow - workflow being edited.
+   * @param operations - requested atomic edit operations.
+   */
   assertWorkflowEditable(workflow: MediaWorkflow, operations: readonly WorkflowEditOperation[]): void {
     assertCanvasWorkflowEditable(this.capabilities, workflow, operations)
   }
+
+  /**
+   * Require the deployment capabilities needed to execute a workflow.
+   * @param workflow - workflow whose execution requirements are checked.
+   */
   assertWorkflowExecutable(workflow: MediaWorkflow): void { assertCanvasWorkflowExecutable(this.capabilities, workflow) }
 
-  /** Browser-readable effective deployment capabilities; raw settings layers never cross this Remote. */
+  /**
+   * Return Browser-readable effective deployment capabilities without raw settings layers.
+   * @returns cloned capability snapshot for the current Host activation.
+   */
   @Remote('get')
   remoteExportGet(): CanvasCapabilities { return structuredClone(this.capabilities) }
 
-  /** Return one client-safe installed-node catalog tied to the exact Host registry mutation revision. */
+  /**
+   * Return one client-safe installed-node catalog tied to the exact Host registry mutation revision.
+   * @returns atomic Host registry revision and data-only node catalog entries.
+   */
   @Remote('listNodes')
   remoteExportListNodes(): CanvasNodeCatalogSnapshot {
     this.assertEnabled('editor')

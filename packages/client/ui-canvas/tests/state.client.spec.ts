@@ -23,7 +23,7 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as CanvasSnapshot
+  } as unknown as CanvasSnapshot
 }
 
 function run(status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted', revision = 1) {
@@ -36,7 +36,7 @@ function run(status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
     startedAt: 2,
     ...(terminal ? { finishedAt: 3 } : {}),
     ...(status === 'failed' ? { error: { category: 'provider', code: 'failed', message: 'failed' } } : {}),
-  } as NonNullable<CanvasSnapshot['run']>
+  } as unknown as NonNullable<CanvasSnapshot['run']>
 }
 
 const output = {
@@ -48,7 +48,7 @@ const output = {
     video: { assetId: 'video-ui', mediaType: 'video/mp4', bytes: 100, width: 640, height: 360, durationMs: 1000 },
   }],
   primaryAssetIndex: 0,
-} as NonNullable<CanvasSnapshot['output']>
+} as unknown as NonNullable<CanvasSnapshot['output']>
 
 describe('Canvas UI product state', () => {
   it('maps every product state to one primary control and RUNNING only to cancel', () => {

@@ -104,14 +104,19 @@ function renderEditor(commitOperations: WorkflowEditorProps['commitOperations'])
   return { input, getSnapshot: instance.getSnapshot }
 }
 
+function changeName(input: HTMLInputElement, value: string): void {
+  input.value = value
+  Simulate.change(input, { target: input })
+}
+
 describe('Canvas WorkflowEditor autosave', () => {
   it('debounces typing and does not write a Session revision per character', async () => {
     const commitOperations = vi.fn(async () => ({ ok: true as const, workflowRevision: 2 }))
     const { input } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Prompt A' } }) })
+    act(() => { changeName(input, 'Prompt A') })
     act(() => { vi.advanceTimersByTime(200) })
-    act(() => { Simulate.change(input, { target: { value: 'Prompt AB' } }) })
+    act(() => { changeName(input, 'Prompt AB') })
     act(() => { vi.advanceTimersByTime(449) })
     expect(commitOperations).not.toHaveBeenCalled()
 
@@ -128,7 +133,7 @@ describe('Canvas WorkflowEditor autosave', () => {
     const commitOperations = vi.fn(() => new Promise<{ ok: true; workflowRevision: number }>((resolve) => { resolveCommit = resolve }))
     const { input } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Blurred' } }) })
+    act(() => { changeName(input, 'Blurred') })
     await act(async () => { Simulate.blur(input); await Promise.resolve() })
     expect(commitOperations).toHaveBeenCalledTimes(1)
 
@@ -142,7 +147,7 @@ describe('Canvas WorkflowEditor autosave', () => {
     const commitOperations = vi.fn(async () => ({ ok: false as const, status: 'offline' as const, message: 'offline' }))
     const { input, getSnapshot } = renderEditor(commitOperations)
 
-    act(() => { Simulate.change(input, { target: { value: 'Offline edit' } }) })
+    act(() => { changeName(input, 'Offline edit') })
     await act(async () => { vi.advanceTimersByTime(450); await Promise.resolve() })
 
     expect(commitOperations).toHaveBeenCalledTimes(1)
