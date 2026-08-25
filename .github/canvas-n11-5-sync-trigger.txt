@@ -1,0 +1,2 @@
+Temporary trigger for repository-pinned N11.5 validation. Do not merge.
+Renderer-root Attempt: 22 — validate renderer-root head f693090f17c60cb88c76087a4a0cd3035b74aa54 after aligning Knip inputs for framework-free Web and ui-renderer, explicitly owning the ambient client-build-environment declaration, and removing two Web test dependencies migrated to ui-renderer. Run the complete trusted acceptance sequence and gated push only if every gate passes.
