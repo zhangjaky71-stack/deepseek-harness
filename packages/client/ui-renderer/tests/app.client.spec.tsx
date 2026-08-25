@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
-/**
- * buildRenderApp on SlotTestRuntime: the fail-loud sessions precondition, the
- * one ctx-level renderSlot('root') call, and the document-title projection
- * arms over the real slot stack.
- */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { buildRenderApp } from '@deepseek-ai/dsh-client-web/src/app.tsx'
+import { buildRenderApp } from '../src/client/app.tsx'
 
 let runtime: SlotTestRuntime | undefined
 
@@ -18,6 +13,7 @@ afterEach(async () => {
   await runtime?.dispose()
   runtime = undefined
   document.title = ''
+  vi.unstubAllEnvs()
 })
 
 async function bench() {
@@ -31,29 +27,29 @@ describe('buildRenderApp', () => {
     expect(() => buildRenderApp({ ctx: new Context() })).toThrow('sessions service unavailable')
   })
 
-  it('renders the root slot tree through the one ctx-level renderSlot call', async () => {
+  it('renders the root slot tree', async () => {
     const b = await bench()
     const view = render(<>{b.renderApp()}</>)
     expect(view.getByTestId('frame')).toBeTruthy()
   })
 
-  it('projects the current session durable title and falls back to the product title', async () => {
-    document.title = 'Product'
+  it('projects the selected durable session title', async () => {
+    vi.stubEnv('DSH_CLIENT_TITLE', 'Product')
+    document.title = 'stale title'
     const b = await bench()
     render(<>{b.renderApp()}</>)
-    // No current session: the product title stands.
     expect(document.title).toBe('Product')
     await b.runtime.sessions.add({ id: 's1', summary: { title: 'First' } })
     expect(document.title).toBe('First — Product')
     await b.runtime.sessions.setCurrent(undefined)
     expect(document.title).toBe('Product')
-    // A session without a durable title keeps the product title.
     await b.runtime.sessions.add({ id: 's2' })
     expect(document.title).toBe('Product')
   })
 
-  it('a current id without a list row falls back (selection/list arbitration transient)', async () => {
-    document.title = 'Product'
+  it('falls back when the selected id has no list row', async () => {
+    vi.stubEnv('DSH_CLIENT_TITLE', 'Product')
+    document.title = 'stale title'
     const b = await bench()
     await b.runtime.sessions.add({ id: 's1', summary: { title: 'First' } })
     render(<>{b.renderApp()}</>)

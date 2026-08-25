@@ -6,18 +6,22 @@ English | [中文](2026-08-22-canvas-v2-2-rc8-compatibility-boundary.zh.md)
 
 ## Problem
 
-Canvas may be **compatible with** a newer Harness client contract while the private repository is **not yet mechanically synced** to that Harness release. Treating those states as equivalent would let later nodes rely on a release baseline that is present only in adapters, comments, or historical branch ancestry rather than in the actual package graph and runtime ownership.
+Canvas can obey a newer Harness client contract while the private repository is still not mechanically synchronized to that release. Conflating those states would let downstream nodes treat adapters, historical sync ancestry, or one repaired ownership seam as proof of a release-wide runtime baseline.
 
-For the current `dsh@0.1.0-rc.8` target, the Canvas overlay has already adopted important rc.8 rules, while the private repository still carries observable rc.7-era Web root ownership. N11.5 therefore needs an explicit boundary between a compatible product overlay and a completed repository-wide upstream sync. Until the full-tree, root-owner, package-graph, and REAL composition evidence exists, the node remains `BLOCKED / REVIEW`.
+The validated compatibility overlay now sits on the final N11 editor baseline. This renderer-root remediation also closes two concrete rc.8 ownership gaps: dynamic `ui-renderer` owns the React application root, and the Web kernel consumes the rc.8-style `window.__ModuleLoader__` queue/create facade. Those improvements are real, but release-wide version/package/build/lock/generated reconciliation and exact-head REAL assembled boot evidence are still incomplete. N11.5 therefore remains `BLOCKED / REVIEW` until the upstream-sync ledger is complete.
 
 ## Decision
 
 Maintain two independent engineering states for Harness upgrades:
 
-1. **Compatibility overlay** — which newer public APIs, plugin seams, lifecycle rules, and authority boundaries the Canvas packages already obey.
-2. **Repository upstream sync** — which official package, version, root-owner, bootstrap, build, lock/generated, and runtime-composition changes are mechanically present in the private tree.
+1. **Compatibility overlay** — newer public APIs, plugin seams, lifecycle rules, and Canvas authority boundaries already obeyed by the private product stack.
+2. **Repository upstream sync** — official package, version, root-owner, bootstrap, build, lock/generated, and runtime-composition changes mechanically present and validated in the private tree.
 
-The compatibility overlay may be implemented and regression-tested without promoting the repository sync state. A release is considered fully synced only when the actual private tree and runnable evidence satisfy the upstream completion gates. Historical `sync/*` ancestry and Canvas-local API compatibility are evidence inputs, not completion proof.
+The renderer/root and module-bootstrap remediation advances the second ledger but does not by itself complete it. Historical `sync/*` ancestry and green Canvas-local tests remain evidence inputs rather than release-completion proof.
+
+Canvas may be **compatible with** a newer Harness client contract while the private repository is **not yet mechanically synced** to that Harness release. These are separate engineering states and must never share the same completion label.
+
+For the current `dsh@0.1.0-rc.8` target, N11.5 has now remediated the two previously concrete Web-client ownership gaps: the dynamic `ui-renderer` owns the React application root, and the Web kernel consumes the rc.8-style `window.__ModuleLoader__` queue/create facade instead of constructing a private module system. N11.5 nevertheless remains `BLOCKED / REVIEW` because release-wide version/package/build/lock/generated reconciliation and REAL assembled validation are still incomplete.
 
 ## Evidence required for a full sync claim
 
@@ -31,26 +35,53 @@ For rc.8, the minimum evidence includes:
 - official `packages/client/ui-renderer` present in the private tree;
 - React root owned by dynamic `ui-renderer`, exposed as `ctx.uiRenderer.mount(container)`;
 - framework-free Web boot handing the container to `uiRenderer` after the client roster activates;
+- rc.8 module bootstrap ownership: Host-installed `__ModuleLoader__` queue, parser preloads, `create()`, then live registration;
 - build/tsconfig/bundle/lock/generated graph reconciled by the repository toolchain;
 - REAL assembled boot and lifecycle evidence.
 
-If any of those remain absent, the correct state is `PARTIAL BACKPORT`, `SYNC INCOMPLETE`, or `REVIEW`.
+If any required repository-wide evidence remains absent, the correct state is `PARTIAL BACKPORT`, `SYNC INCOMPLETE`, or `REVIEW`.
 
-## Current private counter-evidence
+## Ownership remediation completed in N11.5
 
-The current private tree still exposes mechanically observable rc.7-era ownership:
+The previous counter-evidence around React-root and bootstrap ownership is no longer true on the current remediation branch.
 
-- root `package.json` says `0.1.0-rc.7`;
-- `packages/client/ui-renderer` is absent;
-- `packages/client/web/src/boot.tsx` imports ReactDOM `createRoot()`;
-- the Web boot owns `AppRoot` and a shell-owned `APP_SHELL_ID` assembly;
-- the final app is produced through `appShell.renderApp()` rather than a dynamic `uiRenderer` mount service.
+### Dynamic renderer owns the application root
 
-These facts are stronger than a historical branch name. They prevent a full rc.8 sync claim until the root ownership migration is actually performed.
+`packages/client/ui-renderer` now exists as the dynamic browser renderer package. It owns `createRoot` / `hydrateRoot`, installs the React slot renderer, assembles the root slot, projects the durable session title, exposes `ctx.uiRenderer.mount(container)`, and returns the application-root unmount disposer.
+
+`packages/client/web` no longer owns `AppRoot`, `app-shell`, or the final React root. Its boot path is framework-free and performs the handoff only after the client graph settles. A missing `uiRenderer` fails loud on the boot failure surface instead of waiting forever.
+
+### rc.8 module bootstrap ownership is restored
+
+The client-module protocol now follows the rc.8 queue/create model:
+
+```text
+Host index transform
+  → installs window.__ModuleLoader__ in queue mode
+  → parser-preloads modules + runtime bundles
+  → injects window.__DSH_BOOT__
+  → Web kernel calls __ModuleLoader__.create(...)
+  → module system drains queued registrations
+  → facade switches to live registration
+```
+
+The old private `window.__DSH_MODULES__` adoption seam and shell-side static `MODULES_ID` registration are removed. The rc.8 `external` module-graph contract, `/client` normalization, dynamic-provider ordering, self/cycle rejection, bootstrap-module retention, and invalidate semantics are also present.
+
+The core `client-modules` implementation files were transplanted from the official target and their resulting blob hashes match the official rc.8 blobs for the browser index, manifest, system, Host index, and invariant source.
+
+## Remaining repository-wide counter-evidence
+
+The repository must still not be described as a complete rc.8 release sync because broader release evidence remains unresolved:
+
+- root release metadata still identifies the private baseline as `0.1.0-rc.7`;
+- the full official rc.8 package/version family has not been mechanically reconciled as one release operation;
+- the private build external partition is not yet proven identical to the official rc.8 final-tree build contract;
+- workspace lockfile and generated artifacts have not been regenerated by the pinned repository toolchain for this migration;
+- no exact-head REAL assembled Web boot / lifecycle run has executed successfully in repository CI.
+
+These are now the blockers. The old statement that the private Web kernel itself still owns React `createRoot()` is obsolete and must not be repeated.
 
 ## What the Canvas compatibility overlay already gets right
-
-This blocked sync status does not invalidate the Canvas-level compatibility work already in the stack.
 
 ### Dynamic package boundary
 
@@ -70,74 +101,61 @@ Editor Draft, save status, Undo/Redo, Clipboard, and transient layout positions 
 
 ### External authorities
 
-Canvas does not create Browser-owned replacements for:
-
-- Harness Settings;
-- effective deployment capabilities;
-- Media Node Registry / catalog revision;
-- Session Projection / durable Canvas state.
-
-Those authorities remain Host/framework owned.
+Canvas does not create Browser-owned replacements for Harness Settings, effective deployment capabilities, Media Node Registry/catalog revision, or Session Projection/durable Canvas state. Those authorities remain Host/framework owned.
 
 ## Root ownership is an architectural invariant, not a naming detail
 
-The official rc.8 design deliberately moves React root ownership out of the Web boot kernel. This changes HMR/disposal responsibility:
+The rc.8 ownership chain now implemented by the private remediation branch is:
 
 ```text
-Web boot
+framework-free Web boot
   → activate dynamic roster
-  → wait for uiRenderer service
-  → uiRenderer.mount(container)
+  → verify uiRenderer service
+  → dependency-fiber uiRenderer.mount(container)
+  → ui-renderer owns hydrate/create/unmount
 ```
 
-Because the renderer is a plugin, replacing/remounting that dependency can replace the application root through normal Cordis lifecycle. A private shell that still owns `createRoot()` has different lifecycle semantics even if every business plugin uses the same slot APIs.
-
-That is why Canvas-level slot compatibility cannot stand in for repository-level root migration.
+This matters for HMR and disposal: renderer replacement can retract the old root and remount through normal Cordis service lifecycle. The Web kernel does not regain React ownership merely because it initiates the service call.
 
 ## Regression gates
 
-N11.5 pins the parts of the overlay that are already correct:
+N11.5 now pins both the Canvas overlay and the remediated rc.8 kernel boundary:
 
-- `/client` runtime exports are exactly `apply` / `inject`;
+- Canvas `/client` runtime exports are exactly `apply` / `inject`;
 - Canvas is present exactly once in the dynamic Web roster;
 - Canvas injects `shell.main`, not `conversation.view`;
 - AppFrame renders `shell.main` generically and has no Canvas import/type dependency;
-- built-client enable/disable/dispose behavior removes the product contribution with plugin lifetime;
-- built-client Node Catalog fixtures use the current versioned `{ revision, entries }` DTO.
+- `ui-renderer` is present in the Web roster and owns `createRoot` / `hydrateRoot`;
+- Web boot contains no application `createRoot`, `AppRoot`, or shell-owned final app assembly;
+- mount occurs only after graph activation and dispose retracts the renderer root;
+- missing `uiRenderer` fails loud;
+- module bootstrap queue/create/live-registration behavior and dynamic external ordering are covered by the upgraded module tests;
+- built-client enable/disable/dispose behavior removes the Canvas product contribution with plugin lifetime;
+- built-client Node Catalog fixtures use the versioned `{ revision, entries }` DTO.
 
-These tests protect the overlay while the broader upstream sync remains blocked.
+These source tests are regression contracts, not a substitute for runnable repository CI.
 
 ## Rule for future upgrades
 
-For rc.9 and later, maintain the compatibility-overlay ledger and the upstream-sync ledger independently. Do not promote the upstream-sync ledger based on the compatibility-overlay ledger. This prevents future nodes from building on a release baseline that exists only in comments and adapter code.
+For rc.9 and later, maintain two explicit ledgers:
+
+1. **Compatibility overlay ledger** — which new public APIs/lifecycle rules the Canvas packages already follow.
+2. **Upstream sync ledger** — which official tree/package/root-owner/build/version changes are mechanically present in the private repository.
+
+Do not promote the second ledger based on the first. Conversely, once a concrete ownership gap is remediated, remove it from the counter-evidence rather than leaving stale documentation that understates the tree.
 
 ## Alternatives considered
 
-**Treat Canvas-level rc.8 compatibility as proof that the repository is rc.8-synced.** Rejected because the private tree can obey newer Canvas slot/export contracts while still retaining older Web root ownership, package versions, bootstrap flow, and generated/lock state.
+**Treat the now-correct renderer/root and module bootstrap as proof of a complete rc.8 sync.** Rejected because root ownership is only one release boundary. Root/private version metadata, the complete package/version family, build external partition, lock/generated reconciliation, and REAL assembled boot evidence remain separate completion gates.
 
-**Use historical `sync/*` branch ancestry as the completion signal.** Rejected because ancestry proves that synchronization work occurred, not that the final private tree still contains every official ownership and package-graph change after later overlays and remediations.
+**Keep the #41 business facts but discard the validated #40 compatibility-overlay boundary.** Rejected because the renderer remediation is stacked on that overlay and must preserve its Host-authoritative Canvas contracts, `shell.main` composition, versioned catalog DTO, and plugin lifecycle semantics.
 
-**Keep the rc.7 Web-owned React root while documenting it as an acceptable private variation.** Rejected for the N11.5 acceptance baseline because root ownership changes plugin disposal, HMR, remount, and failure semantics. A different owner is an architectural difference, not a cosmetic private customization.
+**Resolve the documentation conflict by choosing either merge side wholesale.** Rejected because #40 owns the current Agent Note format and validated overlay evidence while #41 owns newer renderer/bootstrap facts. A semantic merge is required to preserve both truths.
 
-**Delay compatibility regression tests until the full repository sync is complete.** Rejected because the already-correct Canvas overlay needs protection while the broader migration proceeds. The tests are useful evidence as long as they are not misrepresented as full-sync evidence.
+**Hand-edit pairing hashes.** Rejected. The bilingual consistency record is regenerated by the repository's `verify-translation-pairing --write` tool after both sides are updated.
 
 ## Consequences
 
-The boundary lets Canvas compatibility improvements land and remain regression-protected without creating a false release-completion claim. It also gives later nodes a mechanically checkable rule: N12 may be inspected or prepared while N11.5 is blocked, but it cannot treat rc.8 as an accepted runtime baseline until the repository-wide completion gates pass.
+The merged boundary now accurately records three distinct facts at once: the Canvas overlay is validated on final N11, renderer/root and module-bootstrap ownership are remediated, and N11.5 as a release baseline is still blocked by broader rc.8 reconciliation and REAL-composition evidence.
 
-The cost is that N11.5 can legitimately have implemented compatibility decisions while still remaining blocked as a node. Validation records must therefore say exactly which ledger passed. The repository must continue carrying the broader renderer/root/package/REAL-composition work instead of collapsing that work into a green Canvas-local test suite.
-
-## Maintenance checklist
-
-When changing Harness compatibility or upstream-sync status, verify all of the following:
-
-1. Is the claimed upstream target identified by an exact official commit/version?
-2. Are compatibility-overlay facts kept separate from repository-wide sync facts?
-3. Does the private tree contain the target root owner and bootstrap ownership rather than merely equivalent-looking adapters?
-4. Are package/version/build/lock/generated differences explicitly reconciled or explicitly blocking?
-5. Is Canvas still dynamically composed through generic public seams without Web/ui-layout product special cases?
-6. Do Host Settings, capabilities, node catalog, and Session Projection remain authoritative?
-7. Is there runnable build/test evidence for the exact candidate head?
-8. Is there REAL assembled boot/lifecycle evidence before the upstream-sync ledger is promoted?
-
-If any repository-wide completion gate is missing, keep N11.5 `BLOCKED / REVIEW` even when the Canvas compatibility overlay itself is green.
+This preserves strict predecessor discipline for later work. #41 can be validated as the next N11.5 remediation layer without prematurely authorizing N12 to consume rc.8 as accepted. It also means future release-sync work must remove blockers only when their exact mechanical and runtime evidence exists, rather than by changing status prose.

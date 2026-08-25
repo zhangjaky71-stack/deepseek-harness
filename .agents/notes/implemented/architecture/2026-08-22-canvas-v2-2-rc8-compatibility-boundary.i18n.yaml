@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-22-canvas-v2-2-rc8-compatibility-boundary.md
-2026-08-22-canvas-v2-2-rc8-compatibility-boundary.md: d1e24131f83c2e146c77af1ef961f807b2b7ee5e
-2026-08-22-canvas-v2-2-rc8-compatibility-boundary.zh.md: c672f38bf42b1f7cc1f5e740d71420a2c4f5bf9e
+2026-08-22-canvas-v2-2-rc8-compatibility-boundary.md: 9038602a4f4f86aa7062c29052b1e31664b915dd
+2026-08-22-canvas-v2-2-rc8-compatibility-boundary.zh.md: f68185aeaa4546220b34af0ddd100e72ee77307b
