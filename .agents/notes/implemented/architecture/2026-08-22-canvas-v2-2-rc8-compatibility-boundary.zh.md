@@ -1,8 +1,23 @@
-# Canvas V2.2 — rc.8 Compatibility 不等于仓库已完成 rc.8 同步
+# Agent Note: Canvas V2.2 rc.8 兼容性边界
+
+Status: implemented
 
 [English](2026-08-22-canvas-v2-2-rc8-compatibility-boundary.md) | 中文
 
+## 问题
+
+Canvas 可以遵守新版 Harness Client Contract，但私有仓库仍可能没有机械完整同步到该 Release。若把两者混为一谈，后续节点就可能把 Adapter、历史 sync ancestry 或单个已修复 Ownership Seam 错当成 Release-wide Runtime Baseline 的完成证明。
+
+当前已验证的 Compatibility Overlay 已经叠在最终 N11 Editor 基线上；本 renderer-root remediation 还修复了两个明确的 rc.8 Ownership 缺口：动态 `ui-renderer` 接管 React Application Root，Web Kernel 改为消费 rc.8 风格的 `window.__ModuleLoader__` queue/create facade。这些改进是真实的，但 Release-wide Version/Package/Build/Lock/Generated Reconciliation 与 exact-head REAL assembled boot evidence 仍未闭环。因此 N11.5 继续保持 `BLOCKED / REVIEW`。
+
 ## 决策
+
+Harness Upgrade 必须维护两个相互独立的工程状态：
+
+1. **Compatibility Overlay** — 私有产品栈已经遵守哪些新版 Public API、Plugin Seam、Lifecycle Rule 与 Canvas Authority Boundary。
+2. **Repository Upstream Sync** — 哪些 Official Package、Version、Root-owner、Bootstrap、Build、Lock/Generated 与 Runtime-composition Change 已机械进入私有树并获得验证。
+
+Renderer/Root 与 Module-bootstrap Remediation 会推进第二套 Ledger，但不会单独完成它。历史 `sync/*` ancestry 与绿色 Canvas-local Test 仍只是 Evidence Input，不是 Release Completion Proof。
 
 Canvas 可以已经**兼容**新版 Harness Client Contract，但私有仓库仍然**没有机械完整同步**到该 Harness Release。这是两个独立的工程状态，绝不能共用同一个“完成”标签。
 
@@ -128,3 +143,19 @@ N11.5 现在同时机械固定 Canvas Overlay 与已修复的 rc.8 Kernel Bounda
 2. **Upstream Sync Ledger** — 哪些 Official Tree/Package/Root-owner/Build/Version Change 已机械存在于 Private Repository。
 
 绝不能因为第一套 Ledger 完成，就升级第二套 Ledger 的状态。反过来，一旦某个明确 Ownership Gap 已经修复，也必须从 Counter-evidence 中删除，不能让过期文档持续低估真实 Tree。
+
+## 备选方案
+
+**把已经正确的 Renderer/Root 与 Module Bootstrap 当成完整 rc.8 Sync 证明。** 拒绝，因为 Root Ownership 只是 Release Boundary 的一部分；Root/Private Version Metadata、完整 Package/Version Family、Build External Partition、Lock/Generated Reconciliation 与 REAL assembled boot evidence 仍是独立完成门槛。
+
+**保留 #41 的新业务事实，但丢弃已验证的 #40 Compatibility Overlay Boundary。** 拒绝，因为 Renderer Remediation 正是叠在该 Overlay 上，必须继续保留 Host-authoritative Canvas Contract、`shell.main` Composition、Versioned Catalog DTO 与 Plugin Lifecycle Semantics。
+
+**文档冲突直接整边选择 ours 或 theirs。** 拒绝，因为 #40 持有当前 Agent Note 规范格式和已验证 Overlay Evidence，#41 持有更新的 Renderer/Bootstrap Facts；只有语义合并才能同时保留两边真实信息。
+
+**手工填写 pairing hash。** 拒绝。双语一致性记录由仓库 `verify-translation-pairing --write` 工具在两侧同步后重新生成。
+
+## 后果
+
+合并后的边界同时准确记录三件事：Canvas Overlay 已在最终 N11 上验证；Renderer/Root 与 Module-bootstrap Ownership 已修复；N11.5 作为 Release Baseline 仍被更大范围 rc.8 Reconciliation 与 REAL-composition Evidence 阻塞。
+
+这样可以继续保持严格的 predecessor discipline：#41 可以作为 N11.5 下一层 Remediation 接受独立验证，但不能因此提前授权 N12 把 rc.8 当作 accepted baseline。后续 Release-sync 工作也只能在对应 Mechanical/Runtime Evidence 真正存在时移除 Blocker，而不能靠修改状态文字完成验收。

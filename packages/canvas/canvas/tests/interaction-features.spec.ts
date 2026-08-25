@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import CanvasService, { CanvasFeatureError } from '@deepseek-ai/dsh-canvas'
 import type { StageCanvasInteractionRequest } from '@deepseek-ai/dsh-canvas'
@@ -11,7 +11,7 @@ import CanvasInteractionService from '../src/interaction-service.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
-  while (contexts.length > 0) await contexts.pop()!.dispose()
+  while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
 })
 
 class MemorySettings extends SettingsProvider {
@@ -25,7 +25,7 @@ class MemorySettings extends SettingsProvider {
 }
 
 function stubAgent(ctx: Context): Agent {
-  const session = Session.create(SessionId('canvas-region-feature'))
+  const session = ctx.sessions.create(SessionId('canvas-region-feature'))
   return {
     id: session.id,
     options: {},
@@ -46,6 +46,7 @@ function stubAgent(ctx: Context): Agent {
 async function boot(config: ConstructorParameters<typeof CanvasFeatureService>[1] = {}): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
+  await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(MemorySettings)
   await ctx.plugin(CanvasFeatureService, config)

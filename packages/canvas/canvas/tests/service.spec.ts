@@ -14,7 +14,14 @@ import CanvasService, {
   WorkflowNodeId,
   foldCanvas,
 } from '@deepseek-ai/dsh-canvas'
-import { baseWorkflow, runCompleteChange, runStartChange, workflowRef } from './canvas-fixtures.ts'
+import { withCanvasWritePermit } from '../src/write-authority.ts'
+import {
+  baseWorkflow,
+  currentWriterChange,
+  runStartChange,
+  runUpdateChange,
+  workflowRef,
+} from './canvas-fixtures.ts'
 
 interface StubAgent {
   agent: Agent
@@ -51,6 +58,12 @@ async function harness(seed?: readonly SessionEvent[]) {
   const stub = stubAgentForSession(session)
   ctx.agents.register(stub.agent)
   return { ctx, ...stub }
+}
+
+function appendCurrentChange(session: Session, change: ReturnType<typeof currentWriterChange>): void {
+  withCanvasWritePermit(session, 'canvas/change', change, () => {
+    session.append('canvas/change', change)
+  })
 }
 
 describe('CanvasService durable authority', () => {
@@ -162,7 +175,7 @@ describe('CanvasService durable authority', () => {
     const { ctx, agent, session } = await harness()
     const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
     const ref = workflowRef(created)
-    session.append('canvas/change', runStartChange(created))
+    appendCurrentChange(session, currentWriterChange(runStartChange(created)))
 
     const edited = ctx.canvas.editWorkflow(agent, ref, [{ op: 'rename-workflow', name: 'While running' }])
     expect(edited.workflowRevision).toBe(2)
@@ -211,10 +224,10 @@ describe('CanvasService durable authority', () => {
   it('selects an existing output candidate without changing workflow/run revisions or rerunning', async () => {
     const { ctx, agent, session } = await harness()
     const created = ctx.canvas.create(agent, { workflow: baseWorkflow() })
-    session.append('canvas/change', runStartChange(created))
+    appendCurrentChange(session, currentWriterChange(runStartChange(created)))
     const running = ctx.canvas.get(agent)
     if (running === null) throw new Error('expected running Canvas')
-    session.append('canvas/change', runCompleteChange(running))
+    appendCurrentChange(session, currentWriterChange(runUpdateChange(running, 'completed')))
     const completed = ctx.canvas.get(agent)
     if (completed === null || completed.output === null) throw new Error('expected completed Canvas output')
     const output = completed.output
@@ -248,14 +261,14 @@ describe('CanvasService durable authority', () => {
       expect.objectContaining({ code: 'CANVAS_STALE_WORKFLOW_REVISION' }),
     )
 
-    session.append('canvas/change', runStartChange(edited))
+    appendCurrentChange(session, currentWriterChange(runStartChange(edited)))
     const running = ctx.canvas.get(agent)
     if (running === null) throw new Error('expected running Canvas')
     expect(() => ctx.canvas.clear(agent, workflowRef(running))).toThrow(
       expect.objectContaining({ code: 'CANVAS_INVALID_EDIT' }),
     )
 
-    session.append('canvas/change', runCompleteChange(running))
+    appendCurrentChange(session, currentWriterChange(runUpdateChange(running, 'completed')))
     const completed = ctx.canvas.get(agent)
     if (completed === null) throw new Error('expected completed Canvas')
     ctx.canvas.clear(agent, workflowRef(completed))

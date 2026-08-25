@@ -140,4 +140,31 @@ describe('Canvas authorization hardening', () => {
     expect(projection.values).not.toHaveProperty('canvas')
     expect(projection.values).not.toHaveProperty('canvasLayout')
   })
+
+  it('fails closed for detached Canvas checkpoint and restore views without inventing a Session identity', async () => {
+    const ctx = await baseContext()
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(CapturingAuthorizationService)
+    await ctx.plugin(CanvasService, { authorizationMode: 'required-external' })
+    const agent = stubAgent(ctx, 'canvas-auth-detached-projection')
+    ctx.agents.register(agent)
+
+    ctx.canvas.create(agent, { workflow: baseWorkflow() })
+    const policy = ctx.get('canvasAuthorization') as unknown as CapturingAuthorizationService
+    const checkpoint = ctx.sessionProjections.checkpoint(agent.session)
+    expect(checkpoint).toHaveProperty('canvas')
+    expect(checkpoint).toHaveProperty('canvasLayout')
+    const policyCallCount = policy.requests.length
+
+    const detached = ctx.sessionProjections.viewCheckpoint(checkpoint)
+    expect(detached).not.toHaveProperty('canvas')
+    expect(detached).not.toHaveProperty('canvasLayout')
+
+    const restored = ctx.sessionProjections.restore(checkpoint, [], agent.session.seq)
+    expect(restored.snapshot.values).not.toHaveProperty('canvas')
+    expect(restored.snapshot.values).not.toHaveProperty('canvasLayout')
+    expect(restored.checkpoint).toHaveProperty('canvas')
+    expect(restored.checkpoint).toHaveProperty('canvasLayout')
+    expect(policy.requests).toHaveLength(policyCallCount)
+  })
 })
