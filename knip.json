@@ -21,11 +21,15 @@
     "@yarnpkg/cli-dist",
     "lightningcss"
   ],
+  "ignoreUnresolved": [
+    "client-build-environment"
+  ],
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.mjs",
-        "scripts/**/*.cjs"
+        "scripts/**/*.cjs",
+        "scripts/types/client-build-environment/index.d.ts"
       ],
       "project": [
         "scripts/**/*.ts",
@@ -688,11 +692,19 @@
     "packages/client/web": {
       "project": [
         "src/**/*.ts",
-        "src/**/*.tsx",
-        "tests/**/*.tsx"
+        "tests/**/*.ts"
       ],
       "ignoreDependencies": [
         "@deepseek-ai/dsh-client-ui-theme"
+      ]
+    },
+    "packages/client/ui-renderer": {
+      "entry": [
+        "tests/**/*.spec.tsx"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "tests/**/*.tsx"
       ]
     },
     "packages/client/ui-settings": {
