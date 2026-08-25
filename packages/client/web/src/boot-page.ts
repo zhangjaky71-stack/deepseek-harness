@@ -9,6 +9,7 @@ function div(className: string | undefined, text?: string): HTMLDivElement {
   return el
 }
 
+/** Owns the temporary DOM shown while the dynamic browser plugin graph loads. */
 export class BootPage {
   private readonly root: HTMLDivElement
   private readonly card: HTMLDivElement
@@ -34,14 +35,28 @@ export class BootPage {
     this.updateProgress()
   }
 
+  /**
+   * Set the number of plugin entries expected during this boot.
+   * @param total Expected plugin entry count.
+   */
   setTotal(total: number): void { this.total = total; this.updateProgress() }
+  /**
+   * Record one plugin entry's current loader state.
+   * @param id Stable plugin entry identifier.
+   * @param state Current loader state.
+   */
   setState(id: string, state: LoaderEntryState): void {
     this.states.set(id, state)
     if (state === 'active') this.active.add(id)
     this.updateProgress()
     this.render()
   }
+  /**
+   * Replace the progress surface with a terminal boot failure.
+   * @param message Failure text safe to show on the boot page.
+   */
   fail(message: string): void { this.failure = message; this.render() }
+  /** Remove the temporary boot page from its container. */
   dispose(): void { this.root.remove() }
 
   private render(): void {
