@@ -1,2 +1,2 @@
 Temporary trigger for repository-pinned N11.5 validation. Do not merge.
-Renderer-root Attempt: 20 — validate renderer-root head 0219451b7a563e35ffeca1afa45828c9fef3f244 after synchronizing WebBootEntry.external and WebBootGraph module-order semantics across the English/Chinese subsystem type-equivalence blocks and pairing record. Run the complete trusted acceptance sequence and gated push only if every gate passes.
+Renderer-root Attempt: 21 — validate renderer-root head 54161cec6ae9436cd6138af0555368b2b01289a0 after making the rc.8 bootstrap code block byte-identical across the Agent Note pair, aligning the Web README renderer link target, and refreshing both pairing records. Run the complete trusted acceptance sequence and gated push only if every gate passes.
