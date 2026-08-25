@@ -42,12 +42,12 @@ Client Module Protocol 现在遵循 rc.8 的 queue/create 模型：
 
 ```text
 Host index transform
-  → queue mode 安装 window.__ModuleLoader__
-  → parser-preload modules + runtime bundles
-  → 注入 window.__DSH_BOOT__
-  → Web kernel 调用 __ModuleLoader__.create(...)
-  → module system 排空提前到达的 registrations
-  → facade 切换为 live registration
+  → installs window.__ModuleLoader__ in queue mode
+  → parser-preloads modules + runtime bundles
+  → injects window.__DSH_BOOT__
+  → Web kernel calls __ModuleLoader__.create(...)
+  → module system drains queued registrations
+  → facade switches to live registration
 ```
 
 旧的私有 `window.__DSH_MODULES__` adoption seam 与 Shell 侧 static `MODULES_ID` registration 已删除。rc.8 的 `external` module-graph contract、`/client` normalization、dynamic provider ordering、self/cycle rejection、bootstrap-module retention 与 invalidate semantics 也已进入当前树。
