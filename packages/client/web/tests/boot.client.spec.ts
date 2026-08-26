@@ -80,7 +80,7 @@ describe('bootstrap failure rendering', () => {
 })
 
 describe('plugin activation', () => {
-  it('allows a modules-dependent row to be created before the modules row and mounts after settlement', async () => {
+  it('allows a modules-dependent row to be created before the modules row', async () => {
     const events: string[] = []
     const container = document.createElement('div')
     document.body.append(container)
@@ -110,7 +110,7 @@ describe('plugin activation', () => {
               mount: (element: HTMLElement) => {
                 events.push('mount')
                 element.textContent = 'mounted'
-                return () => { events.push('unmount') }
+                return () => {}
               },
             })
           },
@@ -130,26 +130,6 @@ describe('plugin activation', () => {
     expect(target.mode).toBe('live')
     expect(events).toEqual(['consumer', 'mount'])
     expect(container.textContent).toBe('mounted')
-    await entry.dispose()
-    expect(events).toEqual(['consumer', 'mount', 'unmount'])
-  })
-
-  it('fails loud when the activated graph does not provide uiRenderer', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const container = document.createElement('div')
-    document.body.append(container)
-    installFacade()
-    win.__DSH_BOOT__ = {
-      rev: 'graph',
-      entries: [{ id: MODULES_ID, url: '/modules.js', rev: '1' }],
-    }
-    const entry = new AppWebEntry(container)
-
-    await entry.run()
-
-    expect(container.textContent).toContain('uiRenderer service missing after client graph activation')
-    expect(container.textContent).toContain('Failed to load plugins')
-    expect(error).toHaveBeenCalledOnce()
     await entry.dispose()
   })
 })

@@ -1,4 +1,8 @@
-/** Browser UI renderer: slot adapter plus dynamic React-root ownership. */
+/**
+ * Browser UI renderer. It installs the slot renderer after its Cordis
+ * dependencies activate and exposes the mount operation used by the web boot
+ * kernel after the complete client roster settles.
+ */
 import { createElement, useLayoutEffect, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot, hydrateRoot, type Root } from 'react-dom/client'
@@ -7,28 +11,41 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 
-/** Selector hook bound to one session snapshot source. */
+/** Selector hook over a session's conversation snapshot. */
 export type UseSession<Snap extends object = object> = SnapshotSelectorHook<Snap>
+
 export type {
   ChainRenderOpts, HostObservable, RenderOpts, SessionProvideInfo, SnapshotSelectorHook,
   SlotRenderer, SlotRendererHost, StoreInstanceLike,
 } from '@deepseek-ai/dsh-client-ui-slots'
 export type { SessionProviderProps } from './session-provider.tsx'
 
-/** Dynamic renderer service handed to the framework-free Web boot kernel. */
+/** Mount operation exposed to the framework-free boot kernel. */
 export interface UiRendererService {
-  /** Mount the assembled application and return its lifecycle disposer. */
+  /**
+   * Mount the assembled application into the supplied element.
+   * @param container - Application mount point.
+   * @returns Disposer that unmounts the React root.
+   */
   mount: (container: HTMLElement) => () => void
 }
 
 declare module '@deepseek-ai/cordis' {
-  interface Context { uiRenderer: UiRendererService }
+  interface Context {
+    /** Mount face provided after the UI renderer activates. */
+    uiRenderer: UiRendererService
+  }
 }
 
-/** Cordis dependencies required before the browser renderer can activate. */
+/** Services required before application assembly. */
 export const inject = ['slots', 'sessions']
 
-interface BootSnapshot { className: string; html: string }
+interface BootSnapshot {
+  className: string
+  html: string
+}
+
+/** Hydrate the kernel-owned loading DOM before replacing it with the application. */
 function BootHandoff(props: { app: () => ReactNode; boot: BootSnapshot }): ReactNode {
   const [ready, setReady] = useState(false)
   useLayoutEffect(() => { setReady(true) }, [])
@@ -39,6 +56,8 @@ function BootHandoff(props: { app: () => ReactNode; boot: BootSnapshot }): React
     dangerouslySetInnerHTML: { __html: props.boot.html },
   })
 }
+
+/** Mount React while preserving the framework-free boot DOM through hydration. */
 function mountApp(container: HTMLElement, app: () => ReactNode): Root {
   const boot = container.querySelector<HTMLElement>(':scope > [data-dsh-boot]')
   if (boot !== null) {
@@ -53,8 +72,8 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
 }
 
 /**
- * Install slot rendering and publish dynamic React-root ownership.
- * @param ctx - Browser Cordis context that owns slots, sessions, and service lifetime.
+ * Install the slot renderer and provide the application mount face.
+ * @param ctx - Plugin context.
  */
 export function apply(ctx: Context): void {
   ctx.slots.install(createSlotRenderer())

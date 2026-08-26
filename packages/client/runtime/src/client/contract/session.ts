@@ -39,12 +39,14 @@ export interface ISession {
    * Send a prompt into the session.
    * @param content - text plus browser-owned temporary image uploads.
    * @param mode - 'queue' appends a turn; 'steer' interrupts the running one.
+   * @param signal - optional cancellation for the complete Host admission.
    * @param prepareRpcId - optional client-only request-local preparation after rpc-id mint and before transport.
    * @returns acceptance, or the business error (also mirrored into snapshot.promptError).
    */
   prompt(
     content: PromptContentPart[],
     mode: 'queue' | 'steer',
+    signal?: AbortSignal,
     prepareRpcId?: PromptRpcPreparation,
   ): Promise<RpcResult<{ accepted: true }>>
   /**

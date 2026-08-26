@@ -1,6 +1,17 @@
-/** Fiber-state projection vocabulary for the framework-free boot page. */
+/**
+ * Fiber-state projection vocabulary for the framework-free boot page. The
+ * boot chain subscribes to `internal/status` and projects the owning loader
+ * entry's current state.
+ * @module @deepseek-ai/dsh-client-web/src/loader-status
+ */
 import type { FiberState } from '@deepseek-ai/cordis'
-/** Runtime FiberState values used without importing Cordis value exports in the browser. */
+
+/**
+ * Value mirror of cordis's `FiberState` const enum: a const enum has no
+ * runtime object to import (and esbuild-based pipelines cannot inline it
+ * across modules), so these values mirror the pinned vendored definition
+ * while retaining its type (same rationale as dsh-tool-cordis's mirror).
+ */
 export const FIBER_STATE = {
   PENDING: 0 as FiberState.PENDING,
   LOADING: 1 as FiberState.LOADING,
@@ -9,9 +20,11 @@ export const FIBER_STATE = {
   DISPOSED: 4 as FiberState.DISPOSED,
   UNLOADING: 5 as FiberState.UNLOADING,
 } as const
-/** Loader states projected onto the framework-free boot page. */
+
+/** One entry's projected state label (lower-case face of {@link FiberState}). */
 export type LoaderEntryState = 'pending' | 'loading' | 'active' | 'failed' | 'disposed' | 'unloading'
-/** Human-readable boot-page state for every Cordis fiber state. */
+
+/** Label for each fiber state, keyed by member (inlining-safe — no reverse mapping). */
 export const STATE_LABELS: Record<FiberState, LoaderEntryState> = {
   [FIBER_STATE.PENDING]: 'pending',
   [FIBER_STATE.LOADING]: 'loading',

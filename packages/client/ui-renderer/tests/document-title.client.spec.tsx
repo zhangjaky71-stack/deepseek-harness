@@ -25,12 +25,12 @@ describe('DocumentTitle', () => {
     expect(document.title).toBe('DeepSeek Harness')
   })
 
-  it('uses the private product default when the build provides no title', () => {
+  it('uses the generic title when the build provides no title', () => {
     vi.stubEnv('DSH_CLIENT_TITLE', '')
     delete process.env.DSH_CLIENT_TITLE
     const mounted = render(<DocumentTitle title="First title" />)
-    expect(document.title).toBe('First title — DeepSeek Harness')
+    expect(document.title).toBe('First title — DSH Local Build')
     mounted.unmount()
-    expect(document.title).toBe('DeepSeek Harness')
+    expect(document.title).toBe('DSH Local Build')
   })
 })

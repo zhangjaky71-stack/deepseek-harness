@@ -15,12 +15,16 @@ export const name = 'client-ui-renderer-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: React root ownership is browser lifecycle behavior
- * covered by renderer/Web mount, replacement, and disposal regression tests.
+ * No runtime invariant: the package installs the render adapter and provides a
+ * mount callback but owns no event stream or mutable cross-plugin data relation.
  */
 const install: InvariantInstaller = () => {}
 
-/** Register this package's invariant companion. */
+/**
+ * Register this package's invariant companion.
+ * @param ctx - Cordis context carrying the invariant service.
+ * @returns the installed registration's disposer after setup succeeds.
+ */
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))
 /* jscpd:ignore-end */

@@ -1,5 +1,5 @@
 /**
- * Web boot kernel. It owns only the module system, Cordis Loader, and a
+ * Web boot kernel. It owns only the module system, Cordis loader, and a
  * framework-free boot page. The dynamic UI renderer receives the mount
  * point after every client entry activates.
  * @module @deepseek-ai/dsh-client-web/src/boot
@@ -78,9 +78,6 @@ export class AppWebEntry {
 
   /** Mount through a dependency fiber so replacing uiRenderer remounts the application. */
   private async mountApp(ctx: Context): Promise<void> {
-    if (ctx.get('uiRenderer') === undefined) {
-      throw new Error('web boot: uiRenderer service missing after client graph activation')
-    }
     const mounted = ctx.inject(['uiRenderer'], (scope) => {
       scope.effect(() => scope.uiRenderer.mount(this.container), 'web boot: application mount')
     })

@@ -21,15 +21,15 @@
     "@yarnpkg/cli-dist",
     "lightningcss"
   ],
-  "ignoreUnresolved": [
-    "client-build-environment"
-  ],
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.mjs",
         "scripts/**/*.cjs",
         "scripts/types/client-build-environment/index.d.ts"
+      ],
+      "ignoreUnresolved": [
+        "client-build-environment"
       ],
       "project": [
         "scripts/**/*.ts",
@@ -56,6 +56,7 @@
         "acp-agent/tests/fixtures/parent-sandbox-override.ts",
         "acp-agent/tests/fixtures/partial-landlock-sandbox.ts",
         "acp-agent/tests/fixtures/subagent-durability-failure.ts",
+        "acp-agent/tests/fixtures/subagent-result-diagnostic.ts",
         "acp-agent/tests/fixtures/subagent-report-fence.ts",
         "acp-agent/tests/fixtures/subagent-settlement-marker.ts",
         "acp-agent/tests/fixtures/workspace-context-compaction.ts",
@@ -204,16 +205,6 @@
       ]
     },
     "packages/client/ui-workflow-run": {
-      "entry": [
-        "tests/**/*.spec.tsx"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "src/**/*.tsx",
-        "tests/**/*.tsx"
-      ]
-    },
-    "packages/client/web-react": {
       "entry": [
         "tests/**/*.spec.tsx"
       ],
@@ -465,6 +456,16 @@
         "tests/**/*.ts"
       ]
     },
+    "packages/code-runtime/code-runtime-python": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/**/*.e2e.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "packages/llm/llm-deepseek": {
       "entry": [
         "tests/**/*.spec.ts",
@@ -503,6 +504,16 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
+      ]
+    },
+    "packages/context/file-reference": {
+      "ignoreDependencies": [
+        "zod"
+      ]
+    },
+    "packages/context/session-reference": {
+      "ignoreDependencies": [
+        "zod"
       ]
     },
     "packages/session/session-checkpoint-policy": {
@@ -640,9 +651,6 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
-      ],
-      "ignoreDependencies": [
-        "@openai/codex"
       ]
     },
     "packages/subagent/subagent-claude-code": {
@@ -693,9 +701,6 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
-      ],
-      "ignoreDependencies": [
-        "@deepseek-ai/dsh-client-ui-theme"
       ]
     },
     "packages/client/ui-renderer": {
@@ -703,7 +708,8 @@
         "tests/**/*.spec.tsx"
       ],
       "project": [
-        "src/**/*.{ts,tsx}",
+        "src/**/*.ts",
+        "src/**/*.tsx",
         "tests/**/*.tsx"
       ]
     },
@@ -731,7 +737,6 @@
       "ignoreDependencies": [
         "@deepseek-ai/dsh-client-ui-primitives",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-web-react",
         "@types/react",
         "@types/react-dom",
         "react",

@@ -185,12 +185,14 @@ export class Session implements SessionFace {
    * Send (queue/steer passed through 1:1); failures land in the snapshot's promptError.
    * @param content - text plus browser-owned temporary image uploads.
    * @param mode - queue appends after the current turn; steer interrupts it.
+   * @param signal - optional cancellation for the complete Host admission.
    * @param prepareRpcId - optional request-local preparation after the ordinary prompt rpc id is minted.
    * @returns the prompt result (also mirrored into promptError on failure).
    */
   async prompt(
     content: PromptContentPart[],
     mode: 'queue' | 'steer',
+    signal?: AbortSignal,
     prepareRpcId?: PromptRpcPreparation,
   ): Promise<RpcResult<{ accepted: true }>> {
     this.promptError = null
@@ -209,7 +211,7 @@ export class Session implements SessionFace {
           mode,
           content,
           clientTimeZone: resolvedClientTimeZone(),
-        }, undefined, prepareRpcId)).result
+        }, signal, prepareRpcId)).result
       } else if (prepareRpcId !== undefined) {
         result = {
           ok: false,
@@ -245,7 +247,7 @@ export class Session implements SessionFace {
               ? [{ type: 'text' as const, text: part.text }]
               : []),
             clientTimeZone: resolvedClientTimeZone(),
-          })).result
+          }, signal)).result
           result = routed.ok ? { ok: true, value: { accepted: true } } : routed
         }
       }
@@ -370,7 +372,7 @@ export class Session implements SessionFace {
    * @returns the admission result, or the error branch on transport failure.
    */
   async command(line: string): Promise<RemoteResult<{ matched: boolean }>> {
-    const result = await this.remote.commands.execute(this.sessionId, line)
+    const result = await this.remote.commands.execute(this.sessionId, line, [])
     if (!result.ok) return result
     return { ok: true, value: { matched: result.value !== undefined } }
   }
