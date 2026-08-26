@@ -13,12 +13,25 @@ import type { Context } from '@deepseek-ai/cordis'
 // error, so scope resolution goes through the sessions service (scopeOf
 // method) instead of the standalone helper.
 import type { ISessions, SessionFace, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SubmitImageAttachment, SubmitOutcome } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { ComposerAttachment } from './contract/slots.ts'
 import type { QueueAction, QueueItemId } from './contract/queue.ts'
 import type { ComposerBlocks } from './input/blocks.ts'
 import type { DraftAttachmentId, SessionInputResolver } from './input/contract.ts'
 import type { InputSubmitMode } from './contract/composer-submission.ts'
+
+/** One side effect prepared from a synchronous send-time Browser snapshot. */
+export interface ConversationPromptPreparation {
+  /** Stage the detached snapshot against the exact ordinary prompt rpc id. */
+  prepare(rpcId: string): Promise<void> | void
+  /** Best-effort rollback when preparation or ordinary prompt admission fails. */
+  discard?(rpcId: string): Promise<void> | void
+}
+
+/** Synchronous provider that captures Browser-local prompt context before the first await. */
+export type ConversationPromptPreparationProvider =
+  (sessionId: SessionId) => ConversationPromptPreparation | undefined
 
 /**
  * The outward conversation face (`ctx.conversation`): the scope-addressed
@@ -33,6 +46,8 @@ export interface IConversation {
    * cannot import makes a session's input inert with its own reason.
    */
   readonly blocks: ComposerBlocks
+  /** Register a request-local prompt-context provider and return its disposer. */
+  registerPromptPreparation(id: string, provider: ConversationPromptPreparationProvider): () => void
   /**
    * Send a prompt into the caller scope's session (queued turn).
    * @param text - prompt text, sent verbatim as one text block.
@@ -93,6 +108,7 @@ export class ConversationController extends Service implements IConversation {
   readonly input: SessionInputResolver
   /** The per-session composer-block registry. */
   readonly blocks: ComposerBlocks
+  private readonly promptPreparations = new Map<string, ConversationPromptPreparationProvider>()
   private readonly draftAttachments = new Map<DraftAttachmentId, ComposerAttachment>()
   private readonly imageUrls = new Map<string, ImageUrlEntry>()
   private readonly imageGenerations = new Map<SessionId, number>()
@@ -112,12 +128,25 @@ export class ConversationController extends Service implements IConversation {
     this.blocks = config.blocks
     ctx.effect(() => () => {
       this.disposed = true
+      this.promptPreparations.clear()
       for (const url of this.createdImageUrls) revokePreview(url)
       this.createdImageUrls.clear()
       this.draftAttachments.clear()
       this.imageUrls.clear()
       this.imageGenerations.clear()
     }, 'conversation attachment URL cache')
+  }
+
+  /** Register one send-time prompt preparation provider. */
+  registerPromptPreparation(id: string, provider: ConversationPromptPreparationProvider): () => void {
+    if (id === '') throw new Error('conversation.registerPromptPreparation requires a non-empty id')
+    if (this.promptPreparations.has(id)) {
+      throw new Error(`conversation prompt preparation "${id}" is already registered`)
+    }
+    this.promptPreparations.set(id, provider)
+    return () => {
+      if (this.promptPreparations.get(id) === provider) this.promptPreparations.delete(id)
+    }
   }
 
   /**
@@ -128,8 +157,17 @@ export class ConversationController extends Service implements IConversation {
    */
   async send(text: string): Promise<void> {
     const session = this.scopedSession('send')
-    const result = await session.prompt([{ type: 'text', text }], 'queue')
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const preparations = this.snapshotPromptPreparations(session.sessionId)
+    const result = await session.prompt(
+      [{ type: 'text', text }],
+      'queue',
+      undefined,
+      preparations.length === 0 ? undefined : rpcId => this.preparePrompt(preparations, rpcId),
+    )
+    if (!result.ok) {
+      await this.discardPromptPreparations(preparations)
+      throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    }
   }
 
   /**
@@ -138,22 +176,36 @@ export class ConversationController extends Service implements IConversation {
    * @param text - serialized prompt text.
    * @param imageIds - ordered draft-local attachment ids.
    * @param mode - queue or steer delivery selected by composer policy.
+   * @param signal - optional cancellation for the complete Host admission.
+   * @returns the Host admission outcome; local attachment preparation failures reject.
    */
   async sendSession(
     session: SessionFace,
     text: string,
     imageIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
-  ): Promise<void> {
+    signal?: AbortSignal,
+  ): Promise<SubmitOutcome> {
+    // Snapshot plugin-owned interaction state before image serialization yields.
+    const preparations = this.snapshotPromptPreparations(session.sessionId)
     const attachments = this.draftImages(imageIds)
     if (attachments.length !== imageIds.length) {
       throw new Error('conversation.sendSession: one or more draft images are no longer available')
     }
     const uploaded = await this.serializeImages(attachments.map(attachment => attachment.file))
     const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
-    const result = await session.prompt(content, mode)
-    if (!result.ok) throw new Error(`conversation.send failed: ${result.error.code}: ${result.error.message}`)
+    const result = await session.prompt(
+      content,
+      mode,
+      signal,
+      preparations.length === 0 ? undefined : rpcId => this.preparePrompt(preparations, rpcId),
+    )
+    if (!result.ok) {
+      await this.discardPromptPreparations(preparations)
+      return { kind: 'error' }
+    }
     this.releaseDraftImages(attachments)
+    return { kind: 'success' }
   }
 
   /**
@@ -183,6 +235,21 @@ export class ConversationController extends Service implements IConversation {
       if (attachment !== undefined) attachments.push(attachment)
     }
     return attachments
+  }
+
+  /**
+   * Serialize ordered draft images to command-submit wire payloads without
+   * sending or releasing them (the composer releases only after the command
+   * settles successfully).
+   * @param imageIds - ordered draft-local attachment ids.
+   * @returns base64 payloads in id order.
+   */
+  async serializeDraftImages(imageIds: readonly DraftAttachmentId[]): Promise<readonly SubmitImageAttachment[]> {
+    const attachments = this.draftImages(imageIds)
+    if (attachments.length !== imageIds.length) {
+      throw new Error('conversation.serializeDraftImages: one or more draft images are no longer available')
+    }
+    return Promise.all(attachments.map(attachment => this.encodeImage(attachment.file)))
   }
 
   /**
@@ -287,6 +354,63 @@ export class ConversationController extends Service implements IConversation {
     await this.scopedSession('loadOlder').loadOlder()
   }
 
+  /** Snapshot all registered preparation providers synchronously at the send boundary. */
+  private snapshotPromptPreparations(sessionId: SessionId): ConversationPromptPreparation[] {
+    const preparations: ConversationPromptPreparation[] = []
+    for (const provider of this.promptPreparations.values()) {
+      const preparation = provider(sessionId)
+      if (preparation !== undefined) preparations.push(preparation)
+    }
+    return preparations
+  }
+
+  /** Prepare snapshots in registration order and roll back a partially prepared batch. */
+  private async preparePrompt(
+    preparations: ConversationPromptPreparation[],
+    rpcId: string,
+  ): Promise<void> {
+    const prepared: ConversationPromptPreparation[] = []
+    try {
+      for (const preparation of preparations) {
+        await preparation.prepare(rpcId)
+        prepared.push(preparation)
+        ;(preparation as ConversationPromptPreparation & { __rpcId?: string }).__rpcId = rpcId
+      }
+    } catch (error) {
+      await this.discardPrepared(prepared, rpcId)
+      throw error
+    }
+  }
+
+  /** Best-effort rollback of preparations that reached the Host for a failed prompt. */
+  private async discardPromptPreparations(preparations: ConversationPromptPreparation[]): Promise<void> {
+    for (const preparation of preparations) {
+      const prepared = preparation as ConversationPromptPreparation & { __rpcId?: string }
+      const rpcId = prepared.__rpcId
+      if (rpcId === undefined) continue
+      delete prepared.__rpcId
+      try {
+        await preparation.discard?.(rpcId)
+      } catch (error) {
+        console.error('[ui-conversation] prompt preparation rollback failed:', error)
+      }
+    }
+  }
+
+  /** Reverse-order rollback for preparation failure before prompt transport. */
+  private async discardPrepared(
+    preparations: readonly ConversationPromptPreparation[],
+    rpcId: string,
+  ): Promise<void> {
+    for (let index = preparations.length - 1; index >= 0; index -= 1) {
+      try {
+        await preparations[index]?.discard?.(rpcId)
+      } catch (error) {
+        console.error('[ui-conversation] prompt preparation rollback failed:', error)
+      }
+    }
+  }
+
   /** Resolve the caller scope's session face or throw on root contexts. */
   private scopedSession(op: string): SessionFace {
     const id = this.scopeId(op)
@@ -314,12 +438,16 @@ export class ConversationController extends Service implements IConversation {
 
   /** Convert browser files to canonical base64 prompt parts. */
   private serializeImages(images: readonly File[]): Promise<Parameters<SessionFace['prompt']>[0]> {
-    return Promise.all(images.map(async file => ({
-      type: 'image' as const,
+    return Promise.all(images.map(async file => ({ type: 'image' as const, ...await this.encodeImage(file) })))
+  }
+
+  /** Canonical base64 wire form of one browser image file. */
+  private async encodeImage(file: File): Promise<SubmitImageAttachment> {
+    return {
       mediaType: imageMediaType(file.type),
       data: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
       ...(file.name === '' ? {} : { name: file.name }),
-    })))
+    }
   }
 }
 

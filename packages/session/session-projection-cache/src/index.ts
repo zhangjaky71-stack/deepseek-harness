@@ -109,9 +109,10 @@ export class SessionProjectionCache extends Service {
    * rows (version-matching keys only), each cut carried with its watermark
    * so a client value store can seed under its higher-seq-wins rule — as
    * stale as the last durable checkpoint but never wrong, and never from an
-   * unrelated log (the caller's header is the identity witness). Fresher
-   * paths (the history tail baseline, {@link coldSnapshot}) supersede these
-   * values whenever a session is actually opened.
+   * unrelated log (the caller's header is the identity witness). Browser read
+   * guards receive that exact identity before any cached value leaves the Host.
+   * Fresher paths (the history tail baseline, {@link coldSnapshot}) supersede
+   * these values whenever a session is actually opened.
    * @param meta - the listed session's header (identity witness; no log read).
    * @returns the cut (`asOfSeq` = lowest served-row watermark), or
    *   `undefined` when no usable row exists for this lifecycle.
@@ -119,7 +120,10 @@ export class SessionProjectionCache extends Service {
   cachedSnapshot(meta: SessionHeader): ProjectionSnapshot | undefined {
     const record = this.recordFor(meta.id, identityOf(meta))
     if (record === undefined) return undefined
-    const values = this.ctx.sessionProjections.viewCheckpoint(record.rows)
+    const values = this.ctx.sessionProjections.viewCheckpoint(record.rows, {
+      surface: 'browser',
+      sessionId: String(meta.id),
+    })
     const keys = Object.keys(values)
     if (keys.length === 0) return undefined
     // The block carries ONE cut: the lowest served watermark is the seq every
@@ -155,9 +159,11 @@ export class SessionProjectionCache extends Service {
    * Cold-read one persisted session's projections with zero full-log load:
    * cached rows + a persistence `readFrom` tail from the registry's restore
    * floor, refolded by the registry and written back (fail-soft) so the next
-   * cold read starts closer. A cache row invalidated by a shrunk log
-   * (crash-repair truncation) triggers one full re-read from seq 0 — the
-   * ladder's slow rung, still no crash. Rejects when the session has no
+   * cold read starts closer. Every browser-facing restore carries the exact
+   * target SessionId into read guards; the cache remains a rebuildable fold
+   * shortcut, never an authorization bypass. A cache row invalidated by a
+   * shrunk log (crash-repair truncation) triggers one full re-read from seq 0 —
+   * the ladder's slow rung, still no crash. Rejects when the session has no
    * persisted log (`not found` from the persistence seam).
    * @param id - the persisted session to read.
    * @param signal - optional cancellation for the persistence reads.
@@ -183,14 +189,24 @@ export class SessionProjectionCache extends Service {
     const related = record === undefined || identityMatches(record.identity, identityOf(tail.meta))
     try {
       if (!related) throw new Error('unrelated log identity')
-      restored = this.ctx.sessionProjections.restore(cached, tail.events, floor)
+      restored = this.ctx.sessionProjections.restore(
+        cached,
+        tail.events,
+        floor,
+        { surface: 'browser', sessionId: String(id) },
+      )
     } catch {
       // The recoverable restore failures: an unrelated record, or a row
       // overreaching the stored log end (or predating the floor). Both imply
       // floor > 0 (baseSeq-0 restores never throw and an unrelated record
       // still carried a usable watermark), so the full log is a fresh read.
       const whole = await persistence.readFrom(id, 0, signal)
-      restored = this.ctx.sessionProjections.restore({}, whole.events, 0)
+      restored = this.ctx.sessionProjections.restore(
+        {},
+        whole.events,
+        0,
+        { surface: 'browser', sessionId: String(id) },
+      )
     }
     await this.putSoft(id, identityOf(tail.meta), restored.checkpoint, 'cold-read write-back')
     return restored.snapshot
@@ -287,14 +303,30 @@ export class SessionProjectionCache extends Service {
   }
 }
 
-/** Project a header onto the identity fields a record is bound to. */
+/** Project every immutable header field except SessionId, which is the table key. */
 function identityOf(header: SessionHeader): CheckpointIdentity {
-  return { createdAt: header.createdAt, ...header.cwd === undefined ? {} : { cwd: header.cwd } }
+  return {
+    version: header.version,
+    createdAt: header.createdAt,
+    ...header.cwd === undefined ? {} : { cwd: header.cwd },
+    ...header.parentSession === undefined ? {} : { parentSession: header.parentSession },
+    ...header.seedLength === undefined ? {} : { seedLength: header.seedLength },
+    ...header.origin === undefined ? {} : { origin: header.origin },
+    ...header.delegationDepth === undefined ? {} : { delegationDepth: header.delegationDepth },
+    ...header.agentPreset === undefined ? {} : { agentPreset: header.agentPreset },
+  }
 }
 
 /** Whether a stored record's bound identity names the caller's lifecycle. */
 function identityMatches(stored: CheckpointIdentity, expected: CheckpointIdentity): boolean {
-  return stored.createdAt === expected.createdAt && stored.cwd === expected.cwd
+  return stored.version === expected.version
+    && stored.createdAt === expected.createdAt
+    && stored.cwd === expected.cwd
+    && stored.parentSession === expected.parentSession
+    && stored.seedLength === expected.seedLength
+    && stored.origin === expected.origin
+    && stored.delegationDepth === expected.delegationDepth
+    && stored.agentPreset === expected.agentPreset
 }
 
 export default SessionProjectionCache

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-20-canvas-open-world-migration.md
+2026-08-20-canvas-open-world-migration.md: cc185922b1ea385b5101a7eb248cdba1d131a7db
+2026-08-20-canvas-open-world-migration.zh.md: 83e2b82bc560fc6190845891bde1ca83144b30d8

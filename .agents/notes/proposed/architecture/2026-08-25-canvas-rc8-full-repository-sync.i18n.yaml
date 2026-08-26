@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-25-canvas-rc8-full-repository-sync.md
+2026-08-25-canvas-rc8-full-repository-sync.md: 8cf6aed4f99c6708a9c53cfc0a98e0c50fed66c0
+2026-08-25-canvas-rc8-full-repository-sync.zh.md: 619768ad06ef758b2e096c80105728b78ed37593

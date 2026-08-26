@@ -5,9 +5,13 @@
  */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { TypertContextMap } from './types.ts'
+import type { RemoteFailure, TypertContextMap } from './types.ts'
 
 const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const TYPERT_BUSINESS_CODE_PATTERN = /^[A-Za-z0-9_.:-]+$/
+const TYPERT_BUSINESS_CODE_MAX = 128
+const TYPERT_BUSINESS_MESSAGE_MAX = 512
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
 /**
  * Test one generated Remote name against the Connection endpoint grammar.
@@ -34,6 +38,42 @@ export class TypertLookupFailure<Failure = unknown> extends Error {
     super('Typert lookup policy rejected the requested identity')
     this.name = 'TypertLookupFailure'
     this.failure = failure
+  }
+}
+
+/**
+ * Explicit business rejection that is safe to expose through a Remote carrier.
+ * Ordinary thrown Errors remain infrastructure failures and must never acquire
+ * wire semantics merely because they happen to contain a `code` property.
+ */
+export class TypertBusinessFailure extends Error {
+  /** Stable business code also carried by the wire failure. */
+  readonly code: string
+  /** Frozen carrier-safe failure materialized by the Host Gateway. */
+  readonly failure: RemoteFailure
+
+  /**
+   * Construct one deliberately public business failure.
+   * @param message - bounded correction-oriented message safe for the caller.
+   * @param code - stable bounded machine-readable business code.
+   */
+  constructor(message: string, code: string) {
+    if (code.length === 0
+      || code.length > TYPERT_BUSINESS_CODE_MAX
+      || code.trim() !== code
+      || !TYPERT_BUSINESS_CODE_PATTERN.test(code)) {
+      throw new TypeError('typert-protocol: business failure code is not wire-safe')
+    }
+    if (message.length === 0
+      || message.length > TYPERT_BUSINESS_MESSAGE_MAX
+      || message.trim() !== message
+      || CONTROL_CHARACTER_PATTERN.test(message)) {
+      throw new TypeError('typert-protocol: business failure message is not wire-safe')
+    }
+    super(message)
+    this.name = new.target.name
+    this.code = code
+    this.failure = Object.freeze({ code, message, details: Object.freeze({}) })
   }
 }
 

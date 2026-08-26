@@ -27,6 +27,9 @@
     - id: session
       name: '@deepseek-ai/dsh-session'
 
+    - id: invariants
+      name: '@deepseek-ai/dsh-invariants'
+
     - id: typert
       name: '@deepseek-ai/dsh-typert-registry'
 
@@ -125,6 +128,36 @@
     # loud without it; web layers reuse this same mount for list rows.
     - id: session-projection
       name: '@deepseek-ai/dsh-session-projection'
+
+    # Deployment Canvas capabilities are independent from authorization and
+    # are consumed by Host operations, Browser UI, and later Agent tools.
+    - id: canvas-features
+      name: '@deepseek-ai/dsh-canvas/feature-service'
+
+    # One Host registry supplies semantic media-node definitions to later
+    # Validator, Editor, Agent-summary, and Executor consumers.
+    - id: media-workflow
+      name: '@deepseek-ai/dsh-media-workflow'
+
+    # V1 built-ins register on their own plugin fiber so HMR/unload removes the
+    # exact definitions before a replacement plugin registers newer metadata.
+    - id: media-workflow-builtins
+      name: '@deepseek-ai/dsh-media-workflow/builtins'
+
+    # Canvas is a Host service in every profile so Browser Remotes and later
+    # Agent tools share one Session-backed authority and Projection source.
+    - id: canvas
+      name: '@deepseek-ai/dsh-canvas'
+
+    # Package-owned pre-commit/replay checks make the Canvas write permit a
+    # shipped invariant instead of a test-only convention.
+    - id: canvas-invariant
+      name: '@deepseek-ai/dsh-canvas/invariant'
+
+    # Request-local Browser Canvas selection is staged separately from durable
+    # Canvas state, then logged only when its exact correlated user prompt enters a step.
+    - id: canvas-interaction
+      name: '@deepseek-ai/dsh-canvas/interaction-service'
 
     # Session telemetry is mounted but disabled by default. DSH_TELEMETRY_MODE
     # explicitly opts into FULL or FEEDBACK_ONLY reporting; uploading mirrors

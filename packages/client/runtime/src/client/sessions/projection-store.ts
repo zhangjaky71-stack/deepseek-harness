@@ -1,35 +1,18 @@
 /**
- * Generic per-session projection value store (push model; see the
- * session-projection subsystem page, docs/subsystems/session-projection.md):
- * the host is the only computation site; the client holds finished
- * whole values per key — `key → { value, seq }` — seeded by the history tail
- * page's projections block and updated by `session/projection` push frames,
- * under the single rule **higher seq wins**. No client-side domain folding
- * exists: a domain ships projection support with zero client code. Per-key
- * bare observable faces feed `useProjection` (web-react binds them).
+ * Generic per-session projection value store. The Host is the only computation
+ * site; the client holds finished whole values and framework visibility
+ * tombstones. Durable Session seq orders domain changes, while a separate
+ * visibility generation orders allow/deny or capability transitions that can
+ * happen at the same durable seq.
  */
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { ObservableSnapshot } from '../contract/store.ts'
 import { Notifier } from './notifier.ts'
 
-// The single projection type table, typed end to end (host unit, wire block,
-// client store, React hook) — the Service Definition package's pure-type outlet
-// (`/types`, zero imports), never the package root: the root's dsh-agent →
-// dsh-session chain would drag the host `Context.sessions` merge into the
-// client program (one program must not hold both sides). No second
-// client-side "views" table (rejected in the Alternatives of
-// .agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
 export type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 
-/**
- * The fifth framework hook seat (see the session-projection subsystem page,
- * docs/subsystems/session-projection.md): key-addressed
- * projection reader delivered through the standard kit. `undefined` uniformly
- * means capability absent — host unit unmounted, or no baseline/frame has
- * carried the key yet. The selector overload mirrors useSession (per-key uSES
- * binding; reference stability holds because a key's value reference changes
- * only when a frame or baseline lands).
- */
+const SESSION_PROJECTION_CONTROL_MARKER = '__dshSessionProjectionV1' as const
+
 export type UseProjection = {
   <K extends Extract<keyof SessionProjectionMap, string>>(key: K): SessionProjectionMap[K] | undefined
   <K extends Extract<keyof SessionProjectionMap, string>, S>(
@@ -39,73 +22,65 @@ export type UseProjection = {
   ): S
 }
 
-/**
- * Tail-page projections baseline — structurally identical to the wire's
- * `SessionProjectionsBlock` (apiproxy api layer), restated here so the
- * React-free store depends only on the type table, not the wire package's
- * response vocabulary.
- */
 export interface ProjectionsBaseline {
-  /** The consistent-cut seq (equals the window tail seq by construction). */
-  asOfSeq: number
-  /** Whole current values by key; a registered key absent here means the capability is absent. */
-  values: Partial<SessionProjectionMap>
+  readonly asOfSeq: number
+  readonly values: Partial<SessionProjectionMap>
 }
 
-/** One key's row: the latest finished value and the seq it is consistent with. */
 interface Row {
   value: unknown
   seq: number
+  generation: number
 }
 
-/** Per-key notification channel: the bare face plus its batching notifier. */
+interface Clock {
+  seq: number
+  generation: number
+}
+
 interface Channel {
   face: ObservableSnapshot<unknown>
   notifier: Notifier
 }
 
-/**
- * One session's projection values. Framework semantics, uniform across every
- * key: a baseline seeds rows at its cut, a push frame updates one row, and in
- * both paths a lower-or-equal seq loses — a replayed frame cannot regress a
- * value, a stale baseline cannot overwrite a newer frame. A key the store has
- * never seen reads `undefined` (capability absent). Faces are identity-stable
- * per key (create-on-demand, cached) so the React side binds each exactly
- * once; the store-level channel (`subscribeAny`) serves coarse consumers (the
- * manager's list projection reads the `title` key).
- */
+interface DecodedControl {
+  readonly generation: number
+  readonly present: boolean
+  readonly value?: unknown
+}
+
+function decodeControl(value: unknown): DecodedControl | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const outer = value as Record<string, unknown>
+  if (Object.keys(outer).length !== 1 || !Object.hasOwn(outer, SESSION_PROJECTION_CONTROL_MARKER)) return undefined
+  const body = outer[SESSION_PROJECTION_CONTROL_MARKER]
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
+  const source = body as Record<string, unknown>
+  if (!Number.isSafeInteger(source.generation) || (source.generation as number) < 1 || typeof source.present !== 'boolean') return undefined
+  if (source.present === false) {
+    if (Object.keys(source).sort().join(',') !== 'generation,present') return undefined
+    return { generation: source.generation as number, present: false }
+  }
+  if (Object.keys(source).sort().join(',') !== 'generation,present,value') return undefined
+  return { generation: source.generation as number, present: true, value: source.value }
+}
+
+/** One Session's projection rows plus per-key ordering clocks. */
 export class ProjectionValueStore {
   private readonly rows = new Map<string, Row>()
+  private readonly clocks = new Map<string, Clock>()
   private readonly channels = new Map<string, Channel>()
   private valuesCache: Readonly<Partial<SessionProjectionMap>> | undefined
-  /** Coarse any-key channel (no snapshot cache to rebuild: reads hit rows directly). */
   private readonly anyNotifier = new Notifier(() => {})
 
-  /**
-   * Key-addressed bare observable face (the useProjection resolution path).
-   * Always defined — absence is an `undefined` snapshot, never a missing
-   * face, so a component may subscribe before the key ever carries a value.
-   * @param key - projection key.
-   * @returns the identity-stable face for this key.
-   */
   faceOf(key: string): ObservableSnapshot<unknown> {
     return this.channel(key).face
   }
 
-  /**
-   * Current whole value for a key (erased framework read; typed reads go
-   * through `useProjection`'s map lookup).
-   * @param key - projection key.
-   * @returns the value, or undefined while the key is absent.
-   */
   get(key: string): unknown {
     return this.rows.get(key)?.value
   }
 
-  /**
-   * Read every current projection value as one reference-stable snapshot.
-   * @returns The same frozen value map until a row changes.
-   */
   values(): Readonly<Partial<SessionProjectionMap>> {
     if (this.valuesCache === undefined) {
       this.valuesCache = Object.freeze(Object.fromEntries(
@@ -115,65 +90,89 @@ export class ProjectionValueStore {
     return this.valuesCache
   }
 
-  /**
-   * Subscribe to any-key changes (microtask-batched) — the manager's list
-   * rebuild channel.
-   * @param listener - change callback.
-   * @returns the unsubscribe function.
-   */
   subscribeAny(listener: () => void): () => void {
     return this.anyNotifier.subscribe(listener)
   }
 
-  /**
-   * Apply one finished value (the `session/projection` push-frame path).
-   * @param key - projection key.
-   * @param value - whole value computed by the host unit.
-   * @param seq - the unit's watermark at emission.
-   */
+  /** Apply one live `session/projection` payload. */
   apply(key: string, value: unknown, seq: number): void {
-    const row = this.rows.get(key)
-    if (row !== undefined && seq <= row.seq) return // higher seq wins; replays and stale frames drop
-    this.rows.set(key, { value, seq })
+    const control = decodeControl(value)
+    if (control !== undefined) {
+      this.applyControl(key, control, seq)
+      return
+    }
+    const clock = this.clocks.get(key)
+    if (clock !== undefined && seq <= clock.seq) return
+    this.clocks.set(key, { seq, generation: 0 })
+    this.rows.set(key, { value, seq, generation: 0 })
     this.changed(key)
   }
 
   /**
-   * Seed from a history tail page's projections block: every carried key
-   * lands under the same seq rule as frames; a key the block omits is
-   * capability-absent as of the cut — its row clears unless a newer frame
-   * already superseded the cut (a stale baseline can neither overwrite nor
-   * clear newer values).
-   * @param baseline - the response's projections block.
+   * Seed one fresh full baseline. A same-seq visibility control from the live
+   * stream outranks the baseline until `truncate()` starts a new mux generation.
    */
   seed(baseline: ProjectionsBaseline): void {
-    // Erased walk: the framework crosses the open key space; per-key typing
-    // is re-established at the consumer (useProjection's map lookup).
     const values = baseline.values as Record<string, unknown>
-    for (const key of Object.keys(values)) this.apply(key, values[key], baseline.asOfSeq)
-    for (const [key, row] of this.rows) {
+    for (const [key, value] of Object.entries(values)) {
+      const clock = this.clocks.get(key)
+      if (clock !== undefined) {
+        if (clock.seq > baseline.asOfSeq) continue
+        if (clock.seq === baseline.asOfSeq && clock.generation > 0) continue
+      }
+      const current = this.rows.get(key)
+      this.clocks.set(key, { seq: baseline.asOfSeq, generation: 0 })
+      this.rows.set(key, { value, seq: baseline.asOfSeq, generation: 0 })
+      if (current === undefined || current.value !== value || current.seq !== baseline.asOfSeq || current.generation !== 0) this.changed(key)
+    }
+    for (const key of new Set([...this.rows.keys(), ...this.clocks.keys()])) {
       if (Object.hasOwn(values, key)) continue
-      if (row.seq > baseline.asOfSeq) continue
-      this.rows.delete(key)
-      this.changed(key)
+      const clock = this.clocks.get(key)
+      if (clock !== undefined) {
+        if (clock.seq > baseline.asOfSeq) continue
+        if (clock.seq === baseline.asOfSeq && clock.generation > 0) continue
+      }
+      const existed = this.rows.delete(key)
+      this.clocks.set(key, { seq: baseline.asOfSeq, generation: 0 })
+      if (existed) this.changed(key)
     }
   }
 
   /**
-   * Drop rows past a mux-generation baseline (`session/subscribed.lastSeq`):
-   * a row claiming knowledge beyond the host's own durable baseline rode
-   * state a restart lost — under last-wins it would wrongly outrank the
-   * host's recomputed (lower-seq) values forever. Durable replay and the next
-   * baseline re-seed whatever truly survived (the title-snapshot precedent,
-   * generalized).
-   * @param lastSeq - the subscribed frame's durable baseline seq.
+   * Start a new mux generation. State claiming a seq beyond the Host durable
+   * baseline is dropped; same-or-earlier visibility generations are reset so
+   * the fresh history baseline can become authoritative at an equal seq.
    */
   truncate(lastSeq: number): void {
-    for (const [key, row] of this.rows) {
-      if (row.seq <= lastSeq) continue
-      this.rows.delete(key)
-      this.changed(key)
+    for (const [key, clock] of this.clocks) {
+      if (clock.seq > lastSeq) {
+        const existed = this.rows.delete(key)
+        this.clocks.delete(key)
+        if (existed) this.changed(key)
+        continue
+      }
+      if (clock.generation > 0) {
+        this.clocks.set(key, { seq: clock.seq, generation: 0 })
+        const row = this.rows.get(key)
+        if (row !== undefined) this.rows.set(key, { value: row.value, seq: row.seq, generation: 0 })
+      }
     }
+  }
+
+  private applyControl(key: string, control: DecodedControl, seq: number): void {
+    const clock = this.clocks.get(key)
+    if (clock !== undefined) {
+      if (seq < clock.seq) return
+      if (seq === clock.seq && control.generation <= clock.generation) return
+    }
+    this.clocks.set(key, { seq, generation: control.generation })
+    if (!control.present) {
+      if (this.rows.delete(key)) this.changed(key)
+      return
+    }
+    const previous = this.rows.get(key)
+    this.rows.set(key, { value: control.value, seq, generation: control.generation })
+    if (previous === undefined || previous.value !== control.value || previous.seq !== seq || previous.generation !== control.generation) this.changed(key)
   }
 
   private changed(key: string): void {
@@ -185,7 +184,6 @@ export class ProjectionValueStore {
   private channel(key: string): Channel {
     let channel = this.channels.get(key)
     if (channel === undefined) {
-      // The notifier only batches (no snapshot cache to rebuild: faces read rows directly).
       const notifier = new Notifier(() => {})
       channel = {
         notifier,

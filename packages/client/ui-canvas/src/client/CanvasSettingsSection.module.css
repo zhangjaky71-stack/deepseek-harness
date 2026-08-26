@@ -1,0 +1,137 @@
+.section {
+  display: grid;
+  gap: 16px;
+  width: min(760px, 100%);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.intro,
+.notice,
+.restartNotice,
+.featureCopy p,
+.featureCopy small {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.intro {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+.restartBadge {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.restartNotice,
+.notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+  line-height: 1.5;
+}
+
+.features {
+  display: grid;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  overflow: hidden;
+}
+
+.featureRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+}
+
+.featureRow + .featureRow {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.featureCopy {
+  min-width: 0;
+}
+
+.featureLabel {
+  display: block;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.featureCopy p {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.featureCopy small {
+  font-size: 12px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.resetButton {
+  border: 0;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.resetButton:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.toggle {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+}
+
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+@media (max-width: 640px) {
+  .header,
+  .featureRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .controls {
+    justify-content: flex-end;
+  }
+}
