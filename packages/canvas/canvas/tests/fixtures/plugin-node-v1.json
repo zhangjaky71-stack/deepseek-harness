@@ -1,0 +1,15 @@
+{
+  "id": "plugin-workflow-v1",
+  "schemaVersion": 1,
+  "name": "Golden plugin workflow",
+  "nodes": [
+    { "id": "prompt", "type": "prompt", "nodeVersion": 1, "config": { "text": "stylize the image" } },
+    { "id": "plugin-transform", "type": "example.custom-transform", "nodeVersion": 3, "config": { "strength": 0.8, "mode": "cinematic" } },
+    { "id": "output", "type": "output", "nodeVersion": 1, "config": {} }
+  ],
+  "edges": [
+    { "id": "edge-prompt", "sourceNodeId": "prompt", "sourcePort": "text", "targetNodeId": "plugin-transform", "targetPort": "prompt" },
+    { "id": "edge-output", "sourceNodeId": "plugin-transform", "sourcePort": "image", "targetNodeId": "output", "targetPort": "images" }
+  ],
+  "outputNodeIds": ["output"]
+}

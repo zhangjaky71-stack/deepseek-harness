@@ -126,6 +126,30 @@
     - id: session-projection
       name: '@deepseek-ai/dsh-session-projection'
 
+
+    # Deployment Canvas capabilities are independent from authorization and
+    # are consumed by Host operations, Browser UI, and Agent tools.
+    - id: canvas-features
+      name: '@deepseek-ai/dsh-canvas/feature-service'
+
+    # Open-world semantic media-node registry used by Editor and workflow execution.
+    - id: media-workflow
+      name: '@deepseek-ai/dsh-media-workflow'
+
+    - id: media-workflow-builtins
+      name: '@deepseek-ai/dsh-media-workflow/builtins'
+
+    # One Session-backed Canvas authority for Remotes, Browser projection, and Agents.
+    - id: canvas
+      name: '@deepseek-ai/dsh-canvas'
+
+    - id: canvas-invariant
+      name: '@deepseek-ai/dsh-canvas/invariant'
+
+    # Request-local Browser selection/focus context; durable Canvas state stays in Session.
+    - id: canvas-interaction
+      name: '@deepseek-ai/dsh-canvas/interaction-service'
+
     # Session telemetry is mounted but disabled by default. DSH_TELEMETRY_MODE
     # explicitly opts into FULL or FEEDBACK_ONLY reporting; uploading mirrors
     # session-log records onto OTLP/HTTP logs with no session-telemetry/record redaction

@@ -5,9 +5,13 @@
  */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { TypertContextMap } from './types.ts'
+import type { RemoteFailure, TypertContextMap } from './types.ts'
 
 const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+const TYPERT_BUSINESS_CODE_PATTERN = /^[A-Za-z0-9_.:-]+$/
+const TYPERT_BUSINESS_CODE_MAX = 128
+const TYPERT_BUSINESS_MESSAGE_MAX = 512
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
 /**
  * Test one generated Remote name against the Connection endpoint grammar.
@@ -34,6 +38,39 @@ export class TypertLookupFailure<Failure = unknown> extends Error {
     super('Typert lookup policy rejected the requested identity')
     this.name = 'TypertLookupFailure'
     this.failure = failure
+  }
+}
+
+/**
+ * Explicit business rejection whose code/message are deliberately safe for a
+ * Remote caller. It subclasses the rc.2 lookup-failure carrier so the existing
+ * Gateway preserves the typed failure instead of collapsing it to `internal`.
+ */
+export class TypertBusinessFailure extends TypertLookupFailure<RemoteFailure> {
+  readonly code: string
+
+  constructor(message: string, code: string) {
+    if (code.length === 0
+      || code.length > TYPERT_BUSINESS_CODE_MAX
+      || code.trim() !== code
+      || !TYPERT_BUSINESS_CODE_PATTERN.test(code)) {
+      throw new TypeError('typert-protocol: business failure code is not wire-safe')
+    }
+    if (message.length === 0
+      || message.length > TYPERT_BUSINESS_MESSAGE_MAX
+      || message.trim() !== message
+      || CONTROL_CHARACTER_PATTERN.test(message)) {
+      throw new TypeError('typert-protocol: business failure message is not wire-safe')
+    }
+    const failure: RemoteFailure = Object.freeze({
+      code,
+      message,
+      details: Object.freeze({}),
+    })
+    super(failure)
+    this.name = new.target.name
+    this.message = message
+    this.code = code
   }
 }
 

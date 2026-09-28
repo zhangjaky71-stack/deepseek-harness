@@ -1,0 +1,56 @@
+{
+  "name": "@deepseek-ai/dsh-media-workflow",
+  "description": "Media workflow node registry, DAG validation, partial scheduling, execution dispatch, and deterministic cache fingerprints",
+  "version": "0.1.1-rc.2",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/canvas/media-workflow"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types.js"
+    },
+    "./engine": {
+      "types": "./lib/types/engine.d.ts",
+      "default": "./lib/engine.js"
+    },
+    "./builtins": {
+      "types": "./lib/types/builtins.d.ts",
+      "default": "./lib/builtins.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-canvas": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-canvas": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  }
+}

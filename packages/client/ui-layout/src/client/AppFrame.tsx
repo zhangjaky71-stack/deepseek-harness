@@ -1,10 +1,11 @@
 /**
  * Three-column shell frame, registered into the built-in 'root' slot (the web
- * shell renders only 'root'). Owns the grid tracks (sidebar | canvas |
+ * shell renders only 'root'). Owns the grid tracks (sidebar | main |
  * conversation), the sidebar and conversation drag handles (pointer capture + rAF
  * throttle), the concession chain (columns.ts), and the child-slot render
  * decisions. The details surface remains mounted and overlays the conversation
- * column when a tool opens it. Pure component: everything arrives
+ * column when a tool opens it. The center column is a generic shell slot: product
+ * packages such as ui-canvas own its content. Pure component: everything arrives
  * through the three framework shares — zero cordis or framework imports,
  * zero self-made hooks.
  */
@@ -18,19 +19,12 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
+  & PropsRenderSlots<'sidebar' | 'shell.main' | 'conversation' | 'details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
 
-/** Fixed-width, local-only Infinite Canvas service URL. */
-const INFINITE_CANVAS_URL = 'http://127.0.0.1:3000/'
-
-/** Center column hosting the separately-run Infinite Canvas application. */
-function CanvasColumn() {
-  return (
-    <section className={css.canvasCol} aria-label="Infinite Canvas">
-      <iframe className={css.canvasFrame} src={INFINITE_CANVAS_URL} title="Infinite Canvas" />
-    </section>
-  )
+/** Center-column grid item. Product semantics belong to the registered occupant. */
+function MainColumn(props: { children?: ReactNode }) {
+  return <main className={css.mainCol}>{props.children}</main>
 }
 
 /** Conversation column grid item. */
@@ -175,23 +169,15 @@ export function AppFrame({
       data-dragging={dragging || undefined}
     >
       <div className={css.sidebarCol}>
-        {/* Render-site slot call with live concession output: a closed
-            sidebar keeps the mounted slot at the compact-rail width, and the
-            component sees its rendered state as owner params decided here
-            (collapsed follows the resolved rail, so a derived auto-collapse
-            renders the rail UI too). */}
         {renderSlot('sidebar', {
           collapsed: sidebarCollapsed,
           width: cols.sidebar,
         })}
       </div>
       <>
-        {/* Both column occupants stay at fixed tree positions from first
-            paint — no loading gate: a bare status line reads worse than
-            the shell's own pending rendering. The conversation
-            is session-maybe; the strict details entry naturally renders
-            empty while no session is current. */}
-        <CanvasColumn />
+        {/* Both permanent column occupants stay at fixed tree positions from first paint.
+            The main slot is feature-owned; absent a contribution it renders empty. */}
+        <MainColumn>{renderSlot('shell.main', {})}</MainColumn>
         <ConversationColumn>{renderSlot('conversation', {})}</ConversationColumn>
       </>
       <div className={css.detailsOverlay} style={{ left: viewport - panels.conversation }}>
@@ -200,7 +186,6 @@ export function AppFrame({
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
-      {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
       <DragHandle side="conversation" left={viewport - panels.conversation} onStart={onConversationStart} onDrag={onConversationDrag} onEnd={onDragEnd} />
     </div>
