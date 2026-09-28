@@ -3,6 +3,8 @@
     const LEGACY_KEY = 'canvas_theme';
     const SCALE_KEY = 'studio_ui_scale_mode';
     const SCALE_OPTIONS = ['auto', '60', '65', '70', '75', '80', '85', '90', '95', '100', '115', '125', '140'];
+    const HARNESS_BRIDGE_CHANNEL = 'deepseek-harness:infinite-canvas';
+    const HARNESS_BRIDGE_VERSION = 1;
 
     function currentTheme(){
         return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'light';
@@ -70,6 +72,29 @@
         } catch(e) {
             return true;
         }
+    }
+
+    function isHarnessHostInit(event){
+        const data = event.data;
+        return isFramed()
+            && event.source === window.parent
+            && data && typeof data === 'object'
+            && data.channel === HARNESS_BRIDGE_CHANNEL
+            && data.version === HARNESS_BRIDGE_VERSION
+            && data.type === 'host:init'
+            && data.payload?.host === 'deepseek-harness';
+    }
+
+    function replyHarnessReady(event){
+        const target = event.source;
+        if(!target || typeof target.postMessage !== 'function') return;
+        const targetOrigin = event.origin && event.origin !== 'null' ? event.origin : '*';
+        target.postMessage({
+            channel: HARNESS_BRIDGE_CHANNEL,
+            version: HARNESS_BRIDGE_VERSION,
+            type: 'canvas:ready',
+            payload: { app: 'infinite-canvas' },
+        }, targetOrigin);
     }
 
     function normalizeScaleMode(mode){
@@ -258,6 +283,7 @@
         applyScale(currentScaleMode());
     });
     window.addEventListener('message', event => {
+        if(isHarnessHostInit(event)) replyHarnessReady(event);
         if(event.data?.type === 'studio-theme') applyTheme(event.data.theme);
         if(event.data?.type === 'studio-ui-scale') {
             const incomingScale = normalizeExternalScale(event.data.scale);
